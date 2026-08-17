@@ -280,3 +280,4 @@ NBLM_DOCS_EXTRACT.pickRoot(document, 600)     // khối nào được coi là th
 NBLM_DOCS_EXTRACT.fromLive({}).markdown       // xem đúng thứ sẽ dán vào NotebookLM
 ```
 # notebooklm
+# notebooklm
