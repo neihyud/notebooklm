@@ -94,6 +94,14 @@ test('dedupe — khử theo khoá do người gọi chỉ định', () => {
   assert.deepEqual(out.map((it) => it.title), ['đầu', 'hai']);
 });
 
+// -------------------------------------------------------------- gọn khoảng trắng
+
+test('collapse — gộp mọi khoảng trắng thành một dấu cách và cắt hai đầu', () => {
+  assert.equal(S.collapse('  Xin   chào\n\tcác bạn  '), 'Xin chào các bạn');
+  assert.equal(S.collapse('Đã Có Dấu'), 'Đã Có Dấu', 'collapse không được đụng tới dấu hay hoa/thường');
+  assert.equal(S.collapse(null), '');
+});
+
 // ---------------------------------------------------------- bỏ dấu tiếng Việt
 
 test('deaccent — bỏ dấu tiếng Việt, kể cả đ/Đ', () => {

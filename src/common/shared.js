@@ -383,6 +383,7 @@
     EXT_PREFIX,
     MAX_WORDS_PER_SOURCE,
     DEFAULTS,
+    collapse,
     parseVideoId,
     parsePlaylistId,
     dedupe,

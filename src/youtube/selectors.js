@@ -1,0 +1,97 @@
+// MỌI selector và nhãn của YouTube nằm ở đây — và chỉ ở đây.
+//
+// Cùng lý do với `src/notebooklm/selectors.js`: đường DOM dựa hoàn toàn vào giao diện của một
+// sản phẩm không có API, nên nó sẽ hỏng khi Google đổi layout. Selector rải rác ra file khác
+// là nợ không trả được (`WORKSPACE_PROTOCOL.md`) — `test/transcript.test.js` canh chuyện đó.
+//
+// Hai nhóm tách hẳn nhau vì cách gộp ghi đè khác nhau:
+//   - `selectors`: chuỗi CSS, giữ nguyên chữ hoa và dấu. `[visibility="…_HIDDEN"]` mà bị hạ
+//     chữ thường là hỏng câm.
+//   - `labels`: chữ hiển thị, luôn bỏ dấu và hạ chữ thường để khớp mờ (spec 0001).
+//
+// Classic script như `src/common/shared.js` — content script của MV3 không nạp `import`.
+(function (root) {
+  'use strict';
+
+  if (root.NBLM_YT_SELECTORS) return;
+
+  const S = root.NBLM_SHARED;
+  if (!S) throw new Error('youtube/selectors: cần src/common/shared.js nạp trước');
+
+  const DEFAULT_SELECTORS = Object.freeze({
+    /** Ứng viên để dò nút theo chữ hiển thị: gồm cả wrapper, vì chữ nằm ở wrapper. */
+    clickable: ['button', 'a', 'ytd-button-renderer', 'yt-button-shape', 'tp-yt-paper-button', '[role="button"]'],
+    /** Phần tử thật sự nhận cú bấm. Wrapper **không** nằm trong danh sách này. */
+    pressable: ['button', 'a', 'tp-yt-paper-button', '[role="button"]'],
+    /** Panel transcript của layout hiện tại; hai mục sau là layout cũ, giữ để không hỏng câm. */
+    panel: [
+      'ytd-engagement-panel-section-list-renderer[target-id*="transcript"]',
+      '[target-id*="transcript"]',
+      'ytd-transcript-renderer',
+    ],
+    /** Trạng thái YouTube giữ panel ở layout hẹp — không có gì để quét. */
+    panelHidden: ['[visibility="ENGAGEMENT_PANEL_VISIBILITY_HIDDEN"]'],
+    segment: ['transcript-segment-view-model', 'ytd-transcript-segment-renderer'],
+    segmentTimestamp: ['.segment-timestamp', '.segment-start-offset'],
+    segmentText: ['.segment-text'],
+    /**
+     * Nhãn trợ năng lẫn trong dòng segment ("1 second"). Đường chính là `segmentText` nên nó
+     * không bao giờ lọt vào khi selector chính còn khớp; danh sách này chỉ đỡ cho đường dự
+     * phòng. Tên lớp ở đây là thứ dễ lệch nhất khi YouTube đổi layout — `tools/verify-live.mjs`
+     * là chỗ phát hiện.
+     */
+    segmentNoise: ['.segment-duration-label', '[class*="duration-label"]', '[aria-hidden="true"]'],
+  });
+
+  const DEFAULT_LABELS = Object.freeze({
+    transcriptButton: [
+      'show transcript', 'transcript',
+      'hien ban chep loi', 'ban chep loi',
+      'hien phu de', 'mo phu de',
+    ],
+  });
+
+  /** Selector loại trừ giao diện của chính extension. Suy từ `EXT_PREFIX`, không viết tay lại. */
+  const OWN_UI = `[id^="${S.EXT_PREFIX}"]`;
+
+  const asList = (value) => (Array.isArray(value) ? value.filter((v) => typeof v === 'string' && v.trim()) : []);
+
+  /**
+   * Gộp ghi đè của người dùng *thêm vào* mặc định, ghi đè đứng trước — cùng quy tắc với
+   * `mergeSelectorOverrides` của Seam 1. Thay thế hẳn là sai: một ghi đè cho `segment` sẽ vứt
+   * luôn mọi layout khác đang chạy tốt.
+   */
+  function resolve(overrides) {
+    const over = overrides && typeof overrides === 'object' ? overrides : {};
+    const selectors = {};
+    for (const key of Object.keys(DEFAULT_SELECTORS)) {
+      selectors[key] = S.dedupe([...asList(over[key]), ...DEFAULT_SELECTORS[key]]);
+    }
+    const labels = S.mergeSelectorOverrides(DEFAULT_LABELS, over.labels);
+
+    return Object.freeze({
+      OWN_UI,
+      selectors: Object.freeze(selectors),
+      labels: Object.freeze(labels),
+      /** Chuỗi CSS ghép sẵn cho `querySelectorAll` — thứ tự tài liệu do DOM quyết, không do đây. */
+      css(key) {
+        const list = selectors[key];
+        if (!list) throw new Error(`youtube/selectors: không có nhóm selector "${key}"`);
+        return list.join(', ');
+      },
+      label(key) {
+        return labels[key] || [];
+      },
+    });
+  }
+
+  const DEFAULT = resolve(null);
+
+  root.NBLM_YT_SELECTORS = Object.freeze({
+    OWN_UI,
+    DEFAULT_SELECTORS,
+    DEFAULT_LABELS,
+    DEFAULT,
+    resolve,
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : self);
