@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>Cài đặt — YouTube &amp; Tài liệu → NotebookLM</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+<main>
+  <h1>YouTube &amp; Tài liệu → NotebookLM</h1>
+
+  <p class="lead">
+    Video <strong>private của bạn</strong> không thể import bằng URL, vì máy chủ NotebookLM
+    tải video mà không kèm phiên đăng nhập của bạn. Extension giải quyết bằng cách trích
+    transcript <strong>ngay trong trình duyệt bạn</strong> rồi dán vào notebook dưới dạng nguồn
+    văn bản. Chế độ hiển thị của video <strong>không bao giờ bị thay đổi</strong>.
+  </p>
+
+  <p class="lead">
+    <strong>Trang tài liệu</strong> hỏng vì đúng lý do đó, chỉ khác hình thức: máy chủ NotebookLM
+    tải link nhưng <strong>không chạy JavaScript</strong>, nên docs dựng client-side trả về khung
+    rỗng — nguồn tạo ra không có chữ nào. Vì vậy mặc định của phần này cũng là trích nội dung
+    ngay trên máy rồi dán vào.
+  </p>
+
+  <section>
+    <h2>Notebook đích</h2>
+    <label for="notebookUrl">URL notebook</label>
+    <input type="url" id="notebookUrl" placeholder="https://notebooklm.google.com/notebook/xxxxxxxx" spellcheck="false">
+    <p class="hint">Để trống thì extension dùng tab NotebookLM nào đang mở sẵn.</p>
+  </section>
+
+  <section>
+    <h2>Transcript</h2>
+
+    <label for="preferredLangs">Ngôn ngữ phụ đề ưu tiên (cách nhau bằng dấu phẩy)</label>
+    <input type="text" id="preferredLangs" placeholder="vi, en" spellcheck="false">
+
+    <label class="check"><input type="checkbox" id="includeTimestamps"> Chèn timestamp vào transcript</label>
+    <p class="hint">Giúp NotebookLM trích dẫn đúng mốc thời gian trong video.</p>
+
+    <label for="groupSeconds">Gộp transcript thành đoạn mỗi … giây (0 = giữ từng dòng)</label>
+    <input type="number" id="groupSeconds" min="0" max="300" step="5">
+  </section>
+
+  <section>
+    <h2>Chiến lược import</h2>
+
+    <label for="unlistedMode">Video unlisted</label>
+    <select id="unlistedMode">
+      <option value="url-then-transcript">Thử link trước, hỏng thì trích transcript (khuyến nghị)</option>
+      <option value="url">Chỉ dùng link</option>
+      <option value="transcript">Luôn trích transcript</option>
+    </select>
+
+    <label class="check"><input type="checkbox" id="publicFallbackToTranscript"> Video public: nếu NotebookLM từ chối link thì trích transcript cục bộ</label>
+
+    <p class="hint locked">
+      Video private luôn đi đường transcript — không có tuỳ chọn nào đổi được điều này, và
+      extension không có khả năng chỉnh chế độ hiển thị video.
+    </p>
+
+    <label for="delayMs">Nghỉ giữa hai lần import (ms)</label>
+    <input type="number" id="delayMs" min="300" max="10000" step="100">
+
+    <label class="check"><input type="checkbox" id="autoCloseTabs"> Tự đóng tab YouTube mà extension mở để trích transcript</label>
+    <label class="check"><input type="checkbox" id="bulkSelectUI"> Hiện checkbox chọn hàng loạt trên trang danh sách YouTube</label>
+
+    <label for="downloadFormat">Định dạng file khi tải transcript về máy</label>
+    <select id="downloadFormat">
+      <option value="txt">.txt — có timestamp, dễ đọc</option>
+      <option value="srt">.srt — phụ đề, nạp được vào trình phát</option>
+      <option value="vtt">.vtt — phụ đề chuẩn web</option>
+      <option value="md">.md — Markdown, timestamp là link nhảy tới đúng giây</option>
+    </select>
+
+    <label for="downloadSubfolder">Thư mục con trong Downloads</label>
+    <input type="text" id="downloadSubfolder" spellcheck="false">
+    <p class="hint">Để trống thì lưu thẳng vào Downloads.</p>
+
+    <label for="maxBulkVideos">Trần số video khi quét toàn bộ playlist / kênh</label>
+    <input type="number" id="maxBulkVideos" min="1" max="5000" step="50">
+    <p class="hint">Kênh lớn có hàng nghìn video, mà notebook miễn phí chỉ chứa được 50 nguồn — quét sạch chỉ tổ mất thời gian rồi tắc ở hàng đợi.</p>
+  </section>
+
+  <section>
+    <h2>Trang tài liệu</h2>
+
+    <label class="check"><input type="checkbox" id="docsLauncher"> Hiện nút mở bảng chọn khi dò thấy sidebar tài liệu</label>
+    <p class="hint">Tắt đi thì vẫn mở được bằng phím tắt <strong>Alt+Shift+D</strong>, popup, hoặc menu chuột phải.</p>
+
+    <label for="docsMode">Cách đưa một trang vào NotebookLM</label>
+    <select id="docsMode">
+      <option value="text">Luôn trích nội dung rồi dán (khuyến nghị)</option>
+      <option value="text-then-url">Dán nội dung, hỏng thì thử link</option>
+      <option value="url-then-text">Thử link trước, hỏng thì dán nội dung</option>
+      <option value="url">Chỉ dùng link</option>
+    </select>
+    <p class="hint">
+      Link chỉ dùng được với docs render sẵn ở phía máy chủ. Với Docusaurus, GitBook, docsify
+      và phần lớn docs hiện đại, NotebookLM nhận về trang trống.
+    </p>
+
+    <label class="check"><input type="checkbox" id="docsKeepLinks"> Giữ link dạng <code>[chữ](url)</code> trong nội dung trích</label>
+    <label class="check"><input type="checkbox" id="docsKeepImages"> Giữ ảnh dạng <code>![alt](url)</code></label>
+
+    <label for="docsMaxChars">Cắt nguồn dài hơn … ký tự (0 = không cắt)</label>
+    <input type="number" id="docsMaxChars" min="0" max="2000000" step="10000">
+
+    <label for="docsMinChars">Ngưỡng coi là “trang rỗng” — dưới ngần này ký tự thì mở tab ẩn đọc lại</label>
+    <input type="number" id="docsMinChars" min="0" max="20000" step="100">
+    <p class="hint">
+      Đặt quá cao thì trang ngắn hợp lệ cũng bị tải lại (chậm); quá thấp thì docs render bằng JS
+      lọt lưới và tạo ra nguồn rỗng.
+    </p>
+  </section>
+
+  <section>
+    <h2>Ghi đè selector NotebookLM <span class="tag">nâng cao</span></h2>
+    <p class="hint">
+      Google đổi giao diện NotebookLM khá thường xuyên. Nếu extension báo “Không tìm thấy nút
+      Thêm nguồn”, hãy thêm nhãn nút đang hiển thị vào đây. Nhãn viết thường, <em>không dấu</em>.
+      Các mảng sẽ được gộp thêm vào danh sách mặc định.
+    </p>
+    <textarea id="selectorOverrides" rows="10" spellcheck="false" placeholder='{
+  "addSource": ["them nguon moi"],
+  "pasteChip": ["van ban thuan"],
+  "submit": ["luu"]
+}'></textarea>
+    <p class="hint" id="jsonStatus"></p>
+  </section>
+
+  <div class="actions">
+    <button type="button" id="save" class="btn btn--primary">Lưu</button>
+    <button type="button" id="reset" class="btn">Khôi phục mặc định</button>
+    <span id="saved" class="saved" hidden>Đã lưu</span>
+  </div>
+</main>
+
+<script src="../common/shared.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

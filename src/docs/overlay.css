@@ -1,0 +1,273 @@
+/*
+ * Bảng chọn link tài liệu. Nạp vào shadow root nên không cần tiền tố chống đụng
+ * độ, nhưng vẫn phải tự khai báo mọi thứ: shadow DOM chặn CSS của trang chui vào,
+ * đồng thời cũng không thừa hưởng font/màu nào của nó.
+ */
+
+:host {
+  all: initial;
+}
+
+.panel {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-width: calc(100vw - 40px);
+  max-height: min(72vh, 680px);
+  border-radius: 14px;
+  background: #ffffff;
+  color: #1f1f1f;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .28), 0 0 0 1px rgba(0, 0, 0, .06);
+  font: 400 13px/1.5 "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+
+.panel *,
+.panel *::before,
+.panel *::after {
+  box-sizing: border-box;
+}
+
+/* ---- đầu bảng ---- */
+
+.panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid #e6e6e6;
+}
+
+.panel__title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.panel__site {
+  margin-top: 2px;
+  color: #5f6368;
+  font-size: 12px;
+}
+
+.panel__icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #5f6368;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.panel__icon:hover {
+  background: rgba(0, 0, 0, .06);
+}
+
+/* ---- thanh công cụ ---- */
+
+.panel__tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #efefef;
+}
+
+.panel__search {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #d6d6d6;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+
+.panel__search:focus {
+  outline: none;
+  border-color: #1a73e8;
+}
+
+.panel__btns {
+  display: flex;
+  gap: 6px;
+}
+
+.chip {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #d6d6d6;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: #f1f3f4;
+}
+
+/* ---- danh sách ---- */
+
+.panel__list {
+  flex: 1 1 auto;
+  min-height: 80px;
+  padding: 6px 8px 6px 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding-right: 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: #f1f3f4;
+}
+
+.row input {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #1a73e8;
+  cursor: pointer;
+}
+
+.row__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row--group .row__title {
+  font-weight: 500;
+}
+
+.row__path {
+  flex: 0 0 auto;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #80868b;
+  font-size: 11px;
+  direction: rtl;
+  text-align: right;
+}
+
+/* ---- chân bảng ---- */
+
+.panel__foot {
+  padding: 10px 14px 12px;
+  border-top: 1px solid #e6e6e6;
+  background: #fafafa;
+}
+
+.panel__note {
+  margin: 0 0 10px;
+  color: #5f6368;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.panel__go {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.panel__run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #3c4043;
+  cursor: pointer;
+}
+
+.panel__run input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #1a73e8;
+}
+
+.btn {
+  height: 34px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 17px;
+  background: #1a73e8;
+  color: #fff;
+  font: 500 13px/1 inherit;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: #1b66c9;
+}
+
+.btn:disabled {
+  background: #dadce0;
+  color: #9aa0a6;
+  cursor: default;
+}
+
+/* ---- nền tối ---- */
+
+@media (prefers-color-scheme: dark) {
+  .panel {
+    background: #202124;
+    color: #e8eaed;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .08);
+  }
+
+  .panel__head { border-bottom-color: #3c4043; }
+  .panel__tools { border-bottom-color: #303134; }
+  .panel__site,
+  .panel__icon,
+  .panel__note,
+  .panel__run { color: #9aa0a6; }
+  .panel__icon:hover { background: rgba(255, 255, 255, .09); }
+
+  .panel__search,
+  .chip {
+    border-color: #5f6368;
+    background: #292a2d;
+    color: #e8eaed;
+  }
+
+  .chip:hover,
+  .row:hover { background: rgba(255, 255, 255, .07); }
+  .row__path { color: #80868b; }
+
+  .panel__foot {
+    border-top-color: #3c4043;
+    background: #1b1c1d;
+  }
+
+  .btn:disabled {
+    background: #3c4043;
+    color: #80868b;
+  }
+}

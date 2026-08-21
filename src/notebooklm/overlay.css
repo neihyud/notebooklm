@@ -1,0 +1,57 @@
+#nblm-hud {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  padding: 10px 12px 10px 14px;
+  border-radius: 12px;
+  background: #202124;
+  color: #e8eaed;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
+  font-family: "Google Sans", "Roboto", Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity .18s ease, transform .18s ease;
+  pointer-events: none;
+}
+
+#nblm-hud.nblm-hud--show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+
+.nblm-hud__spin {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, .25);
+  border-top-color: #8ab4f8;
+}
+
+.nblm-hud--spinning .nblm-hud__spin { animation: nblm-hud-spin .9s linear infinite; }
+
+@keyframes nblm-hud-spin { to { transform: rotate(360deg); } }
+
+.nblm-hud__text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nblm-hud__stop {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid #5f6368;
+  border-radius: 8px;
+  background: transparent;
+  color: #e8eaed;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.nblm-hud__stop:hover { background: rgba(255, 255, 255, .08); }

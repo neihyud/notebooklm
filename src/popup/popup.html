@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>YouTube &amp; Tài liệu → NotebookLM</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="head">
+    <h1>→ NotebookLM</h1>
+    <button type="button" id="open-options" class="link-btn" title="Cài đặt">Cài đặt</button>
+  </header>
+
+  <section class="notebook">
+    <label for="notebook-url">Notebook đích</label>
+    <input type="url" id="notebook-url" placeholder="https://notebooklm.google.com/notebook/…" spellcheck="false">
+    <button type="button" id="use-current" class="btn btn--ghost">Dùng notebook ở tab hiện tại</button>
+    <p class="hint" id="notebook-hint"></p>
+  </section>
+
+  <section class="add">
+    <label for="bulk">Dán link YouTube (mỗi dòng một link)</label>
+    <textarea id="bulk" rows="3" placeholder="https://www.youtube.com/watch?v=…&#10;https://youtu.be/…" spellcheck="false"></textarea>
+    <div class="row">
+      <button type="button" id="add-bulk" class="btn btn--primary">Thêm vào hàng đợi</button>
+      <button type="button" id="add-current" class="btn btn--ghost">Thêm tab hiện tại</button>
+    </div>
+  </section>
+
+  <section class="add">
+    <label>Thu gom hàng loạt</label>
+    <div class="row row--wrap">
+      <button type="button" id="import-playlist" class="btn btn--ghost">Toàn bộ playlist / kênh ở tab này</button>
+      <button type="button" id="collect-tabs" class="btn btn--ghost">Mọi tab YouTube đang mở</button>
+      <button type="button" id="collect-links" class="btn btn--ghost">Mọi link YouTube trên trang này</button>
+    </div>
+    <p class="hint" id="collect-hint">Quét playlist qua API nội bộ của YouTube nên lấy đủ cả danh sách vài trăm video, không phụ thuộc đã cuộn tới đâu.</p>
+  </section>
+
+  <section class="add">
+    <label>Trang tài liệu</label>
+    <button type="button" id="scan-docs" class="btn btn--ghost">Chọn link từ sidebar tab hiện tại…</button>
+    <p class="hint">Dò sidebar của trang tài liệu rồi mở bảng chọn ngay trong trang. Phím tắt <strong>Alt+Shift+D</strong>.</p>
+  </section>
+
+  <section class="queue">
+    <div class="queue__head">
+      <strong>Hàng đợi <span id="counts"></span></strong>
+      <div class="queue__actions">
+        <button type="button" id="run" class="btn btn--primary btn--sm">Chạy</button>
+        <button type="button" id="run-download" class="btn btn--sm" title="Trích transcript rồi lưu thành file, không đụng tới NotebookLM">Tải transcript</button>
+        <button type="button" id="stop" class="btn btn--sm" hidden>Dừng</button>
+        <button type="button" id="retry" class="btn btn--sm">Thử lại lỗi</button>
+        <button type="button" id="clear-done" class="btn btn--sm">Xoá xong</button>
+        <button type="button" id="clear-all" class="btn btn--sm btn--danger">Xoá hết</button>
+      </div>
+    </div>
+    <ul id="list" class="list"></ul>
+    <p class="empty" id="empty">Hàng đợi trống. Bấm nút <strong>NotebookLM</strong> trên trang video, chọn nhiều video bằng checkbox trên trang danh sách YouTube, hoặc mở bảng chọn link trên một trang tài liệu.</p>
+  </section>
+
+  <footer class="foot">
+    <span class="badge badge--lock">Video private và trang tài liệu đều được trích nội dung ngay trên máy bạn — extension không bao giờ đổi chế độ hiển thị của video.</span>
+  </footer>
+
+  <script src="../common/shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
