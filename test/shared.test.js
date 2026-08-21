@@ -409,6 +409,26 @@ test('normalizeDocUrl — cùng trang viết khác kiểu thì ra cùng một kh
   assert.equal(a, 'https://docs.example.com/api/config');
 });
 
+test('normalizeDocUrl — port là một phần định danh trang (host, không phải hostname)', () => {
+  // `host` kèm port, `hostname` thì không. Hoán vị hai thuộc tính cùng kiểu này vẫn cho một
+  // định danh trông hợp lệ, nên nó trôi im lặng: docs nội bộ chạy localhost kèm port là
+  // chuyện thường, và khi đó hai trang khác nhau ra cùng một khoá khử trùng lặp.
+  const dev = 'http://localhost:3000/guide/intro';
+  assert.equal(S.normalizeDocUrl('/api', dev), 'http://localhost:3000/api');
+  // Hai trang thật khác nhau phải giữ được hai khoá khác nhau. Dùng chung khoá thì lúc khử
+  // trùng lặp một trang biến mất khỏi Bảng chọn mà không có triệu chứng nào.
+  assert.notEqual(
+    S.normalizeDocUrl('/api', dev),
+    S.normalizeDocUrl('/api', 'http://localhost:8080/guide/intro'),
+  );
+});
+
+test('normalizeDocUrl — khác port là khác origin, không phải link điều hướng cùng site', () => {
+  const dev = 'http://localhost:3000/guide/intro';
+  assert.equal(S.normalizeDocUrl('http://localhost:8080/api', dev), null);
+  assert.equal(S.normalizeDocUrl('/api', dev), 'http://localhost:3000/api', 'cùng port vẫn nhận');
+});
+
 test('normalizeDocUrl — cùng một trang chỉ ra một định danh, dù link viết kiểu nào', () => {
   // Định danh này là khoá khử trùng lặp của hàng đợi tài liệu: hai định danh cho một trang
   // nghĩa là trang đó vào Nguồn gộp hai lần và tiêu quota hai lần.
