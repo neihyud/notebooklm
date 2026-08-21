@@ -335,3 +335,69 @@ test('đúng video thì trích, và tin đi nguyên vẹn sang adapter', async (
   assert.equal(answer.ok, true);
   assert.deepEqual(asked, ['video-A']);
 });
+
+// --------------------------------------- ghi đè Cài đặt tới được nơi chúng có tác dụng
+
+/** Tab giả: đúng những gì `createTab` được phép dùng của `target`. */
+function fakeTarget(settings) {
+  return {
+    document: fakeDoc(el('div', {}, [])),
+    location: { href: WATCH_URL },
+    setTimeout: (fn) => fn(),
+    fetch: async () => ({ ok: true, json: async () => ({}) }),
+    chrome: {
+      runtime: { sendMessage: async () => null },
+      storage: { sync: { get: async () => (settings ? { settings } : {}) } },
+    },
+  };
+}
+
+test('createTab — bốn con số của Cài đặt đi tới đúng bốn ô, không lẫn vào nhau', async () => {
+  // `mergeWindowSeconds`, `wordsPerMinute` và `maxWords` là ba số cùng kiểu đọc từ cùng một
+  // bag. Hoán vị hai trong ba vẫn ra một `options` dùng được: file `.md` gộp theo một nhịp
+  // lạ, và bảng xác nhận playlist báo một con số Nguồn lạ — cả hai đều không có triệu chứng.
+  const options = await W.createTab(fakeTarget({
+    mergeWindowSeconds: 45,
+    wordsPerMinute: 200,
+    maxWordsPerSource: 120000,
+  })).options();
+
+  assert.equal(options.mergeWindowSeconds, 45);
+  assert.equal(options.wordsPerMinute, 200);
+  assert.equal(options.maxWords, 120000);
+});
+
+test('createTab — ước lượng số Nguồn của thanh nổi chạy theo trần của Cài đặt, không theo mặc định', async () => {
+  // Ước lượng dùng trần mặc định trong khi engine cắt theo trần đã chỉnh là một bảng xác nhận
+  // nói dối, và người dùng chỉ biết lúc chạm trần 50 nguồn giữa chừng (ADR 0005).
+  const items = Array.from({ length: 300 }, (_, i) => ({ id: `v${i}`, durationSeconds: 3600 }));
+  const tight = await W.createTab(fakeTarget({ wordsPerMinute: 150, maxWordsPerSource: 450000 })).options();
+  const loose = await W.createTab(fakeTarget({ wordsPerMinute: 150, maxWordsPerSource: 900000 })).options();
+
+  assert.equal(S.estimateSources(items, tight).sources, 6);
+  assert.equal(S.estimateSources(items, loose).sources, 3);
+});
+
+test('createTab — thiếu Cài đặt thì rơi về mặc định, không rơi về 0', async () => {
+  const options = await W.createTab(fakeTarget(null)).options();
+  assert.equal(options.mergeWindowSeconds, S.DEFAULTS.mergeWindowSeconds);
+  assert.equal(options.wordsPerMinute, S.DEFAULTS.wordsPerMinute);
+  assert.equal(options.maxWords, S.DEFAULTS.maxWordsPerSource);
+  assert.equal(typeof options.selectors.css, 'function', 'thiếu ghi đè vẫn phải có bộ selector mặc định');
+});
+
+test('createTab — một cửa sổ một lớp bọc cầu, không phải một lớp cho mỗi chỗ gọi', () => {
+  // Ba content script cùng ngồi trên một tab YouTube (watch, panel, thanh nổi playlist) và cả
+  // ba đều gọi `createTab`. Mỗi lượt dựng một `createBridgeClient` riêng là mỗi lượt thêm một
+  // listener `message` **và** một bộ đếm id riêng khởi từ 0 — hai client hỏi trong cùng một
+  // mili-giây nhận cùng id, rồi mỗi client settle lượt hỏi của mình bằng phản hồi tới trước:
+  // cả hai vẫn nhận một kết quả *hợp lệ*, chỉ là của nhau.
+  const target = fakeTarget(null);
+  const first = W.createTab(target);
+  assert.equal(W.createTab(target), first, 'hai lượt gọi trên cùng cửa sổ ra hai tab khác nhau');
+  assert.equal(W.createTab(target).bridge, first.bridge);
+
+  // Nhưng vẫn là một cầu **cho mỗi cửa sổ**: hai tab YouTube khác nhau không dùng chung một
+  // lớp bọc, vì `postMessage` của tab này không tới được cầu của tab kia.
+  assert.notEqual(W.createTab(fakeTarget(null)).bridge, first.bridge);
+});

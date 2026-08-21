@@ -64,6 +64,33 @@
     playerVideo: ['video.html5-main-video', '.html5-main-video', 'video'],
     /** Cột phải của trang watch: chỗ panel transcript của extension đứng (ticket 006). */
     secondaryColumn: ['#secondary-inner', '#secondary', 'ytd-watch-flexy #secondary'],
+    /**
+     * Một dòng video trên trang playlist / kênh — chỗ checkbox chọn lẻ chen vào (ticket 007).
+     *
+     * Bốn layout vì trang playlist, tab Videos của kênh, và các kệ đề xuất dùng renderer khác
+     * nhau. Danh sách này **chỉ** dùng để gắn checkbox và đọc videoId của dòng; danh sách
+     * thật để import đến từ InnerTube qua cầu MAIN world, nên trang cuộn tới đâu không đổi
+     * kết quả (ADR 0003, ticket 007).
+     */
+    playlistRow: [
+      'ytd-playlist-video-renderer',
+      'ytd-grid-video-renderer',
+      'ytd-rich-item-renderer',
+      'ytd-video-renderer',
+    ],
+    /** Link `watch?v=…` bên trong một dòng — nguồn duy nhất đọc được videoId của dòng ấy. */
+    playlistRowLink: ['a#video-title', 'a#thumbnail', 'a[href*="watch?v="]'],
+    /** Chỗ đặt checkbox trong một dòng: ô thumbnail. Không có thì người gọi treo vào chính dòng. */
+    playlistRowThumb: ['ytd-thumbnail', '#thumbnail'],
+    /** Tên playlist trên trang — nó thành tên Nguồn gộp, nên đọc sai là sai vĩnh viễn (ADR 0010). */
+    playlistTitle: [
+      'ytd-playlist-header-renderer h1',
+      'yt-dynamic-sizing-view-model h1',
+      'ytd-browse[page-subtype="playlist"] h1',
+    ],
+    /** Id kênh trên trang kênh: `/@handle` không mang `UC…` ở đâu ngoài hai chỗ này. */
+    channelIdMeta: ['meta[itemprop="identifier"]', 'meta[itemprop="channelId"]'],
+    canonicalLink: ['link[rel="canonical"]'],
   });
 
   const DEFAULT_LABELS = Object.freeze({

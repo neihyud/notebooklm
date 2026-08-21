@@ -323,6 +323,50 @@
     throw new Error(`bundleName: loại Nguồn gộp lạ: ${String(kind)}`);
   }
 
+  // -------------------------------------------- ước lượng số Nguồn trước khi chạy
+
+  /**
+   * Ước lượng số Nguồn một playlist sẽ tốn, **từ tổng thời lượng** — số từ chỉ biết sau khi
+   * trích, mà bảng xác nhận phải nói ra con số trước khi trích mục nào (ADR 0005, 0008).
+   *
+   * Ở Seam 1 chứ không ở engine: bảng xác nhận được vẽ trên chính tab YouTube, nơi engine
+   * hàng đợi không được nạp — và ước lượng là hàm thuần của (thời lượng, tốc độ nói, trần
+   * mỗi Nguồn), không cần biết gì về một lượt chạy.
+   *
+   * Trả về `approximate: true` và một nhãn mang dấu `≈`: đây là ước lượng, và nó phải được
+   * trình bày đúng như một ước lượng. `unknownDurations` là số mục không biết thời lượng —
+   * chúng không vào ước lượng, nên người đọc cần thấy con số đó ngay cạnh.
+   */
+  function estimateSources(items, options) {
+    const opts = options || {};
+    const perMinute = Number(opts.wordsPerMinute) || DEFAULTS.wordsPerMinute;
+    const max = Number(opts.maxWords) || DEFAULTS.maxWordsPerSource;
+    const list = (items || []).filter(Boolean);
+
+    let totalSeconds = 0;
+    let unknownDurations = 0;
+    for (const item of list) {
+      const seconds = Number(item.durationSeconds);
+      if (Number.isFinite(seconds) && seconds > 0) totalSeconds += seconds;
+      else unknownDurations += 1;
+    }
+
+    const estimatedWords = Math.round((totalSeconds / 60) * perMinute);
+    const sources = list.length === 0 ? 0 : Math.max(1, Math.ceil(estimatedWords / max));
+
+    return {
+      approximate: true,
+      basis: 'duration',
+      items: list.length,
+      totalSeconds,
+      estimatedWords,
+      unknownDurations,
+      sources,
+      label: `≈ ${sources} Nguồn (ước lượng từ tổng thời lượng ${stamp(totalSeconds)}`
+        + `${unknownDurations ? `, ${unknownDurations} mục chưa biết thời lượng` : ''})`,
+    };
+  }
+
   // ------------------------------------------------- khoá Sổ đã import (ADR 0006)
 
   /**
@@ -426,6 +470,7 @@
     countWords,
     packSources,
     bundleName,
+    estimateSources,
     ledgerKey,
     normalizeDocUrl,
     mergeSelectorOverrides,

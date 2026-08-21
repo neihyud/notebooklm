@@ -241,7 +241,29 @@
    * không dựng đường thứ hai — hai đường trích là hai chỗ để ADR 0003 lệch nhau, và cái lệch
    * ấy chỉ lộ ra ở video private.
    */
+  /**
+   * Một `createTab` cho mỗi cửa sổ, không phải một cho mỗi chỗ gọi.
+   *
+   * Ba content script cùng ngồi trên một tab YouTube (watch, panel, thanh nổi playlist) và cả
+   * ba đều cần `bridge`. Mỗi lượt `createTab` dựng một `createBridgeClient` riêng, tức một
+   * listener `message` riêng — mà `newId` của client là `nblm-<ms>-<đếm>` với bộ đếm **của
+   * riêng client ấy**, khởi từ 0. Hai client hỏi trong cùng một mili-giây nhận cùng id, và
+   * mỗi client settle lượt hỏi của mình bằng phản hồi tới trước: cả hai vẫn nhận một kết quả
+   * hợp lệ, chỉ là của nhau (`bridge-client.js` mở đầu bằng đúng cảnh báo này).
+   *
+   * `WeakMap` chứ không phải `Map`: khoá là chính đối tượng cửa sổ, và không giữ nó sống thêm.
+   */
+  const tabs = new WeakMap();
+
   function createTab(target) {
+    const cached = tabs.get(target);
+    if (cached) return cached;
+    const tab = buildTab(target);
+    tabs.set(target, tab);
+    return tab;
+  }
+
+  function buildTab(target) {
     const doc = target.document;
     const chrome_ = target.chrome;
 
@@ -260,12 +282,19 @@
       const settings = (bag && bag.settings) || {};
       const css = settings.selectorOverrides || {};
       const window_ = Number(settings.mergeWindowSeconds);
+      const perMinute = Number(settings.wordsPerMinute);
+      const maxWords = Number(settings.maxWordsPerSource);
       overrides = {
         selectors: Y.resolve({ ...css, labels: settings.labelOverrides || {} }),
         // Panel transcript dựng `.md` từ chính bag này. Thiếu `mergeWindowSeconds` thì file
         // tải từ panel gộp theo mặc định trong khi Bản lưu ghi ra đĩa gộp theo Cài đặt — hai
         // file cùng tên, khác nội dung, mà không chỗ nào nói ra.
         mergeWindowSeconds: window_ > 0 ? window_ : S.DEFAULTS.mergeWindowSeconds,
+        // Bảng xác nhận của thanh nổi playlist ước lượng số Nguồn từ chính hai con số này
+        // (ticket 007). Ước lượng theo mặc định trong khi engine cắt theo Cài đặt là một bảng
+        // xác nhận nói dối — và người dùng chỉ biết lúc chạm trần 50 nguồn giữa chừng.
+        wordsPerMinute: perMinute > 0 ? perMinute : S.DEFAULTS.wordsPerMinute,
+        maxWords: maxWords > 0 ? maxWords : S.DEFAULTS.maxWordsPerSource,
       };
       return overrides;
     }
@@ -295,7 +324,10 @@
       });
     }
 
-    return { doc, wait, send, options, extract };
+    // `bridge` đi ra ngoài để thanh nổi playlist (ticket 007) dùng **chung một** lớp bọc
+    // postMessage với đường trích: hai lớp bọc trên cùng một cửa sổ là hai listener cùng nghe
+    // một kênh, và mỗi lượt trả lời tới cả hai.
+    return { doc, wait, send, options, extract, bridge };
   }
 
   function install(target) {

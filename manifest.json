@@ -31,7 +31,9 @@
         "src/youtube/srt.js",
         "src/youtube/transcript.js",
         "src/youtube/watch.js",
-        "src/youtube/panel.js"
+        "src/youtube/panel.js",
+        "src/youtube/playlist.js",
+        "src/youtube/playlist-bar.js"
       ],
       "run_at": "document_idle"
     },

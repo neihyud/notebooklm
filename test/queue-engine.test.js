@@ -560,42 +560,6 @@ test('summarize — mục ra hai lần cũng là lệch, không phải chỉ thi
   assert.equal(s.balanced, false);
 });
 
-// ------------------------------------------------------------------ ước lượng (ADR 0008)
-
-test('estimateSources — playlist 300 video một tiếng ước lượng ra sáu Nguồn', () => {
-  const items = Array.from({ length: 300 }, (_, i) => video(`v${i}`, { durationSeconds: 3600 }));
-  const est = E.estimateSources(items, { wordsPerMinute: 150, maxWords: S.MAX_WORDS_PER_SOURCE });
-
-  assert.equal(est.sources, 6);
-  assert.equal(est.items, 300);
-  assert.equal(est.totalSeconds, 300 * 3600);
-  assert.equal(est.estimatedWords, 300 * 60 * 150);
-  assert.equal(est.unknownDurations, 0);
-});
-
-test('estimateSources — trình bày đúng như một ước lượng, không như con số chốt', () => {
-  const items = [video('v1', { durationSeconds: 600 })];
-  const est = E.estimateSources(items);
-  assert.equal(est.approximate, true);
-  assert.equal(est.basis, 'duration');
-  assert.match(est.label, /≈/);
-  assert.match(est.label, /ước lượng/);
-});
-
-test('estimateSources — mục chưa biết thời lượng được đếm riêng, không lặng lẽ tính là 0', () => {
-  const items = [video('v1', { durationSeconds: 3600 }), video('v2'), video('v3', { durationSeconds: 0 })];
-  const est = E.estimateSources(items, { wordsPerMinute: 150 });
-  assert.equal(est.unknownDurations, 2);
-  assert.equal(est.totalSeconds, 3600);
-  assert.equal(est.estimatedWords, 9000);
-  assert.equal(est.sources, 1);
-  assert.match(est.label, /chưa biết thời lượng/);
-});
-
-test('estimateSources — hàng đợi rỗng thì không tốn nguồn nào', () => {
-  assert.equal(E.estimateSources([]).sources, 0);
-});
-
 test('runQueue — bó đầy đúng bằng trần thì chưa cắt, giống hệt packSources (ADR 0005)', async () => {
   const group = playlist('P');
   // Mỗi mục đúng 50 từ (2 từ tiêu đề + 48), trần 100: hai mục đầu vừa khít, mục thứ ba mới

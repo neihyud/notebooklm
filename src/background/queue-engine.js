@@ -401,46 +401,6 @@
     return lines.join('\n');
   }
 
-  // ------------------------------------------------------------------ ước lượng
-
-  /**
-   * Ước lượng số Nguồn một playlist sẽ tốn, **từ tổng thời lượng** — số từ chỉ biết sau khi
-   * trích, mà bảng xác nhận phải nói ra con số trước khi trích mục nào (ADR 0005, 0008).
-   *
-   * Trả về `approximate: true` và một nhãn mang dấu `≈`: đây là ước lượng, và nó phải được
-   * trình bày đúng như một ước lượng. `unknownDurations` là số mục không biết thời lượng —
-   * chúng không vào ước lượng, nên người đọc cần thấy con số đó ngay cạnh.
-   */
-  function estimateSources(items, options) {
-    const opts = options || {};
-    const perMinute = Number(opts.wordsPerMinute) || S.DEFAULTS.wordsPerMinute;
-    const maxWords = Number(opts.maxWords) || S.DEFAULTS.maxWordsPerSource;
-    const list = (items || []).filter(Boolean);
-
-    let totalSeconds = 0;
-    let unknownDurations = 0;
-    for (const item of list) {
-      const seconds = Number(item.durationSeconds);
-      if (Number.isFinite(seconds) && seconds > 0) totalSeconds += seconds;
-      else unknownDurations += 1;
-    }
-
-    const estimatedWords = Math.round((totalSeconds / 60) * perMinute);
-    const sources = list.length === 0 ? 0 : Math.max(1, Math.ceil(estimatedWords / maxWords));
-
-    return {
-      approximate: true,
-      basis: 'duration',
-      items: list.length,
-      totalSeconds,
-      estimatedWords,
-      unknownDurations,
-      sources,
-      label: `≈ ${sources} Nguồn (ước lượng từ tổng thời lượng ${S.stamp(totalSeconds)}`
-        + `${unknownDurations ? `, ${unknownDurations} mục chưa biết thời lượng` : ''})`,
-    };
-  }
-
   root.NBLM_ENGINE = Object.freeze({
     VIDEO_QUEUE,
     DOCS_QUEUE,
@@ -450,6 +410,5 @@
     runQueue,
     summarize,
     formatSummary,
-    estimateSources,
   });
 })(typeof globalThis !== 'undefined' ? globalThis : self);

@@ -343,6 +343,74 @@ test('bundleName — loại lạ thì ném lỗi thay vì đặt tên sai vĩnh 
   assert.throws(() => S.bundleName({ kind: 'playlist', source: 'X', part: 0 }));
 });
 
+// ------------------------------- ước lượng số Nguồn trước khi chạy (ADR 0005, 0008)
+
+/** Mục hàng đợi rút gọn — ước lượng chỉ đọc đúng một trường của nó. */
+const item = (id, durationSeconds) => (durationSeconds === undefined ? { id } : { id, durationSeconds });
+
+test('estimateSources — playlist 300 video một tiếng ước lượng ra sáu Nguồn', () => {
+  const items = Array.from({ length: 300 }, (_, i) => item(`v${i}`, 3600));
+  const est = S.estimateSources(items, { wordsPerMinute: 150, maxWords: S.MAX_WORDS_PER_SOURCE });
+
+  assert.equal(est.sources, 6);
+  assert.equal(est.items, 300);
+  assert.equal(est.totalSeconds, 300 * 3600);
+  assert.equal(est.estimatedWords, 300 * 60 * 150);
+  assert.equal(est.unknownDurations, 0);
+});
+
+test('estimateSources — con số suy từ TỔNG THỜI LƯỢNG, không từ số video (ADR 0008)', () => {
+  // Ba lô cùng tổng thời lượng nhưng số video khác hẳn nhau: nếu ước lượng lén đếm mục thay
+  // vì cộng giây, ba con số này sẽ khác nhau. Canh **quan hệ**, không khoá hằng số — chỉnh
+  // `wordsPerMinute` ở Cài đặt không được làm test này chết.
+  const opts = { wordsPerMinute: 150, maxWords: S.MAX_WORDS_PER_SOURCE };
+  const many = S.estimateSources(Array.from({ length: 300 }, (_, i) => item(`v${i}`, 3600)), opts);
+  const few = S.estimateSources(Array.from({ length: 30 }, (_, i) => item(`v${i}`, 36000)), opts);
+  assert.equal(few.sources, many.sources, 'cùng tổng thời lượng phải ra cùng số Nguồn');
+  assert.notEqual(few.items, many.items, 'hai lô phải khác số video, nếu không test này rỗng tuếch');
+
+  // Cùng **số video**, thời lượng khác nhau → số Nguồn phải khác. Đây là vế còn lại: một hàm
+  // đếm mục sẽ cho hai con số bằng nhau ở đây.
+  const short = S.estimateSources(Array.from({ length: 300 }, (_, i) => item(`v${i}`, 60)), opts);
+  assert.equal(short.items, many.items);
+  assert.ok(short.sources < many.sources, `${short.sources} phải nhỏ hơn ${many.sources}`);
+});
+
+test('estimateSources — trình bày đúng như một ước lượng, không như con số chốt', () => {
+  const est = S.estimateSources([item('v1', 600)]);
+  assert.equal(est.approximate, true);
+  assert.equal(est.basis, 'duration');
+  assert.match(est.label, /≈/);
+  assert.match(est.label, /ước lượng/);
+});
+
+test('estimateSources — mục chưa biết thời lượng được đếm riêng, không lặng lẽ tính là 0', () => {
+  const est = S.estimateSources([item('v1', 3600), item('v2'), item('v3', 0)], { wordsPerMinute: 150 });
+  assert.equal(est.unknownDurations, 2);
+  assert.equal(est.totalSeconds, 3600);
+  assert.equal(est.estimatedWords, 9000);
+  assert.equal(est.sources, 1);
+  assert.match(est.label, /chưa biết thời lượng/);
+});
+
+test('estimateSources — trần mỗi Nguồn của Cài đặt là trần thật sự được chia', () => {
+  // Người dùng hạ trần xuống thì số Nguồn phải tăng theo. Ước lượng dùng trần mặc định trong
+  // khi engine cắt theo trần đã chỉnh là một bảng xác nhận nói dối.
+  // Trần chọn sao cho chia hết, để quan hệ "hạ nửa trần thì gấp đôi số Nguồn" đọc được mà
+  // không lẫn với phần dư của phép làm tròn lên.
+  const items = Array.from({ length: 300 }, (_, i) => item(`v${i}`, 3600));
+  const full = S.estimateSources(items, { wordsPerMinute: 150, maxWords: 900000 });
+  const half = S.estimateSources(items, { wordsPerMinute: 150, maxWords: 450000 });
+  assert.equal(full.estimatedWords, 2700000);
+  assert.equal(full.sources, 3);
+  assert.equal(half.sources, full.sources * 2);
+});
+
+test('estimateSources — hàng đợi rỗng thì không tốn nguồn nào', () => {
+  assert.equal(S.estimateSources([]).sources, 0);
+  assert.equal(S.estimateSources([]).items, 0);
+});
+
 // ------------------------------------------------- khoá Sổ đã import (ADR 0006)
 
 test('ledgerKey — khoá là cặp (mục, Notebook đích) theo đúng thứ tự ấy', () => {
