@@ -4,7 +4,7 @@
 // jsdom. Nó chỉ hiện thực đúng phần API mà module sản phẩm được phép dùng:
 //
 //   querySelector(All) · matches · closest · getAttribute · textContent · cloneNode · remove
-//   · dispatchEvent / click (ghi lại, không thực sự phát)
+//   · addEventListener · dispatchEvent / click (ghi lại **và** gọi listener đã gắn)
 //
 // Hai ràng buộc mà cây giả phải trung thực, nếu không nó *giấu* lỗi thay vì lộ ra:
 //
@@ -137,6 +137,7 @@ export class FakeElement {
     this.parentElement = null;
     /** Mọi sự kiện đã phát vào node này, theo thứ tự — đó là thứ test đọc. */
     this.events = [];
+    this.listeners = new Map();
   }
 
   get classList() {
@@ -218,13 +219,26 @@ export class FakeElement {
     return copy;
   }
 
+  addEventListener(type, handler) {
+    if (typeof handler !== 'function') return;
+    const list = this.listeners.get(String(type)) || [];
+    list.push(handler);
+    this.listeners.set(String(type), list);
+  }
+
+  /**
+   * Ghi lại **rồi** gọi listener. Chỉ ghi lại thôi thì một nút gắn nhầm handler vẫn "xanh":
+   * test đọc `events` thấy đủ chuỗi bấm mà không ai chạy gì cả.
+   */
   dispatchEvent(event) {
-    this.events.push(event && event.type ? String(event.type) : String(event));
+    const type = event && event.type ? String(event.type) : String(event);
+    this.events.push(type);
+    for (const handler of this.listeners.get(type) || []) handler(event);
     return true;
   }
 
   click() {
-    this.events.push('click');
+    this.dispatchEvent({ type: 'click' });
   }
 }
 

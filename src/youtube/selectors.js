@@ -41,6 +41,18 @@
      * là chỗ phát hiện.
      */
     segmentNoise: ['.segment-duration-label', '[class*="duration-label"]', '[aria-hidden="true"]'],
+    /** Hàng nút Like/Share dưới player — chỗ nút của extension chen vào (ticket 005). */
+    actionBar: [
+      '#top-level-buttons-computed',
+      'ytd-watch-metadata #actions',
+      'ytd-menu-renderer #top-level-buttons-computed',
+    ],
+    videoTitle: ['ytd-watch-metadata h1', 'h1.ytd-watch-metadata', '#title h1'],
+    channelName: ['ytd-channel-name a', '#owner #channel-name a', '#upload-info #channel-name a'],
+    /** Huy hiệu "Riêng tư"/"Không công khai" — nguồn duy nhất đọc được Mức riêng tư từ DOM. */
+    privacyBadge: ['ytd-badge-supported-renderer', '.badge-style-type-simple', '.ytd-video-primary-info-renderer.badge'],
+    /** Thời lượng ở thanh player. Trang có nhiều chỗ hiện thời lượng; chỗ này là chỗ đúng nhất. */
+    playerDuration: ['.ytp-time-duration'],
   });
 
   const DEFAULT_LABELS = Object.freeze({
@@ -49,6 +61,13 @@
       'hien ban chep loi', 'ban chep loi',
       'hien phu de', 'mo phu de',
     ],
+    /**
+     * Chữ trên huy hiệu Mức riêng tư. Hai nhóm tách hẳn nhau: `private` và `unlisted` đi hai
+     * đường trích khác nhau (ADR 0003), nên đọc nhầm nhóm này thành nhóm kia là thử hai lần
+     * gọi mạng chắc chắn hỏng — hoặc tệ hơn, bỏ qua đường DOM là đường duy nhất chạy được.
+     */
+    privacyPrivate: ['private', 'rieng tu'],
+    privacyUnlisted: ['unlisted', 'khong cong khai'],
   });
 
   /** Selector loại trừ giao diện của chính extension. Suy từ `EXT_PREFIX`, không viết tay lại. */

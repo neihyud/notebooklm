@@ -118,6 +118,35 @@
     return PLAYLIST_ID_RE.test(list) ? list : null;
   }
 
+  // --------------------------------------------------- NotebookLM: bóc notebookId
+
+  const NOTEBOOK_HOSTS = new Set(['notebooklm.google.com']);
+  const NOTEBOOK_ID_RE = /^[A-Za-z0-9_-]{8,}$/;
+
+  /**
+   * Bóc id Notebook đích từ URL của tab NotebookLM đang mở.
+   *
+   * Đây là khoá của Sổ đã import (ADR 0006), nên nhận nhầm còn tệ hơn không nhận: một chuỗi
+   * lạ vẫn dựng được khoá "hợp lệ", và chống trùng lặp sai *âm thầm*. Vì vậy chỉ đúng host
+   * NotebookLM và đúng đoạn path `notebook/<id>` mới được nhận.
+   */
+  function parseNotebookId(input) {
+    const raw = str(input).trim();
+    if (!raw) return null;
+
+    let url;
+    try {
+      url = new URL(raw);
+    } catch {
+      return null;
+    }
+    if (!NOTEBOOK_HOSTS.has(url.hostname.toLowerCase())) return null;
+
+    const segments = url.pathname.split('/').filter(Boolean);
+    if (segments[0] !== 'notebook') return null;
+    return NOTEBOOK_ID_RE.test(segments[1] || '') ? segments[1] : null;
+  }
+
   // ------------------------------------------------------------ khử trùng lặp
 
   /** Giữ lần xuất hiện đầu tiên, giữ nguyên thứ tự vào. */
@@ -386,6 +415,7 @@
     collapse,
     parseVideoId,
     parsePlaylistId,
+    parseNotebookId,
     dedupe,
     deaccent,
     foldLabel,

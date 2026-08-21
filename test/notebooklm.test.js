@@ -10,12 +10,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import '../src/common/shared.js';
+import '../src/common/messages.js';
 import '../src/notebooklm/selectors.js';
 import '../src/notebooklm/automation.js';
+import '../src/notebooklm/content.js';
 import { el, input, evt } from './helpers/fake-dom.js';
 
 const N = globalThis.NBLM_NB_SELECTORS;
 const A = globalThis.NBLM_AUTOMATION;
+const M = globalThis.NBLM_MESSAGES;
+const C = globalThis.NBLM_NB_CONTENT;
 
 /** Cây giả không lan truyền event, nên mọi lần chạy đều tiêm bộ tạo event. */
 const OPTS = { createEvent: evt };
@@ -463,4 +467,84 @@ test('ô nhập giả có value là accessor trên prototype — nếu không, n
   const native = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(box), 'value');
   assert.equal(typeof native.set, 'function');
   assert.equal(typeof native.get, 'function');
+});
+
+// ------------------------------------------ kỷ luật định tuyến ở tab NotebookLM
+
+test('listener của tab NotebookLM im lặng với tin không phải của mình', () => {
+  const deps = { currentNotebookId: () => 'nb-1', addTextSource: async () => ({ ok: true }) };
+  for (const type of [M.TYPES.EXTRACT_TRANSCRIPT, M.TYPES.PING_YOUTUBE, M.TYPES.GET_STATE, 'tin-la', undefined]) {
+    assert.equal(C.handleMessage({ type }, deps), undefined, `phải im lặng với "${type}"`);
+  }
+});
+
+test('ping tab NotebookLM trả về notebook đang mở ở tab đó', async () => {
+  const deps = { currentNotebookId: () => 'nb-1', addTextSource: async () => ({ ok: true }) };
+  const answer = await C.handleMessage({ type: M.TYPES.PING_NOTEBOOKLM }, deps);
+  assert.deepEqual(answer, { ok: true, result: { notebookId: 'nb-1' } });
+});
+
+test('tab đã chuyển sang notebook khác thì TỪ CHỐI đẩy — Nguồn vào nhầm notebook là vĩnh viễn', async () => {
+  const pushed = [];
+  const deps = {
+    currentNotebookId: () => 'nb-DANG-MO',
+    addTextSource: async (source) => {
+      pushed.push(source);
+      return { ok: true };
+    },
+  };
+  const answer = await C.handleMessage(
+    { type: M.TYPES.PUSH_SOURCE, source: { notebookId: 'nb-DA-CHON', name: 'A', body: 'chữ' } },
+    deps,
+  );
+
+  assert.equal(answer.ok, false);
+  assert.match(answer.error, /nb-DANG-MO/);
+  assert.deepEqual(pushed, [], 'không được đẩy gì cả khi hai id lệch nhau');
+});
+
+test('đúng notebook thì đẩy, và Nguồn đi nguyên vẹn sang addTextSource', async () => {
+  const pushed = [];
+  const deps = {
+    currentNotebookId: () => 'nb-1',
+    addTextSource: async (source) => {
+      pushed.push(source);
+      return { ok: true, name: source.name };
+    },
+  };
+  const source = { notebookId: 'nb-1', name: 'Học Rust', body: '# Học Rust\n\n[00:00] Xin chào' };
+  const answer = await C.handleMessage({ type: M.TYPES.PUSH_SOURCE, source }, deps);
+
+  assert.deepEqual(answer, { ok: true, result: { ok: true, name: 'Học Rust' } });
+  assert.deepEqual(pushed, [source]);
+  assert.equal(pushed[0].name, 'Học Rust', 'tên Nguồn và thân Nguồn không đổi chỗ khi đi qua kênh tin');
+  assert.ok(pushed[0].body.startsWith('# Học Rust'));
+});
+
+test('đẩy hỏng thì trả lời có lời, không để service worker treo một Promise', async () => {
+  const deps = {
+    currentNotebookId: () => 'nb-1',
+    addTextSource: async () => { throw new Error('addTextSource: hộp thoại không mở'); },
+  };
+  const answer = await C.handleMessage({ type: M.TYPES.PUSH_SOURCE, source: { notebookId: 'nb-1' } }, deps);
+  assert.equal(answer.ok, false);
+  assert.match(answer.error, /hộp thoại không mở/);
+});
+
+test('tab không ở trang notebook nào cũng là lệch — id rỗng không phải là "khớp"', async () => {
+  // NotebookLM đá tab về danh sách notebook khi Notebook đích đã bị xoá. Bỏ qua chốt chặn
+  // đúng lúc đó là chạy addTextSource trên một trang không phải notebook nào cả.
+  const pushed = [];
+  const deps = {
+    currentNotebookId: () => '',
+    addTextSource: async (source) => { pushed.push(source); return { ok: true }; },
+  };
+  const answer = await C.handleMessage(
+    { type: M.TYPES.PUSH_SOURCE, source: { notebookId: 'nb-1', name: 'X', body: 'y' } },
+    deps,
+  );
+
+  assert.equal(answer.ok, false);
+  assert.match(answer.error, /nb-1/);
+  assert.deepEqual(pushed, [], 'không được đẩy gì cả khi tab không ở một notebook nào');
 });

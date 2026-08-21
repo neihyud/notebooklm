@@ -500,3 +500,29 @@ test('DEFAULTS — mỗi setting có giá trị dùng được ngay', () => {
 test('EXT_PREFIX — mọi id do extension tạo mang chung một tiền tố', () => {
   assert.equal(S.EXT_PREFIX, 'nblm-');
 });
+
+// ------------------------------------------------------------- bóc notebookId
+
+test('parseNotebookId — bóc id từ URL tab NotebookLM, kể cả khi còn đuôi phía sau', () => {
+  const id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+  assert.equal(S.parseNotebookId(`https://notebooklm.google.com/notebook/${id}`), id);
+  assert.equal(S.parseNotebookId(`https://notebooklm.google.com/notebook/${id}/`), id);
+  assert.equal(S.parseNotebookId(`https://notebooklm.google.com/notebook/${id}?hl=vi`), id);
+  assert.equal(S.parseNotebookId(`https://notebooklm.google.com/notebook/${id}/audio`), id);
+});
+
+test('parseNotebookId — host khác thì KHÔNG nhận, dù đường dẫn trông y hệt', () => {
+  // Khoá Sổ đã import dựng từ id này (ADR 0006): nhận nhầm là chống trùng lặp sai âm thầm,
+  // không có triệu chứng nào ở lần chạy đầu.
+  assert.equal(S.parseNotebookId('https://www.youtube.com/notebook/a1b2c3d4e5'), null);
+  assert.equal(S.parseNotebookId('https://notebooklm.google.com.evil.test/notebook/a1b2c3d4e5'), null);
+});
+
+test('parseNotebookId — trang chủ, đường dẫn lạ, id quá ngắn hay chuỗi bậy đều ra null', () => {
+  assert.equal(S.parseNotebookId('https://notebooklm.google.com/'), null);
+  assert.equal(S.parseNotebookId('https://notebooklm.google.com/notebook'), null);
+  assert.equal(S.parseNotebookId('https://notebooklm.google.com/settings/abc12345'), null);
+  assert.equal(S.parseNotebookId('https://notebooklm.google.com/notebook/abc'), null);
+  assert.equal(S.parseNotebookId('không phải url'), null);
+  assert.equal(S.parseNotebookId(null), null);
+});

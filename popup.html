@@ -59,6 +59,34 @@
         padding-top: 0.5rem;
         border-top: 1px solid var(--line);
       }
+      .actions {
+        margin-top: 0.75rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+      }
+      button {
+        font: inherit;
+        padding: 0.3rem 0.6rem;
+        cursor: pointer;
+      }
+      button[disabled] {
+        cursor: default;
+        opacity: 0.5;
+      }
+      .current {
+        margin: 0.35rem 0 0;
+        color: var(--muted);
+      }
+      #nblm-status {
+        margin: 0.5rem 0 0;
+        white-space: pre-wrap;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      #nblm-status[data-state='error'] {
+        color: #c0392b;
+      }
       [hidden] {
         display: none;
       }
@@ -67,6 +95,21 @@
   <body>
     <h1>NotebookLM Importer</h1>
     <p class="target">Notebook đích: <span id="nblm-target">chưa chọn</span></p>
+    <div class="actions">
+      <button id="nblm-use-notebook" type="button" disabled>Dùng notebook ở tab hiện tại</button>
+    </div>
+
+    <section class="queue">
+      <div class="queue-head">
+        <h2>Video đang xem</h2>
+      </div>
+      <p class="current" id="nblm-current">…</p>
+      <div class="actions">
+        <button id="nblm-import" type="button" disabled>Import vào Notebook đích</button>
+        <button id="nblm-save-only" type="button" disabled>Chỉ tải transcript về</button>
+      </div>
+      <p id="nblm-status"></p>
+    </section>
 
     <section class="queue">
       <div class="queue-head">
@@ -88,8 +131,9 @@
 
     <p class="footer">Bản lưu transcript ghi vào <span id="nblm-download-dir">…</span></p>
 
-    <!-- Thứ tự nạp theo chuỗi phụ thuộc: popup.js đọc globalThis.NBLM_SHARED. -->
+    <!-- Thứ tự nạp theo chuỗi phụ thuộc: popup.js đọc NBLM_SHARED và NBLM_MESSAGES. -->
     <script src="src/common/shared.js"></script>
+    <script src="src/common/messages.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
