@@ -4,6 +4,13 @@
   "version": "0.1.0",
   "description": "Trích cục bộ video YouTube và trang tài liệu, rồi đẩy vào Notebook đích.",
   "minimum_chrome_version": "111",
+  "permissions": [
+    "storage"
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "action": {
     "default_title": "NotebookLM Importer",
     "default_popup": "popup.html"

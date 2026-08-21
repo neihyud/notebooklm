@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>NotebookLM Importer — Cài đặt</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --line: color-mix(in srgb, currentColor 15%, transparent);
+        --muted: color-mix(in srgb, currentColor 55%, transparent);
+      }
+      body {
+        max-width: 44rem;
+        margin: 0 auto;
+        padding: 1.5rem 1rem 3rem;
+        font: 14px/1.5 system-ui, sans-serif;
+      }
+      h1 {
+        font-size: 16px;
+      }
+      h2 {
+        margin: 1.75rem 0 0.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--line);
+        font-size: 14px;
+      }
+      .field {
+        display: grid;
+        grid-template-columns: 14rem 1fr;
+        gap: 0.5rem 1rem;
+        align-items: baseline;
+        margin: 0.6rem 0;
+      }
+      .field p {
+        grid-column: 2;
+        margin: 0.15rem 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      input,
+      select,
+      textarea {
+        font: inherit;
+        padding: 0.3rem 0.4rem;
+      }
+      textarea {
+        width: 100%;
+        min-height: 8rem;
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+      }
+      .wide {
+        display: block;
+      }
+      .actions {
+        margin-top: 1.5rem;
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+      }
+      #nblm-opt-status {
+        color: var(--muted);
+      }
+      #nblm-opt-status[data-state='error'] {
+        color: #c0392b;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>NotebookLM Importer — Cài đặt</h1>
+
+    <h2>Trích và lưu</h2>
+
+    <div class="field">
+      <label for="nblm-opt-downloadDir">Thư mục Bản lưu transcript</label>
+      <input id="nblm-opt-downloadDir" type="text" />
+      <p>Nằm trong thư mục Tải về của trình duyệt.</p>
+    </div>
+
+    <div class="field">
+      <label for="nblm-opt-transcriptFormat">Định dạng transcript</label>
+      <select id="nblm-opt-transcriptFormat">
+        <option value="md">md</option>
+        <option value="srt">srt</option>
+        <option value="vtt">vtt</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="nblm-opt-mergeWindowSeconds">Cửa sổ gộp phụ đề (giây)</label>
+      <input id="nblm-opt-mergeWindowSeconds" type="number" min="0" step="1" />
+      <p>Các segment cách nhau dưới ngần này giây được gộp thành một dòng.</p>
+    </div>
+
+    <div class="field">
+      <label for="nblm-opt-maxWordsPerSource">Trần số từ mỗi Nguồn</label>
+      <input id="nblm-opt-maxWordsPerSource" type="number" min="1" step="1000" />
+      <p>Trần của NotebookLM là 500.000 từ. Hạ xuống thì Nguồn gộp bị cắt sớm hơn.</p>
+    </div>
+
+    <div class="field">
+      <label for="nblm-opt-docsMinChars">Ngưỡng nội dung mỏng (ký tự)</label>
+      <input id="nblm-opt-docsMinChars" type="number" min="0" step="50" />
+      <p>Trang tài liệu ngắn hơn ngần này bị coi là chưa render xong.</p>
+    </div>
+
+    <div class="field">
+      <label for="nblm-opt-wordsPerMinute">Số từ mỗi phút (ước lượng)</label>
+      <input id="nblm-opt-wordsPerMinute" type="number" min="1" step="10" />
+      <p>Dùng để đoán trước một playlist sẽ tiêu bao nhiêu Nguồn.</p>
+    </div>
+
+    <h2>Khi Google đổi giao diện NotebookLM</h2>
+
+    <p>
+      Toàn bộ đường đẩy dựa trên giao diện NotebookLM, nên nó sẽ hỏng khi Google đổi chữ hoặc
+      đổi layout. Hai ô dưới đây sửa được điều đó mà không cần sửa code: các mảng được
+      <strong>gộp thêm</strong> vào mặc định chứ không thay thế, và thứ bạn thêm được ưu tiên
+      trước.
+    </p>
+
+    <div class="wide">
+      <label for="nblm-opt-labelOverrides">Ghi đè nhãn (chữ hiển thị)</label>
+      <textarea id="nblm-opt-labelOverrides" spellcheck="false"></textarea>
+      <p>Nhãn viết thường, không dấu. Nhãn dưới 4 ký tự chỉ khớp chính xác.</p>
+    </div>
+
+    <div class="wide">
+      <label for="nblm-opt-selectorOverrides">Ghi đè selector CSS</label>
+      <textarea id="nblm-opt-selectorOverrides" spellcheck="false"></textarea>
+      <p>Giữ nguyên chữ hoa và dấu ngoặc — chuỗi CSS không được hạ chữ thường.</p>
+    </div>
+
+    <div class="actions">
+      <button id="nblm-opt-save" type="button">Lưu</button>
+      <button id="nblm-opt-reset" type="button">Về mặc định</button>
+      <span id="nblm-opt-status"></span>
+    </div>
+
+    <!--
+      Thứ tự nạp theo chuỗi phụ thuộc: selectors.js cần shared.js, options.js đọc cả hai.
+      Gợi ý trong hai ô ghi đè dựng từ chính bộ mặc định đang chạy, nên trang này không tự
+      viết lại một selector nào (`WORKSPACE_PROTOCOL.md`).
+    -->
+    <script src="src/common/shared.js"></script>
+    <script src="src/notebooklm/selectors.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

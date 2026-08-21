@@ -166,6 +166,10 @@ export class FakeElement {
     return node;
   }
 
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
+
   remove() {
     const parent = this.parentElement;
     if (!parent) return;
@@ -233,3 +237,30 @@ export function el(tagName, attributes = {}, children = []) {
 
 /** Event giả: chỉ cần `.type`, vì cây giả chỉ ghi lại chứ không lan truyền. */
 export const evt = (type) => ({ type });
+
+/**
+ * Ô nhập. `value` là **accessor trên prototype**, đúng như `HTMLTextAreaElement.prototype` —
+ * đó chính là thứ native value setter phải đi tìm. Nếu ở đây `value` chỉ là một field thường
+ * trên instance thì gán thẳng `el.value = x` cũng "chạy", và đường native setter — thứ duy
+ * nhất Angular phản ứng — không bao giờ được kiểm.
+ *
+ * Mỗi lần gán qua setter ghi lại vào `events`, để test chốt được thứ tự *gán trước, phát
+ * event sau*: gán sau khi phát event thì Angular đọc lại ô nhập vẫn thấy rỗng.
+ */
+export class FakeInput extends FakeElement {
+  #value = '';
+
+  get value() {
+    return this.#value;
+  }
+
+  set value(next) {
+    this.#value = String(next);
+    this.events.push(`value=${this.#value}`);
+  }
+}
+
+/** `input('textarea', { id: 'x' })` — ô nhập rỗng, không có con. */
+export function input(tagName, attributes = {}) {
+  return new FakeInput(tagName, attributes);
+}
