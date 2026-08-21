@@ -212,6 +212,61 @@ test('meta — videoId của Mục hàng đợi là thứ không trang nào ghi 
   assert.equal(meta.videoId, 'abc', 'id trong tên file phải là id của mục đã xếp hàng');
 });
 
+/**
+ * `url` đi **ngược** chiều ưu tiên của `title`/`channel`/`privacy`, và ba test dưới đây canh
+ * đúng cái ngược chiều ấy.
+ *
+ * Test "meta đọc từ trang thắng…" ở trên có kiểm `meta.url`, nhưng meta trang trong ca đó
+ * không mang `url` nào cả — nên nó xanh với **cả hai** thứ tự và hoán vị `pick(i.url, m.url)`
+ * → `pick(m.url, i.url)` sống sót nguyên vẹn. Điều kiện để giết được hoán vị đó là hai bên
+ * cùng có url và hai url **khác nhau**; so sánh với biến chứ không với chuỗi cố định, để test
+ * nói về quan hệ ("url của Mục thắng") chứ không về một địa chỉ cụ thể.
+ */
+test('meta — url của Mục hàng đợi thắng url của trang: Link gốc là video được yêu cầu', () => {
+  const requested = 'https://www.youtube.com/watch?v=video-duoc-yeu-cau';
+  const onScreen = 'https://www.youtube.com/watch?v=video-dang-mo';
+  const meta = I.mergeMeta(
+    { id: 'video-duoc-yeu-cau', url: requested, title: 'Tên đoán từ link' },
+    { videoId: 'video-dang-mo', url: onScreen, title: 'Tên thật trên trang' },
+  );
+
+  assert.equal(meta.url, requested, 'Link gốc phải trỏ video người dùng bấm, không phải tab đang mở');
+  assert.notEqual(meta.url, onScreen);
+});
+
+test('meta — nội dung theo trang nhưng danh tính theo Mục, trong cùng một lần gộp', () => {
+  // Bất đối xứng giữa `title` và `url` là cố ý; test này là chỗ nói ra điều đó, để lần sau ai
+  // đọc `pick(i.url, m.url)` không "sửa" nó cho đều với ba dòng bên trên.
+  const item = { id: 'id-cua-muc', url: 'https://youtu.be/id-cua-muc', title: 'Tên đoán từ link' };
+  const page = { videoId: 'id-cua-trang', url: 'https://youtu.be/id-cua-trang', title: 'Tên thật trên trang' };
+  const meta = I.mergeMeta(item, page);
+
+  assert.equal(meta.title, page.title, 'nội dung: trang thắng');
+  assert.equal(meta.url, item.url, 'danh tính: Mục thắng');
+  assert.equal(meta.videoId, item.id, 'danh tính: Mục thắng');
+});
+
+test('meta — Mục hàng đợi không có url thì mới dùng url của trang, không bỏ trống Link gốc', () => {
+  const onScreen = 'https://www.youtube.com/watch?v=video-dang-mo';
+  const meta = I.mergeMeta({ id: 'video-dang-mo' }, { url: onScreen });
+  assert.equal(meta.url, onScreen, '"Mục thắng" là ưu tiên, không phải là bỏ hẳn url của trang');
+});
+
+test('Link gốc trong thân Nguồn đi ra từ url của Mục, không phải url trang trả về', () => {
+  // Chốt ở đầu ra: `contextHeader` in `url` thành dòng người dùng thật sự nhấn vào. Test
+  // `mergeMeta` ở trên chết theo hoán vị, còn test này nói vì sao chuyện đó đáng quan tâm.
+  const requested = 'https://www.youtube.com/watch?v=video-duoc-yeu-cau';
+  const built = I.buildTranscript(
+    { ...VIDEO, id: 'video-duoc-yeu-cau', url: requested },
+    EXTRACTED,
+    SETTINGS,
+  );
+
+  assert.ok(built.body.includes(`- Link gốc: ${requested}`), built.body.split('\n').slice(0, 6).join('\n'));
+  assert.ok(!built.body.includes(EXTRACTED.meta.url), 'url của tab đang mở không được lọt vào thân Nguồn');
+  assert.ok(built.file.text.includes(requested) || built.file.format !== 'md');
+});
+
 // ----------------------------------------------------------------- đường dẫn tải về
 
 test('downloadPath — thư mục Cài đặt đứng trước tên file, ngăn bằng đúng một dấu /', () => {

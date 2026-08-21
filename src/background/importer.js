@@ -30,8 +30,22 @@
 
   /**
    * Meta của một video: những gì đọc được **trên trang** thắng những gì hàng đợi đoán từ link
-   * — trang là thứ vừa nhìn thấy thật. Trừ `videoId`: nó là khoá của Mục hàng đợi, của Sổ đã
-   * import và của tên file, nên nó không phải thứ trang được quyền đổi.
+   * — trang là thứ vừa nhìn thấy thật. Đúng cho `title`, `channel`, `privacy`, `durationSeconds`.
+   *
+   * Hai trường đi ngược chiều ấy, và cả hai đều cố ý:
+   *
+   *   - `videoId` lấy của Mục: nó là khoá của Mục hàng đợi, của Sổ đã import và của tên file,
+   *     nên nó không phải thứ trang được quyền đổi.
+   *   - `url` **cũng** lấy của Mục — dòng `pick(i.url, m.url)` dưới đây không phải lỗi gõ.
+   *     `url` là thứ duy nhất trong meta không mô tả nội dung, mà là **địa chỉ để quay lại**:
+   *     `contextHeader` in nó thành `- Link gốc: …` trong thân mỗi Nguồn, và đó là chỗ người
+   *     dùng nhấn để kiểm chứng một trích dẫn. Mục hàng đợi biết người dùng đã yêu cầu video
+   *     nào — `itemFromLink` lấy nó từ chính link vừa bấm chuột phải. Trang chỉ biết tab đang
+   *     hiển thị gì, và tab ấy có thể là một trang watch khác hẳn (bấm chuột phải lên một video
+   *     gợi ý ở sidebar là đúng trường hợp đó, và cả hai URL đều hợp lệ nên không gì lộ ra).
+   *     Lấy url của trang là dựng một Nguồn mang transcript video A với Link gốc trỏ video B.
+   *
+   * Nói gọn: nội dung theo trang, **danh tính theo Mục**. `videoId` và `url` là danh tính.
    */
   function mergeMeta(item, meta) {
     const i = item || {};
