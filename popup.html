@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>NotebookLM Importer</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --line: color-mix(in srgb, currentColor 15%, transparent);
+        --muted: color-mix(in srgb, currentColor 55%, transparent);
+      }
+      body {
+        width: 22rem;
+        margin: 0;
+        padding: 0.75rem;
+        font: 13px/1.45 system-ui, sans-serif;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: 13px;
+      }
+      h2 {
+        margin: 0;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .target,
+      .footer {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .queue {
+        margin-top: 0.75rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--line);
+      }
+      .queue-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+      }
+      .count {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      ul {
+        margin: 0.35rem 0 0;
+        padding-left: 1.1rem;
+      }
+      li {
+        margin: 0.15rem 0;
+      }
+      .empty {
+        margin: 0.35rem 0 0;
+        color: var(--muted);
+      }
+      .footer {
+        margin-top: 0.75rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--line);
+      }
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>NotebookLM Importer</h1>
+    <p class="target">Notebook đích: <span id="nblm-target">chưa chọn</span></p>
+
+    <section class="queue">
+      <div class="queue-head">
+        <h2>Hàng đợi video</h2>
+        <span class="count" id="nblm-video-count">0 mục</span>
+      </div>
+      <ul id="nblm-video-list" hidden></ul>
+      <p class="empty" id="nblm-video-empty">Chưa có video nào trong hàng đợi.</p>
+    </section>
+
+    <section class="queue">
+      <div class="queue-head">
+        <h2>Hàng đợi tài liệu</h2>
+        <span class="count" id="nblm-docs-count">0 mục</span>
+      </div>
+      <ul id="nblm-docs-list" hidden></ul>
+      <p class="empty" id="nblm-docs-empty">Chưa có trang tài liệu nào trong hàng đợi.</p>
+    </section>
+
+    <p class="footer">Bản lưu transcript ghi vào <span id="nblm-download-dir">…</span></p>
+
+    <!-- Thứ tự nạp theo chuỗi phụ thuộc: popup.js đọc globalThis.NBLM_SHARED. -->
+    <script src="src/common/shared.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

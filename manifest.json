@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "NotebookLM Importer",
+  "version": "0.1.0",
+  "description": "Trích cục bộ video YouTube và trang tài liệu, rồi đẩy vào Notebook đích.",
+  "minimum_chrome_version": "111",
+  "action": {
+    "default_title": "NotebookLM Importer",
+    "default_popup": "popup.html"
+  }
+}
