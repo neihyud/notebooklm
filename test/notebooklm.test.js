@@ -205,7 +205,7 @@ test('pressElement — phát đủ chuỗi sự kiện, đúng thứ tự (một
  * Trạng thái chỉ tiến khi trang "được thở" — tức mỗi lần code gọi `page.wait()`.
  */
 function fakeNotebookLM(config = {}) {
-  const cfg = { withTitle: true, submit: 'ok', late: null, ...config };
+  const cfg = { withTitle: true, submit: 'ok', late: null, formDelay: 0, ...config };
   const addButton = el('button', {}, ['Add source']);
   const body = el('body', {}, [
     el('div', { class: 'topbar' }, [el('button', {}, ['Add note'])]),
@@ -213,6 +213,7 @@ function fakeNotebookLM(config = {}) {
   ]);
   const nodes = { body, addButton, ignoredPresses: 0 };
   let seenSubmitClicks = 0;
+  let chipTicks = 0;
 
   const clicked = (node) => !!node && node.events.includes('click');
 
@@ -256,7 +257,11 @@ function fakeNotebookLM(config = {}) {
     async wait(ms) {
       page.waits.push(ms);
       if (!nodes.dialog && !nodes.submit && clicked(addButton)) return openDialog();
-      if (nodes.dialog && !nodes.submit && clicked(nodes.chip)) return openForm();
+      if (nodes.dialog && !nodes.submit && clicked(nodes.chip)) {
+        // Máy chậm hoặc tab nền: Angular dựng ô nhập sau vài nhịp, không phải ngay.
+        chipTicks += 1;
+        return chipTicks > cfg.formDelay ? openForm() : undefined;
+      }
       if (!nodes.submit) return undefined;
       // Nút Insert mở khoá khi ô nội dung phát `input` — không phải khi `.value` được gán.
       if (nodes.body_.events.includes('input')) nodes.submit.removeAttribute('disabled');
@@ -393,6 +398,44 @@ test('addTextSource — nhãn ghi đè từ Cài đặt đủ để chạy trên
   const sel = N.resolve({ labels: { addSource: ['nap tu lieu'] } });
   const result = await A.addTextSource(SOURCE, app.page, with_({ selectors: sel }));
   assert.equal(result.ok, true);
+});
+
+// ----------------------------------- ngân sách chờ: ô bắt buộc ≠ ô tuỳ chọn
+
+// Ô nội dung là **bắt buộc** — không thấy nó là hỏng, nên đáng chờ lâu. Ô tiêu đề là **tuỳ
+// chọn** — không thấy nó là chuyện bình thường, và cái giá phải trả ở *mọi* nguồn không có
+// ô ấy. Hai ngân sách vì thế không được đổi chỗ cho nhau. Ba test dưới đây canh **quan hệ**
+// giữa chúng chứ không canh con số: chỉnh nhịp cho nhanh hơn hay chậm hơn vẫn phải xanh.
+
+test('TIMING — ngân sách chờ ô tuỳ chọn nhỏ hơn hẳn ngân sách chờ ô bắt buộc', () => {
+  assert.ok(
+    A.TIMING.titleTries * 4 <= A.TIMING.formTries,
+    `chờ ô tiêu đề (${A.TIMING.titleTries}) phải nhỏ hơn hẳn chờ ô nội dung (${A.TIMING.formTries})`,
+  );
+});
+
+test('addTextSource — ô nội dung dựng chậm vẫn kịp: đó là ô không có thì hỏng', async () => {
+  // Chậm gấp đôi ngân sách của ô *tuỳ chọn*. Ngân sách của ô *bắt buộc* phải nuốt được ngần
+  // ấy — không thì hàm ném đúng lỗi "không thấy ô nhập nội dung" và test này đỏ ngay ở đó.
+  const app = fakeNotebookLM({ formDelay: A.TIMING.titleTries * 2 });
+  const result = await A.addTextSource(SOURCE, app.page, OPTS);
+  assert.equal(result.ok, true);
+  assert.equal(app.nodes.body_.value, SOURCE.body);
+});
+
+test('addTextSource — ô tiêu đề không bao giờ hiện thì không đốt ngân sách của ô nội dung', async () => {
+  const withTitle = fakeNotebookLM();
+  await A.addTextSource(SOURCE, withTitle.page, OPTS);
+  const without = fakeNotebookLM({ withTitle: false });
+  await A.addTextSource(SOURCE, without.page, OPTS);
+
+  // Chênh lệch chính là số nhịp đốt vào việc đi tìm một ô không tồn tại — cái giá này trả ở
+  // mọi nguồn, nên một playlist 55 nguồn nhân nó lên 55 lần.
+  const burnt = without.page.waits.length - withTitle.page.waits.length;
+  assert.ok(
+    burnt <= A.TIMING.formTries / 4,
+    `đốt ${burnt} nhịp cho một ô tuỳ chọn, trong khi ngân sách của ô bắt buộc chỉ là ${A.TIMING.formTries}`,
+  );
 });
 
 // ------------------------------------------- kỷ luật: selector chỉ ở một chỗ
