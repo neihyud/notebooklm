@@ -53,6 +53,17 @@
     privacyBadge: ['ytd-badge-supported-renderer', '.badge-style-type-simple', '.ytd-video-primary-info-renderer.badge'],
     /** Thời lượng ở thanh player. Trang có nhiều chỗ hiện thời lượng; chỗ này là chỗ đúng nhất. */
     playerDuration: ['.ytp-time-duration'],
+    /**
+     * Thẻ `<video>` của player — chỗ duy nhất mà một content script nhảy đoạn được.
+     *
+     * `#movie_player.seekTo()` là **thuộc tính JS của trang**: content script chạy ở ISOLATED
+     * world nhìn thấy phần tử nhưng không thấy phương thức ấy, nên gọi nó là `undefined is not
+     * a function`. `currentTime` thì là thuộc tính DOM thật của `HTMLMediaElement`, đặt được
+     * từ ISOLATED world và player tự đồng bộ theo — và không tải lại trang (ticket 006).
+     */
+    playerVideo: ['video.html5-main-video', '.html5-main-video', 'video'],
+    /** Cột phải của trang watch: chỗ panel transcript của extension đứng (ticket 006). */
+    secondaryColumn: ['#secondary-inner', '#secondary', 'ytd-watch-flexy #secondary'],
   });
 
   const DEFAULT_LABELS = Object.freeze({

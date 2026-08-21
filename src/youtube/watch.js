@@ -233,10 +233,17 @@
 
   // ------------------------------------------------------------------ cài vào trang
 
-  function install(target) {
+  /**
+   * Mọi thứ một tab YouTube cần để tự trích transcript: ghi đè của người dùng, adapter mạng,
+   * cầu MAIN world, và adapter trang có thử lại.
+   *
+   * Tách khỏi `install` để panel transcript (ticket 006) **dùng lại đúng đường trích này** chứ
+   * không dựng đường thứ hai — hai đường trích là hai chỗ để ADR 0003 lệch nhau, và cái lệch
+   * ấy chỉ lộ ra ở video private.
+   */
+  function createTab(target) {
     const doc = target.document;
     const chrome_ = target.chrome;
-    if (!chrome_ || !chrome_.runtime) return;
 
     const wait = (ms) => new Promise((resolve) => target.setTimeout(resolve, ms));
     const send = (message) => chrome_.runtime.sendMessage(message).catch(() => null);
@@ -252,7 +259,14 @@
       const bag = area ? await area.get('settings') : null;
       const settings = (bag && bag.settings) || {};
       const css = settings.selectorOverrides || {};
-      overrides = { selectors: Y.resolve({ ...css, labels: settings.labelOverrides || {} }) };
+      const window_ = Number(settings.mergeWindowSeconds);
+      overrides = {
+        selectors: Y.resolve({ ...css, labels: settings.labelOverrides || {} }),
+        // Panel transcript dựng `.md` từ chính bag này. Thiếu `mergeWindowSeconds` thì file
+        // tải từ panel gộp theo mặc định trong khi Bản lưu ghi ra đĩa gộp theo Cài đặt — hai
+        // file cùng tên, khác nội dung, mà không chỗ nào nói ra.
+        mergeWindowSeconds: window_ > 0 ? window_ : S.DEFAULTS.mergeWindowSeconds,
+      };
       return overrides;
     }
 
@@ -281,9 +295,19 @@
       });
     }
 
+    return { doc, wait, send, options, extract };
+  }
+
+  function install(target) {
+    const chrome_ = target.chrome;
+    if (!chrome_ || !chrome_.runtime) return;
+
+    const tab = createTab(target);
+    const doc = tab.doc;
+
     chrome_.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const answer = handleMessage(message, {
-        extract,
+        extract: tab.extract,
         currentVideoId: () => S.parseVideoId(target.location.href) || '',
       });
       if (!answer) return false; // im lặng với tin không phải của mình
@@ -294,7 +318,7 @@
     // Gắn nút bằng chính selector người dùng đang dùng: ghi đè `actionBar` ở trang Cài đặt tồn
     // tại đúng cho lúc YouTube đổi hàng nút, mà lúc đó nút chưa hiện thì không có gì để bấm —
     // đọc ghi đè muộn (chỉ trong `extract`) là để tính năng cứu hộ tự khoá mình lại.
-    const mount = async () => mountButton(doc, doc, () => send({ type: M.TYPES.IMPORT_VIDEO }), await options());
+    const mount = async () => mountButton(doc, doc, () => tab.send({ type: M.TYPES.IMPORT_VIDEO }), await tab.options());
     mount();
     // YouTube là SPA: đổi video không tải lại trang, nó chỉ dựng lại hàng nút.
     for (const event of ['yt-navigate-finish', 'yt-page-data-updated']) doc.addEventListener(event, mount);
@@ -312,6 +336,7 @@
     createPage,
     extractHere,
     handleMessage,
+    createTab,
     install,
   });
 

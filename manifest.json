@@ -28,8 +28,10 @@
         "src/youtube/selectors.js",
         "src/youtube/bridge-protocol.js",
         "src/youtube/bridge-client.js",
+        "src/youtube/srt.js",
         "src/youtube/transcript.js",
-        "src/youtube/watch.js"
+        "src/youtube/watch.js",
+        "src/youtube/panel.js"
       ],
       "run_at": "document_idle"
     },
