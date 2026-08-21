@@ -84,6 +84,44 @@ function mounted(options = {}) {
   return { page, doc, controller, copied, saved };
 }
 
+/**
+ * Cửa sổ giả cho `install`: đủ để panel tự cài vào trang và nghe sự kiện điều hướng SPA của
+ * YouTube, không hơn. `fire` bắn một sự kiện đúng như trang thật bắn.
+ */
+function fakeWindow(page) {
+  const listeners = new Map();
+  const doc = {
+    body: page,
+    createElement: (tag) => el(tag),
+    querySelector: (selector) => page.querySelector(selector),
+    querySelectorAll: (selector) => page.querySelectorAll(selector),
+    addEventListener: (type, handler) => {
+      const list = listeners.get(String(type)) || [];
+      list.push(handler);
+      listeners.set(String(type), list);
+    },
+  };
+  return {
+    document: doc,
+    navigator: { clipboard: { writeText: async () => {} } },
+    fire: (type) => {
+      for (const handler of listeners.get(String(type)) || []) handler({ type });
+    },
+  };
+}
+
+/** Tab giả: đúng bề mặt mà `install` dùng của `W.createTab`. */
+function fakeTab(segmentsOf) {
+  let turn = 0;
+  return {
+    options: async () => ({}),
+    extract: async () => {
+      turn += 1;
+      return segmentsOf(turn);
+    },
+  };
+}
+
 const rowsOf = (controller) => Array.from(controller.nodes.list.children);
 const stampOf = (row) => S.collapse(row.querySelector('button').textContent);
 const textOf = (row) => S.collapse(row.children[1].textContent);
@@ -475,4 +513,77 @@ test('panel — mọi id panel tạo ra đều mang tiền tố chung', async ()
   const created = withId.map((node) => node.getAttribute('id')).filter((id) => id.includes('panel'));
   assert.ok(created.length >= 3, `quét được quá ít id (${created.length}) — biểu thức quét hỏng`);
   for (const id of created) assert.ok(id.startsWith(S.EXT_PREFIX), `id lạc quy ước: ${id}`);
+});
+
+// --------------------------------- đổi video: panel của video trước phải biến mất
+
+/**
+ * Video A và video B là hai thứ cùng kiểu, và thẻ `<video>` là thẻ **dùng lại**: panel của A
+ * còn treo trên trang B vẫn cuộn được, vẫn bấm mốc nhảy được, chỉ là đang hiển thị transcript
+ * của video khác. Không một dấu hiệu nào cho người đọc — cùng một hình với cặp `url` Mục ↔ url
+ * trang mà `mergeMeta` phải canh (`WORKSPACE_PROTOCOL.md`).
+ */
+const VIDEO_A = [{ start: 0, text: 'Đây là video A' }, { start: 10, text: 'A nói tiếp' }];
+const VIDEO_B = [{ start: 0, text: 'Đây là video B' }];
+
+for (const navigation of ['yt-navigate-finish', 'yt-page-data-updated']) {
+  test(`install — "${navigation}" dọn panel của video trước ra khỏi trang`, async () => {
+    const page = watchPage();
+    const win = fakeWindow(page);
+    const panel = P.install(win, {
+      tab: fakeTab((turn) => ({ meta: META, segments: turn === 1 ? VIDEO_A : VIDEO_B })),
+    });
+
+    await panel.toggle();
+    assert.match(page.querySelector(`#${P.PANEL_ID}`).textContent, /video A/);
+
+    win.fire(navigation);
+    assert.equal(page.querySelector(`#${P.PANEL_ID}`), null,
+      'panel của video trước vẫn còn trên trang — người dùng đang đọc transcript sai video');
+
+    await panel.toggle();
+    const reopened = page.querySelector(`#${P.PANEL_ID}`);
+    assert.match(reopened.textContent, /video B/);
+    assert.equal(reopened.textContent.includes('video A'), false, 'dòng của video trước còn sót lại');
+    assert.equal(page.querySelectorAll(`#${P.PANEL_ID}`).length, 1, 'hai panel cùng lúc trên một trang');
+  });
+}
+
+test('install — nhịp timeupdate sau khi đổi video không nổ, dù panel đã bị dọn', async () => {
+  const page = watchPage();
+  const win = fakeWindow(page);
+  const panel = P.install(win, { tab: fakeTab(() => ({ meta: META, segments: VIDEO_A })) });
+
+  await panel.toggle();
+  win.fire('yt-navigate-finish');
+
+  // Listener nằm trên thẻ `<video>`, thứ YouTube **không** dựng lại khi đổi video, nên nó vẫn
+  // chạy sau khi panel đã bị dọn. Không có guard thì mỗi nhịp là một TypeError, vài lần mỗi
+  // giây, suốt thời gian xem — và người dùng không thấy gì ngoài một panel không chịu mở.
+  const video = page.querySelector('video');
+  video.currentTime = 5;
+  assert.doesNotThrow(() => video.dispatchEvent(evt('timeupdate')));
+});
+
+test('install — mở panel hai lần chỉ gắn một listener lên thẻ video, và nó nối vào panel mới', async () => {
+  const page = watchPage();
+  const win = fakeWindow(page);
+  const panel = P.install(win, {
+    tab: fakeTab((turn) => ({ meta: META, segments: turn === 1 ? VIDEO_A : VIDEO_B })),
+  });
+
+  await panel.toggle();
+  win.fire('yt-navigate-finish');
+  await panel.toggle();
+
+  const video = page.querySelector('video');
+  assert.equal(video.listeners.get('timeupdate').length, 1,
+    'mỗi lần mở panel lại chồng thêm một listener lên cùng một thẻ video');
+
+  // Một listener ấy phải nối vào bộ điều khiển **đang sống**, không phải cái đã bị dọn.
+  video.currentTime = 0;
+  video.dispatchEvent(evt('timeupdate'));
+  const marked = Array.from(page.querySelector(`#${P.LIST_ID}`).children)
+    .filter((row) => row.getAttribute('aria-current') === 'true');
+  assert.deepEqual(marked.map((row) => S.collapse(row.children[1].textContent)), ['Đây là video B']);
 });

@@ -472,11 +472,24 @@
     link.remove();
   }
 
-  function install(target) {
+  /**
+   * Cài panel vào một trang.
+   *
+   * `deps` chỉ có một việc: mở seam. Hai lối ra của hàm này — cái tab để trích, và cái bộ điều
+   * khiển để vẽ — mặc định vẫn là `W.createTab(target)` và `createController`, nên hành vi
+   * trên trang thật không đổi. Nhưng tự tạo chúng bên trong thì thứ **duy nhất** ở đây không
+   * kiểm được lại đúng là thứ nguy hiểm nhất: dọn panel khi YouTube đổi video. Panel của video
+   * A còn treo trên trang video B vẫn bấm mốc được (thẻ `<video>` là thẻ dùng lại), nên nó là
+   * một màn hình "chạy được" hiển thị transcript sai video — cùng một hình với cặp `url` Mục ↔
+   * url trang của `mergeMeta` (`WORKSPACE_PROTOCOL.md`).
+   */
+  function install(target, deps) {
     const doc = target.document;
-    if (!target.chrome || !target.chrome.runtime) return null;
+    const given = deps || {};
+    if (!given.tab && (!target.chrome || !target.chrome.runtime)) return null;
 
-    const tab = W.createTab(target);
+    const tab = given.tab || W.createTab(target);
+    const makeController = given.makeController || createController;
     let controller = null;
     /**
      * Thẻ video đã gắn listener. YouTube **dùng lại đúng một thẻ `<video>`** qua các lần điều
@@ -489,12 +502,12 @@
     async function toggle() {
       const opts = await tab.options();
       if (!controller) {
-        controller = createController({
+        controller = makeController({
           doc,
           root: doc,
           options: opts,
           extract: () => tab.extract(),
-          clipboard: target.navigator.clipboard,
+          clipboard: target.navigator && target.navigator.clipboard,
           download: (file) => downloadInTab(doc, file),
           fallbackHost: doc.body,
         });
@@ -513,6 +526,9 @@
     // của video cũ không còn đúng nữa, nên panel đi theo nút.
     for (const event of ['yt-navigate-finish', 'yt-page-data-updated']) {
       doc.addEventListener(event, () => {
+        // `close()` **rồi** mới bỏ tham chiếu: chỉ đặt `controller = null` là bỏ quên khung
+        // panel cũ trên trang, và nó không trông như một lỗi — nó trông như transcript của
+        // video đang mở.
         if (controller) {
           controller.close();
           controller = null;
