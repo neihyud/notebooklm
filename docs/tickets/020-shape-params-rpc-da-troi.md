@@ -1,5 +1,5 @@
 ---
-status: open
+status: done
 labels: [ready-for-agent, risk]
 blocked_by: []
 spec: docs/spec/0001-notebooklm-importer.md
@@ -148,3 +148,86 @@ Không cần che gì nếu dùng đúng hai chuỗi giả trên — đó là lý
 - `teng-lin/notebooklm-py` — `src/notebooklm/_source/add.py`, `docs/rpc-reference.md`
 - `jacob-bd/notebooklm-mcp-cli` — `docs/API_REFERENCE.md`, `CHANGELOG.md` v0.5.16 (2026-04-04)
 - `LocalKinAI/notebooklm-go` — xác nhận `RPCAddSource = "izAoDd"`, không tài liệu hoá shape
+
+---
+
+## Nghiệm thu — 2026-08-23, Lead
+
+**Trạng thái: ĐÃ NHẬN.** Commit `6326187` + `341a71a`. Không cần vá vòng hai.
+
+### Bằng chứng Lead tự chạy
+`bash test/run.sh` → `XANH — tests 783, 25 file.` (nền 778 / 25)
+
+### Hình dạng bản vá — và vì sao nó đúng hơn thứ ticket yêu cầu
+Ticket đòi "một hằng số có tên kèm xuất xứ". Peer làm hơn thế: `buildParams` **không còn tự phát
+biểu shape**, nó chỉ *điền vào* `TEXT_PARAMS_SPECIMEN` — chỗ duy nhất trong repo phát biểu shape
+ấy. Ba chỗ giữ chỗ là ba chuỗi **tự gọi tên mình**, và hai chuỗi đầu đúng bằng hai chuỗi ticket
+dặn owner dùng lúc chụp capture (`AAA-TIEU-DE-AAA` / `BBB-NOI-DUNG-BBB`).
+
+Hệ quả đáng giá nhất nằm ở chi tiết ấy: **chiều của cặp tiêu đề/nội dung nằm trong chính chuỗi,
+không nằm trong một comment cạnh nó.** Đọc mẫu là đọc ra chiều, không phải tin lời. Và khi capture
+về thì nó **dán đè thẳng** lên mẫu — sửa đúng một chỗ.
+
+Từng ô của mẫu đánh dấu `[cả hai]` hay `[bất đồng]`, nên mức tin cậy đọc được tại chỗ. Ô `[0]` là
+chỗ hai nguồn bất đồng (một lớp bọc hay hai); peer chọn `notebooklm-py` **và nói rõ** đó cũng là độ
+sâu code đang có, tức ô duy nhất trong ba chỗ lệch mà ticket giữ nguyên thay vì đổi.
+
+### Bằng chứng mạnh nhất lấy được mà không đăng nhập
+Peer boot service worker **thật** với `chrome` giả + `fetch` giả, chạy trọn một lượt import, in
+nguyên văn thân request sẽ đi trên dây:
+```
+?rpcids=izAoDd&source-path=%2Fnotebook%2Fabcd1234efgh&f.sid=…&hl=en&rt=c
+params = [[[ null,
+             ["docs.acme.dev — Hướng dẫn",   ← tiêu đề, ô đầu
+              "# Một trang\n- Link gốc: …"], ← nội dung, ô sau
+             null, 2, null,null,null,null,null,null, 1 ]],
+          "abcd1234efgh", [2]]
+```
+Đây là thứ gần "chạy thật" nhất mà ràng buộc cho phép, và nó **không** gửi một request nào.
+
+### Ba phép xanh mà peer cố ý KHÔNG vá — Lead đồng ý
+M1 (hoán vị tiêu đề/nội dung **ngay trong mẫu**), M2 (hoán vị hai giá trị `PARAMS_MARKS`), M6 (gỡ
+phần tử thứ ba khỏi mẫu) đều **XANH**.
+
+Cả ba là hoán vị *chính cái mẫu*, tức chính lời khẳng định chưa đo. Lập luận của peer, Lead nhận:
+vá chúng đòi một assert thứ hai ghim "tiêu đề đứng trước" trong test — **đúng bản sao thứ hai** mà
+Acceptance cấm, và đúng cái bẫy đã cho ticket 015 đi lọt. Chiều của cặp được phát biểu **một lần**,
+ở chỗ capture sẽ đè lên. Mọi hoán vị **ngoài** mẫu đều chết (M3, M5, M8, M9, M11 — ĐỎ).
+
+M7 (`canFallBackToDom(INVALID_ARGUMENT)` → `false`) giết **6 test**, gồm một test gọi thẳng tên
+tiền đề. Đó là chỗ dựa của cả quyết định "sửa mù", và nó có canh.
+
+### Phép Lead tự chạy — cặp ngoài danh sách M1–M11
+Danh sách của peel canh *hình dạng* rất kỹ nhưng không canh **tương ứng giữa nhiều Nguồn trong một
+lượt**. Lead chạy hai biến thể:
+
+| phép | kết quả |
+|---|---|
+| `fillMarks` cache cả mảng — Nguồn thứ hai trở đi dùng lại params của Nguồn đầu | **ĐỎ** (1 test) |
+| mỗi lượt vẫn dựng mảng **mới**, chỉ **giá trị** là của Nguồn đầu | **ĐỎ** (1 test) |
+
+Biến thể thứ hai là phép quan trọng: nếu phép canh chỉ so danh tính mảng thì nó sẽ xanh. Nó đỏ,
+nên `shape — mỗi lượt dựng một mảng MỚI…` có kiểm **nội dung** thật.
+
+**Nợ ghi ra từ chính phép này:** chỉ **một** test bắt, và nó ở tầng đơn vị. Tầng service worker
+không bắt — tức lượt import nhiều Nguồn chưa được canh ở chỗ nó thật sự chạy. Hậu quả nếu lỗi ấy
+xảy ra thật: mọi Nguồn sau Nguồn đầu mang nội dung của Nguồn đầu, **vĩnh viễn** (ADR 0010). Chưa
+mở ticket vì guard hiện có bắt được cả hai biến thể; ghi ra để lần sau ai chạm `fillMarks` biết
+lưới ở đây mỏng.
+
+### Peer tự sửa hai chỗ tài liệu đã lệch
+- Runbook chạy thật của ticket 015 bảo owner *"sửa một dòng trong `buildParams`"* — dòng ấy không
+  còn. Nay trỏ đúng vào `TEXT_PARAMS_SPECIMEN` kèm cách áp capture.
+- `WORKSPACE_PROTOCOL.md` header còn `version: 9` trong khi evolution log đã có v10. **Đây là chỗ
+  Lead sót** khi bump v10 ở ticket 019; peer bắt được.
+
+### Việc Lead nợ, nay đã trả
+Peer đúng khi không tự viết: ADR 0012 vẫn chốt *"`izAoDd` không bị xoay lần nào trong 7,5 tháng"*.
+Đã thêm mục **Đính chính** vào `docs/adr/0012-*`: có id thứ hai `ozz5Z`, bằng chứng công khai chỉ
+nói về loại URL, quyết định của ADR **không đổi** — và lý do không đổi là `ozz5Z` xuất hiện kèm
+`INVALID_ARGUMENT`, tức rơi đúng vào hạng mà bộ đọc hỏng đóng và cho rơi về đường DOM.
+
+### Còn thiếu bằng chứng ở đâu — nói thẳng
+**Chiều của cặp tiêu đề/nội dung vẫn dựa trên hai nguồn công khai, không dựa trên phép đo.** Không
+test nào chứng minh được nó tới khi có capture; M1/M2 xanh là cách repo tự thú nhận điều đó thay vì
+che đi. Owner chụp capture theo mục *"Việc owner làm SAU"* là đóng được, và chỉ phải sửa một chỗ.

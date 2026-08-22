@@ -96,3 +96,37 @@ dùng, vào một thời điểm không ai báo trước.
 - Lần đầu extension gửi một request ghi thật vào notebook của owner vẫn cần owner cho phép riêng
   (`WORKSPACE_PROTOCOL.md`, mục `prohibited without explicit authority`). ADR này không cấp quyền
   đó.
+
+---
+
+## Đính chính — 2026-08-22, Lead
+
+ADR này viết ở dòng 39: *"RPC id `izAoDd` **không bị Google xoay lần nào trong 7,5 tháng**"*, và
+dùng câu ấy để chống đỡ lựa chọn đi đường RPC. **Câu ấy không còn đúng như đã viết.**
+
+Changelog `jacob-bd/notebooklm-mcp-cli` **v0.5.16, 2026-04-04**:
+
+> "Fixed `source_add` (URL type) failing with `RPC error code 3 (INVALID_ARGUMENT)` for some users
+> due to Google migrating the `add_source` endpoint. Implemented a dual-RPC fallback: the system
+> tries the legacy `izAoDd` endpoint first, and if it returns code 3, automatically retries with
+> the new `ozz5Z` endpoint."
+
+Ba điều cần tách bạch, vì chúng không cùng mức chắc chắn:
+
+1. **Có một id thứ hai, `ozz5Z`.** Đây là dữ kiện, có ngày tháng và số hiệu bản phát hành.
+2. **Bằng chứng công khai chỉ nói về loại URL.** Ta không đi đường URL (ràng buộc 3 của chính ADR
+   này), nên **chưa kết luận được** đường text có cần `ozz5Z` không. Đây vẫn là điều chưa biết,
+   không phải một lỗ đã đo.
+3. **Cụm *"for some users"* nghĩa là rollout theo cohort** — đúng cơ chế mà ADR này đã mô tả cho
+   *shape*, giờ thấy áp cả cho *id*.
+
+**Quyết định của ADR không đổi**, và lý do đổi hướng suy nghĩ chứ không đổi kết luận: id thứ hai
+xuất hiện kèm mã `INVALID_ARGUMENT`, tức nó rơi vào đúng hạng mà bộ đọc đang **hỏng đóng** và
+`canFallBackToDom` cho rơi về đường DOM. Cohort nào cần `ozz5Z` thì hôm nay chạy đường lui, không
+mất dữ liệu. Đó chính là điều khoản "giữ cả hai đường" của ADR này đang làm việc.
+
+**Không thêm `ozz5Z` vào code** cho tới khi có bằng chứng cho đường text: thêm một id chưa đo vào
+đường ghi là mở đúng cái biến ADR này dựng lên để đóng. Ticket 020 ghi cùng ranh giới ấy.
+
+Đính chính này **không đảo** quyết định nào; nó sửa một tiền đề bị phát biểu chắc hơn bằng chứng.
+Việc đảo quyết định của một ADR `accepted` vẫn là quyền của owner (`WORKSPACE_PROTOCOL.md`).
