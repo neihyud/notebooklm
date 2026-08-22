@@ -3,7 +3,7 @@
 ## Status
 - owner: hiennd
 - status: accepted
-- version: 9
+- version: 10
 - last_reviewed: 2026-08-22
 - applies_to: /home/neihyud/Space/github-me/notebooklm
 - readers: Lead; Supervisor khi được giao audit

@@ -189,3 +189,23 @@ Hệ quả cho runbook ở trên: **bước 4(b) không còn là một khả nă
 Nhiều khả năng lượt chạy thật đầu tiên rớt ở bước 5 (`INVALID_ARGUMENT` → rơi về đường DOM, an
 toàn) trước khi kịp tới 4(b). Nhưng nếu shape lại đi lọt, tên Nguồn sai là **vĩnh viễn**. Owner
 làm ticket 020 trước thì rẻ hơn nhiều — và nó chỉ cần một capture, không cần đẩy thật.
+
+### Bổ sung 2026-08-22 (2) — ticket 020 đã vào, runbook trên đổi ở hai bước
+
+Commit `6326187`. `buildParams` **không còn tự phát biểu shape**: nó điền vào
+`TEXT_PARAMS_SPECIMEN` trong `src/notebooklm/rpc.js` — mẫu duy nhất trong repo nói shape `params`,
+với ba chỗ giữ chỗ `AAA-TIEU-DE-AAA` / `BBB-NOI-DUNG-BBB` / `CCC-NOTEBOOK-CCC`.
+
+- **Bước 4(b)** — câu *"sửa một dòng trong `buildParams`"* không còn đúng: không có dòng ấy nữa.
+  Chiều của cặp nằm ở phần tử `[PARAMS_MARKS.title, PARAMS_MARKS.content]` **trong mẫu**, và cặp
+  đã được đảo lại theo hai nguồn công khai (tiêu đề trước). Nếu tên Nguồn vẫn ra bằng cả
+  transcript thì hai nguồn ấy sai cho cohort của owner — đổi chỗ hai chỗ giữ chỗ **trong mẫu**.
+- **Bước 5** — đối chiếu `f.req` với **`TEXT_PARAMS_SPECIMEN`**, không phải với `buildParams`.
+  Cách áp capture: `JSON.parse` lớp ngoài của `f.req`, lấy `envelope[0][0][1]`, `JSON.parse` tiếp,
+  rồi thay ba giá trị thật bằng ba chỗ giữ chỗ trên. Sửa **đúng một chỗ**; test đọc mẫu chứ không
+  chép lại shape nên chúng tự đi theo.
+- Chụp capture thì dùng đúng hai chuỗi `AAA-TIEU-DE-AAA` (tiêu đề) và `BBB-NOI-DUNG-BBB` (nội
+  dung) như ticket 020 dặn — capture chụp bằng hai chuỗi ấy **dán thẳng được** vào mẫu.
+
+Điều bước 5 vẫn đúng nguyên: shape sai thì hỏng đóng (`INVALID_ARGUMENT` → đường lui DOM). Đo được
+7 phép probe trên bộ đọc, không phép nào ra `ok` (nghiệm thu ticket 020).
