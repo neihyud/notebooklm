@@ -84,6 +84,13 @@ Bất cứ thay đổi nào chạm `page-bridge.js` hoặc đảo một ADR: Lea
   Chỗ nào code rút một tập thành một số hay một boolean thì fixture phải có **≥2 phần tử khác nhau
   đôi một**, và phần tử "đặc biệt" **không được nằm ở đầu hay cuối** — nằm ở đầu thì `[0]` lọt,
   nằm ở cuối thì `at(-1)` lọt.
+
+  **Và không được nằm ở tâm đối xứng.** "Không đầu không cuối" chưa đủ: ticket 019 dựng fixture ba
+  Nguồn `[rpc, dom, rpc]` — đúng chữ nghĩa luật trên — nhưng dãy ấy **bằng chính bản đảo ngược của
+  nó**, nên một `formatSummary` đọc nhãn theo chỉ số đảo ngược vẫn **xanh 777/777**. Vá bằng
+  fixture chứ không bằng assert: bốn phần tử, phần tử đặc biệt ở **vị trí hai** (`[rpc, dom, rpc,
+  rpc]`), khác hẳn bản đảo ngược. Phép chứng ngược cũng đo rồi — hạ chính fixture ấy xuống n=1 thì
+  phép hoán vị xanh sạch trở lại.
 - **`tools/verify-live.mjs` và `tools/verify-docs.mjs` là cổng thứ hai, chạy trên Chrome thật.**
   Ticket nào chạm lớp YouTube hoặc lớp tài liệu phải chạy và dán output. Lý do đo được: hai lỗi
   hạng "chỉ lộ ra ở Chrome" đã lọt qua suite xanh — `.filter` trên `children` (ticket 009, suite
@@ -171,6 +178,10 @@ Bất cứ thay đổi nào chạm `page-bridge.js` hoặc đảo một ADR: Lea
 ## Protocol evolution
 
 Owner duyệt 2026-08-21; section `Authority` có hiệu lực.
+
+**v10 (2026-08-22)** — mở rộng luật *fixture một phần tử* sau ticket 019: phần tử đặc biệt còn
+phải **không nằm ở tâm đối xứng** của dãy, vì n=3 với phần tử đặc biệt ở giữa bằng chính bản đảo
+ngược và nuốt cả một lớp phép hoán vị theo chỉ số. Không đụng `Authority`.
 
 **v9 (2026-08-22)** — thêm luật *fixture một phần tử* vào Verification sau ticket 017, và ghi
 `tools/verify-live.mjs` thành cổng thứ hai (Chrome thật) bên cạnh `test/run.sh`. Không đụng

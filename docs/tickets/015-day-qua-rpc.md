@@ -164,7 +164,9 @@ thật đầu tiên là quyết định của owner.
 1. **Tạo một notebook nháp mới.** Đừng dùng notebook có dữ liệu — Nguồn đã đẩy thì extension không
    sửa và không xoá được (ADR 0010), quota 50/notebook.
 2. Popup → *Dùng notebook ở tab hiện tại*, trỏ vào notebook nháp ấy.
-3. **Mở DevTools của service worker** (`chrome://extensions` → *service worker*) **trước khi** chạy.
+3. *(Lỗi từ ticket 019: bảng tổng kết giờ tự nói ra đường nào đã chạy — dòng `Nguồn đã tạo: N (…
+   đường lui (DOM), … đường RPC)` cộng nhãn trên **từng** dòng Nguồn. DevTools vẫn cho biết **lý
+   do** rơi về đường lui, nên vẫn nên mở.)* **Mở DevTools của service worker** (`chrome://extensions` → *service worker*) **trước khi** chạy.
    Đây là chỗ duy nhất nói ra đường nào đã chạy: thấy `[nblm] đường RPC không dùng được, rơi về
    đường lui — …` thì đường chính đã chết, và câu sau dấu gạch là lý do.
 4. Import **đúng một video ngắn**, rồi mở notebook kiểm ba thứ: (a) có đúng một Nguồn mới; (b)
