@@ -473,6 +473,119 @@ test('viaPanel — thiếu ytcfg hoặc thiếu adapter mạng thì hỏng ngay,
   assert.deepEqual(net.sent, []);
 });
 
+// ------------------------------------- context.client của InnerTube (ticket 013, vòng 2)
+
+/**
+ * `hl` ↔ `gl` là cặp hoán vị được mà cả hai cổng của ticket 013 đều bỏ lọt: hai chuỗi cùng kiểu,
+ * lấy từ **cùng một** đối tượng `ytcfg`, đi vào hai trường nằm cạnh nhau. Đổi chỗ chúng thì
+ * `bash test/run.sh` vẫn xanh và `tools/verify-live.mjs` vẫn xanh 100% chữ trùng — vì phép đo
+ * trang thật chỉ chạy trên video tiếng Anh với giao diện tiếng Anh, nơi gửi sai cả hai trường
+ * vẫn rơi về đúng một kết quả. Đó là fixture n=1 của ticket 017 dời sang **lựa chọn video**.
+ *
+ * Nên chỗ canh phải là đây, ở tầng dữ liệu, với giá trị phân biệt được — không phải đi tìm một
+ * video đa ngữ. `hl` chọn ngôn ngữ bản transcript trả về: hoán vị nó lấy về bản sai ngôn ngữ mà
+ * request vẫn 200, vẫn có segment, mốc vẫn tăng dần, Nguồn vẫn dựng, và tên Nguồn là vĩnh viễn
+ * (ADR 0010).
+ *
+ * Bốn giá trị dưới đây khác nhau đôi một và **không giá trị nào trùng giá trị lui**, để một
+ * phép hoán vị không thể ẩn sau một mặc định.
+ */
+const YTCFG_DISTINCT = Object.freeze({
+  apiKey: 'AIzaKEY',
+  clientName: '1',
+  clientVersion: '2.20260822.01.00',
+  hl: 'de',
+  gl: 'CH',
+});
+
+test('innertubeClient — từng trường ytcfg vào đúng trường context: hl là ngôn ngữ, gl là quốc gia', () => {
+  assert.deepEqual(T.innertubeClient(YTCFG_DISTINCT), {
+    clientName: 'WEB',
+    clientVersion: '2.20260822.01.00',
+    hl: 'de',
+    gl: 'CH',
+  });
+});
+
+test('innertubeClient — thiếu hl/gl thì lui về ngôn ngữ vi và quốc gia VN, không đổi chỗ cho nhau', () => {
+  // Hai giá trị lui cũng là một cặp hoán vị được, và chúng chỉ khác nhau ở chữ hoa: `hl: 'VN'`
+  // là một mã ngôn ngữ không tồn tại, còn `gl: 'vi'` là một mã quốc gia không tồn tại — cả hai
+  // đều không làm YouTube trả lỗi, nó chỉ lặng lẽ chọn mặc định khác.
+  const client = T.innertubeClient({ apiKey: 'k', clientName: '1', clientVersion: '2.2026' });
+  assert.equal(client.hl, 'vi');
+  assert.equal(client.gl, 'VN');
+});
+
+test('innertubeClient — clientName là TÊN trong context, và ytcfg khai tên khác "1" thì giữ nguyên', () => {
+  assert.equal(T.innertubeClient({ clientName: '1' }).clientName, 'WEB');
+  assert.equal(T.innertubeClient({}).clientName, 'WEB');
+  assert.equal(T.innertubeClient({ clientName: 'MWEB' }).clientName, 'MWEB');
+});
+
+test('innertubeHeaders — X-Youtube-Client-Name mang CON SỐ, Client-Version mang chuỗi phiên bản', () => {
+  // Cặp cùng kiểu thứ hai: hai header cạnh nhau, cùng lấy từ `ytcfg`, cùng là chuỗi. Hoán vị
+  // chúng thì `clientName` thành `'2.20260822.01.00'` và `clientVersion` thành `'1'` — hình dạng
+  // vẫn hợp lệ. Và cặp thứ ba, chéo giữa hai chỗ: header mang `'1'` còn `context.client` mang
+  // `'WEB'`; lấy nhầm bản của nhau thì không header nào thiếu, chỉ sai giá trị.
+  assert.deepEqual(T.innertubeHeaders(YTCFG_DISTINCT), {
+    'Content-Type': 'application/json',
+    'X-Youtube-Client-Name': '1',
+    'X-Youtube-Client-Version': '2.20260822.01.00',
+  });
+  assert.notEqual(
+    T.innertubeHeaders(YTCFG_DISTINCT)['X-Youtube-Client-Name'],
+    T.innertubeClient(YTCFG_DISTINCT).clientName,
+    'header mang con số, context mang tên — trùng nhau nghĩa là một trong hai lấy nhầm bản của bên kia',
+  );
+  // Giá trị lui của hai header cũng phải chốt riêng: `YTCFG_DISTINCT` khai sẵn `clientName: '1'`,
+  // đúng bằng giá trị lui, nên với riêng nó thì bỏ hẳn giá trị lui đi vẫn ra cùng một kết quả.
+  assert.deepEqual(T.innertubeHeaders({}), {
+    'Content-Type': 'application/json',
+    'X-Youtube-Client-Name': '1',
+    'X-Youtube-Client-Version': '',
+  });
+});
+
+test('innertubeHeaders — không có Authorization, và không nhận đường nào để chuyền lén vào', () => {
+  const headers = T.innertubeHeaders({ ...YTCFG_DISTINCT, authorization: 'SAPISIDHASH 111_bimat' });
+  const names = Object.keys(headers).map((h) => h.toLowerCase());
+  assert.ok(!names.includes('authorization'), `lộ header: ${names.join(', ')}`);
+  assert.ok(!JSON.stringify(headers).includes('bimat'));
+});
+
+test('get_panel và get_transcript dùng CHUNG một khối context — không phải hai bản chép tay', async () => {
+  // Trước vòng này, khối `context.client` có hai bản giống hệt nhau trong cùng `transcript.js`.
+  // Test này chết nếu ai đó sửa một bản mà bản kia lệch đi — đúng loại nợ ticket 014 vừa dọn.
+  //
+  // Ba `ytcfg`, và hai cái sau **thiếu dần các trường**: một bản chép tay thứ hai thường lệch
+  // đúng ở giá trị lui chứ không ở giá trị có sẵn — `String(cfg.hl || 'en')` trùng bản gốc với
+  // mọi ytcfg đủ trường. Đo thật: với riêng fixture đủ trường, hai phép hoán vị kiểu đó (một ở
+  // `context`, một ở header) sống sót cả bộ test. Nên fixture cuối chỉ còn `apiKey`.
+  for (const cfg of [
+    YTCFG_DISTINCT,
+    { apiKey: 'AIzaKEY', clientName: '1', clientVersion: '2.2026' },
+    { apiKey: 'AIzaKEY' },
+  ]) {
+    const panel = panelNet(FULL_PANEL);
+    await T.viaPanel({ videoId: 'aaaaaaaaaaa', ytcfg: cfg }, panel);
+
+    const inner = panelNet(innertubePayload([{ startMs: 0, endMs: 1000, runs: ['ok'] }]));
+    await T.viaInnertube({ videoId: 'aaaaaaaaaaa', ytcfg: cfg }, inner);
+
+    assert.deepEqual(panel.sent[0].body.context, inner.sent[0].body.context);
+    assert.deepEqual(panel.sent[0].headers, inner.sent[0].headers);
+    // Và cả hai phải là **đúng** khối ấy, không chỉ là "giống nhau": hai bản cùng sai vẫn bằng nhau.
+    assert.deepEqual(panel.sent[0].body.context, { client: T.innertubeClient(cfg) });
+    assert.deepEqual(panel.sent[0].headers, T.innertubeHeaders(cfg));
+  }
+
+  const panel = panelNet(FULL_PANEL);
+  await T.viaPanel({ videoId: 'aaaaaaaaaaa', ytcfg: YTCFG_DISTINCT }, panel);
+  assert.deepEqual(panel.sent[0].body.context.client, {
+    clientName: 'WEB', clientVersion: '2.20260822.01.00', hl: 'de', gl: 'CH',
+  });
+});
+
 // ------------------------------------------------------------------ timedtext
 
 test('parseTimedText — tStartMs/dDurationMs ra đúng start và end', () => {

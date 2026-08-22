@@ -75,6 +75,60 @@
 
   const INNERTUBE_ENDPOINT = 'https://www.youtube.com/youtubei/v1/get_transcript';
 
+  /**
+   * Hai giá trị lui của `context.client`, tách ra thành hằng **có tên theo vai trò** vì `hl` và
+   * `gl` là một cặp hoán vị được: hai chuỗi cùng kiểu, lấy từ cùng một đối tượng `ytcfg`, đi vào
+   * hai trường nằm cạnh nhau. Đổi chỗ chúng thì request vẫn HTTP 200, vẫn đủ segment, mốc vẫn
+   * tăng dần — nhưng `hl` là thứ chọn **ngôn ngữ bản transcript trả về**, nên ở một video có
+   * nhiều bản phụ đề nó lấy về bản sai ngôn ngữ mà không có triệu chứng nào. Tên Nguồn dựng từ
+   * đó là vĩnh viễn (ADR 0010) và ADR 0009 đọc chính tên ấy để biết phần nào đã có.
+   *
+   * Vì sao một phép đo trên trang thật *không* bắt được: video tiếng Anh + giao diện tiếng Anh
+   * thì gửi sai cả hai trường vẫn rơi về đúng một kết quả. Đó là fixture n=1 của ticket 017,
+   * lần này n=1 nằm ở **lựa chọn video** chứ không ở fixture — nên chỗ canh phải là test dữ liệu
+   * dưới đây, không phải `tools/verify-live.mjs`.
+   */
+  const FALLBACK_LANGUAGE = 'vi'; // → hl
+  const FALLBACK_COUNTRY = 'VN'; // → gl
+
+  /**
+   * `context.client` của InnerTube — **một bản duy nhất** cho cả `get_transcript` lẫn
+   * `get_panel`. Trước ticket 013 nó là hai khối chép tay giống hệt nhau trong cùng file này;
+   * sửa một bản để bản kia lệch đi là đúng loại nợ mà ticket 014 vừa dọn.
+   *
+   * (`page-bridge.js` vẫn giữ bản riêng của nó, và đó là chủ ý: file kia chạy ở MAIN world, nơi
+   * mỗi phụ thuộc thêm vào là một lần nữa phải xin owner duyệt phạm vi.)
+   *
+   * `clientName` ở đây là **tên** (`WEB`), còn con số `1` là thứ đi ở header
+   * `X-Youtube-Client-Name` (`innertubeHeaders`). Hai trường cùng tên, hai dạng giá trị khác
+   * nhau, hai chỗ khác nhau — nên chúng cũng là một cặp phải canh.
+   */
+  function innertubeClient(ytcfg) {
+    const cfg = ytcfg || {};
+    return {
+      clientName: cfg.clientName === '1' || !cfg.clientName ? 'WEB' : String(cfg.clientName),
+      clientVersion: String(cfg.clientVersion || ''),
+      hl: String(cfg.hl || FALLBACK_LANGUAGE),
+      gl: String(cfg.gl || FALLBACK_COUNTRY),
+    };
+  }
+
+  /**
+   * Header của một lượt gọi InnerTube. Không có `Authorization` ở đây, và sẽ không bao giờ có:
+   * hai đường mạng của file này chỉ chạy cho video unlisted/public — thứ không cần biết "bạn là
+   * ai" — còn header mượn được thì thuộc về việc liệt kê playlist (ADR 0003,
+   * `WORKSPACE_PROTOCOL.md`). Hàm này không nhận tham số nào để thêm header, nên không có đường
+   * nào chuyền lén một cái vào.
+   */
+  function innertubeHeaders(ytcfg) {
+    const cfg = ytcfg || {};
+    return {
+      'Content-Type': 'application/json',
+      'X-Youtube-Client-Name': String(cfg.clientName || '1'),
+      'X-Youtube-Client-Version': String(cfg.clientVersion || ''),
+    };
+  }
+
   const collapse = (value) => S.collapse(value);
   const messageOf = (error) => (error && error.message ? String(error.message) : String(error));
   /** Mã máy đọc được của một lỗi trích, hoặc chuỗi rỗng khi lỗi không tự khai mã nào. */
@@ -183,23 +237,9 @@
     if (!net || typeof net.post !== 'function') throw new Error('InnerTube: thiếu adapter mạng');
     if (!cfg.apiKey) throw new Error('InnerTube: chưa đọc được ytcfg của tab YouTube');
 
-    // Không có `Authorization` ở đây, và sẽ không bao giờ có: đường này chỉ chạy cho video
-    // unlisted/public — thứ không cần biết "bạn là ai" — còn header mượn được thì thuộc về
-    // việc liệt kê playlist (ADR 0003, WORKSPACE_PROTOCOL).
-    const headers = {
-      'Content-Type': 'application/json',
-      'X-Youtube-Client-Name': String(cfg.clientName || '1'),
-      'X-Youtube-Client-Version': String(cfg.clientVersion || ''),
-    };
+    const headers = innertubeHeaders(cfg);
     const body = {
-      context: {
-        client: {
-          clientName: cfg.clientName === '1' || !cfg.clientName ? 'WEB' : String(cfg.clientName),
-          clientVersion: String(cfg.clientVersion || ''),
-          hl: String(cfg.hl || 'vi'),
-          gl: String(cfg.gl || 'VN'),
-        },
-      },
+      context: { client: innertubeClient(cfg) },
       videoId: String(req.videoId || ''),
     };
     // `get_transcript` nhận `params` dạng protobuf base64 của videoId. Mã hoá dưới đây **chưa
@@ -354,23 +394,11 @@
       );
     }
 
-    // Không `Authorization` ở đây, và sẽ không bao giờ có (ADR 0003, WORKSPACE_PROTOCOL).
     const payload = await net.post({
       url: `${PANEL_ENDPOINT}?key=${encodeURIComponent(cfg.apiKey)}&prettyPrint=false`,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Youtube-Client-Name': String(cfg.clientName || '1'),
-        'X-Youtube-Client-Version': String(cfg.clientVersion || ''),
-      },
+      headers: innertubeHeaders(cfg),
       body: {
-        context: {
-          client: {
-            clientName: cfg.clientName === '1' || !cfg.clientName ? 'WEB' : String(cfg.clientName),
-            clientVersion: String(cfg.clientVersion || ''),
-            hl: String(cfg.hl || 'vi'),
-            gl: String(cfg.gl || 'VN'),
-          },
-        },
+        context: { client: innertubeClient(cfg) },
         panelId: PANEL_ID,
         params: panelParams(videoId),
       },
@@ -666,6 +694,8 @@
     routeFor,
     fetchTranscript,
     parseClock,
+    innertubeClient,
+    innertubeHeaders,
     parseInnertubeTranscript,
     viaInnertube,
     panelParams,
