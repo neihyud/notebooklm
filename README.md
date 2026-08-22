@@ -4,7 +4,7 @@ Chrome extension (Manifest V3) đẩy nhanh **video YouTube** và **trang tài l
 
 > **Trạng thái: có code, chạy được một phần, chưa import thật lần nào.**
 >
-> 17/19 ticket đã nghiệm thu. Suite: `bash test/run.sh` → xanh, **766 test / 25 file**. Ngoài ra
+> 18/20 ticket đã nghiệm thu. Suite: `bash test/run.sh` → xanh, **771 test / 25 file**. Ngoài ra
 > có hai cổng chạy trên **Chrome thật** (`tools/verify-live.mjs`, `tools/verify-docs.mjs`) — chúng
 > nạp chính extension này vào Google Chrome for Testing 151 và chạy trên trang công khai thật.
 >
@@ -17,7 +17,7 @@ Chrome extension (Manifest V3) đẩy nhanh **video YouTube** và **trang tài l
 > | Trích transcript qua InnerTube `get_transcript` | **chết** — HTTP 400 kể cả với `params` do chính YouTube đúc. Đã thay bằng `get_panel` ([ADR 0013](docs/adr/)) |
 > | Trích transcript qua `timedtext` | **bị khoá** — HTTP 200 với 0 byte; PoToken, không phải xác thực |
 > | Trích nội dung trang tài liệu | **chạy** trên Docusaurus, MkDocs Material, VitePress, Sphinx+RTD |
-> | Dò cây Nhánh của sidebar | chạy trên Docusaurus và Sphinx+RTD; **suy biến thành danh sách phẳng** trên MkDocs Material và VitePress (ticket 018) |
+> | Dò cây Nhánh của sidebar | **chạy** trên cả bốn — MkDocs Material 8 Nhánh, VitePress 5 Nhánh (ticket 018). Sphinx+RTD vẫn phẳng: trang đo chỉ mở nhánh của trang đang đọc |
 > | Đẩy nguồn vào NotebookLM | **chưa chạy lần nào** — cần phiên đăng nhập của bạn, và không thứ tự động nào được phép làm việc đó (ticket 015) |
 >
 > Chỗ nào README nói ngược ADR thì [`docs/adr/`](docs/adr/) thắng.
@@ -285,7 +285,7 @@ tools/                            hai cổng chạy trên Chrome thật, và m�
 Luật của mục này giữ nguyên: **một gạch đầu dòng chỉ được đổi sang thì quá khứ khi có lệnh chạy
 được kèm kết quả dán vào.** Dưới đây là chỗ đã đổi được, và chỗ chưa.
 
-Đã có, chạy được: `bash test/run.sh` → **766 test / 25 file**, cộng ba cổng —
+Đã có, chạy được: `bash test/run.sh` → **771 test / 25 file**, cộng ba cổng —
 `tools/verify-live.mjs` và `tools/verify-docs.mjs` nạp chính extension này vào Chrome for
 Testing 151 và chạy trên trang công khai thật; `tools/audit-fake-dom.mjs` đối chiếu cây node giả
 của bộ test với DOM thật và thoát 1 khi còn lệch.
