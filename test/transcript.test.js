@@ -441,20 +441,29 @@ const livePanelPage = (segments, innerTargetId = 'PAmodern_transcript_view') =>
     ]),
   ]);
 
-/** Trang chỉ có panel transcript đang ẩn, không một dòng segment nào — hình của cửa sổ hẹp thật. */
-const hiddenOnlyPage = () =>
-  el('div', { id: 'page' }, [
-    el('ytd-engagement-panel-section-list-renderer', {
-      'target-id': 'engagement-panel-searchable-transcript',
-      visibility: 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN',
-    }, []),
-  ]);
-
-/** Gán bề rộng đo được cho một node của cây giả — cây giả trả 0 cho mọi node chưa gắn vào trang. */
+/**
+ * Gán bề rộng đo được cho một node của cây giả — cây giả trả 0 cho mọi node chưa gắn vào trang.
+ * `null` nghĩa là **không đo được**: node không có phương thức ấy.
+ */
 const withWidth = (node, width) => {
-  node.getBoundingClientRect = () => ({ x: 0, y: 0, width, height: 40, top: 0, right: width, bottom: 40, left: 0 });
+  node.getBoundingClientRect = width === null
+    ? null
+    : () => ({ x: 0, y: 0, width, height: 40, top: 0, right: width, bottom: 40, left: 0 });
   return node;
 };
+
+/**
+ * Trang chỉ có panel transcript **đang ẩn**, không một dòng segment nào — hình của cửa sổ hẹp.
+ *
+ * Nhận một bề rộng cho **mỗi** panel, vì đó là chỗ duy nhất phân biệt được vai trò của phép rút
+ * gọn trên `widths`: với một panel thì `max`, `min`, `widths[0]` và `widths.at(-1)` là cùng một
+ * số. Dump live của ticket 017 cho ba panel bề rộng 0px / 494px / 0px.
+ */
+const hiddenOnlyPage = (widths = [0]) =>
+  el('div', { id: 'page' }, widths.map((width) => withWidth(el('ytd-engagement-panel-section-list-renderer', {
+    'target-id': 'engagement-panel-searchable-transcript',
+    visibility: 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN',
+  }, []), width)));
 
 test('scanTranscriptPanel — panel đang mở KHÔNG có target-id vẫn đọc được (layout thật của jNQXAC9IVRw)', () => {
   const result = T.scanTranscriptPanel(livePanelPage([
@@ -544,10 +553,7 @@ test('scanTranscriptPanel — có dòng segment ngoài mọi panel nhận ra đ�
 });
 
 test('scanTranscriptPanel — panel ẩn mà vẫn rộng 494px thì không phải cửa sổ hẹp', () => {
-  const page = hiddenOnlyPage();
-  withWidth(page.querySelector('ytd-engagement-panel-section-list-renderer'), 494);
-
-  const result = T.scanTranscriptPanel(page, { opened: true });
+  const result = T.scanTranscriptPanel(hiddenOnlyPage([494]), { opened: true });
   assert.equal(result.ok, false);
   assert.notEqual(result.reason, T.REASON.NARROW, 'kết luận cửa sổ hẹp cho một panel rộng 494px');
   assert.equal(result.reason, T.REASON.EMPTY);
@@ -576,6 +582,53 @@ test('scanTranscriptPanel — cửa sổ hẹp ở layout hiện tại: khối t
   const result = T.scanTranscriptPanel(page, { opened: true });
   assert.equal(result.ok, false);
   assert.equal(result.reason, T.REASON.NARROW, `${result.reason} — ${result.message}`);
+});
+
+test('scanTranscriptPanel — CÒN một panel chiếm bề rộng là chưa hẹp, dù mọi panel khác đo ra 0px', () => {
+  // Vai trò của phép rút gọn trên `widths` là **"có panel nào chiếm chỗ không"**, không phải
+  // "panel hẹp nhất rộng bao nhiêu". Hai vai trò ấy chỉ khác nhau khi có từ hai panel ẩn trở
+  // lên — và trang thật đúng là như thế: dump live của ticket 017 cho ba panel 0px / 494px /
+  // 0px. Một panel thì `max`, `min`, `widths[0]`, `widths.at(-1)` là cùng một số, nên fixture
+  // phải cho các bề rộng **khác nhau** và đặt panel rộng ở giữa.
+  const result = T.scanTranscriptPanel(hiddenOnlyPage([0, 494, 0]), { opened: true });
+
+  assert.equal(result.ok, false);
+  assert.notEqual(result.reason, T.REASON.NARROW,
+    'một panel 494px vẫn chiếm chỗ, nhưng lượt chạy bị cắt đường lui vì "cửa sổ quá hẹp"');
+  assert.equal(result.reason, T.REASON.EMPTY);
+  assert.match(result.message, /494/, 'nói bề rộng của panel không chiếm chỗ nào thay vì panel đang chiếm chỗ');
+});
+
+test('scanTranscriptPanel — quan hệ: mọi panel 0px mới là hẹp, thêm đúng một panel chiếm chỗ là hết hẹp', () => {
+  // Hai fixture chỉ khác nhau ở bề rộng của panel giữa. Đây là quan hệ cần canh, không phải con
+  // số: ngưỡng hay đổi, còn "hễ còn một panel chiếm chỗ thì đừng nói cửa sổ hẹp" thì không.
+  const allZero = T.scanTranscriptPanel(hiddenOnlyPage([0, 0, 0]), { opened: true });
+  const oneWide = T.scanTranscriptPanel(hiddenOnlyPage([0, 494, 0]), { opened: true });
+
+  assert.equal(allZero.reason, T.REASON.NARROW);
+  assert.notEqual(oneWide.reason, allZero.reason);
+});
+
+test('scanTranscriptPanel — còn một panel KHÔNG đo được bề rộng là chưa đủ căn cứ nói cửa sổ hẹp', () => {
+  // `some` chứ không `every`: một panel không đo được thì không loại trừ được khả năng nó đang
+  // chiếm chỗ, nên chưa được cắt đường lui. Với một panel thì hai phép ấy cho cùng kết quả.
+  const result = T.scanTranscriptPanel(hiddenOnlyPage([null, 0]), { opened: true });
+
+  assert.equal(result.ok, false);
+  assert.notEqual(result.reason, T.REASON.NARROW, 'kết luận cửa sổ hẹp khi còn một panel chưa đo được');
+  assert.equal(result.reason, T.REASON.EMPTY);
+  assert.match(result.message, /không đo được/);
+});
+
+test('scanTranscriptPanel — câu "không nhận ra" đếm đúng số dòng segment lạc, không đếm số panel', () => {
+  const result = T.scanTranscriptPanel(livePanelPage([
+    segmentNode('0:00', 'một'),
+    segmentNode('0:02', 'hai'),
+    segmentNode('0:04', 'ba'),
+  ], 'PAmodern_caption_view'), { opened: true });
+
+  assert.equal(result.reason, T.REASON.UNRECOGNIZED);
+  assert.match(result.message, /\b3 dòng segment\b/, `đếm sai: ${result.message}`);
 });
 
 test('scanTranscriptPanel — "ẩn vì cửa sổ hẹp" và "mở mà không nhận ra" không được hoán vị cho nhau', () => {
