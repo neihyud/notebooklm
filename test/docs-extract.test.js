@@ -131,6 +131,64 @@ test('chọn thân bài — selector quen thuộc trỏ nhầm một ô quảng 
   assert.ok(doc.markdown.includes('apt install acme'));
 });
 
+// ------------------------------------------------------------ hai ngưỡng, hai vai
+
+test('hai ngưỡng — "giữ gần trọn" phải chặt hơn hẳn "đủ tốt để tin selector quen"', () => {
+  // Hai tỉ lệ cùng đơn vị, cạnh nhau, đi **ngược chiều** nhau: `KEEP_RATIO` càng cao càng dè
+  // dặt (chỉ đi sâu khi gần như không mất gì), `KNOWN_RATIO` càng cao càng khắt khe với đường
+  // tắt (tin selector quen thuộc ít đi). Hoán vị không làm hỏng lần chạy nào — vẫn ra Markdown
+  // có tiêu đề, có khối code — nên chỗ này canh **vai**, không khoá 0,9 và 0,5: chỉnh ngưỡng
+  // sau khi có trang thật là việc sẽ xảy ra.
+  assert.ok(X.KEEP_RATIO > X.KNOWN_RATIO,
+    `"gần trọn" (${X.KEEP_RATIO}) phải chặt hơn "đủ tốt" (${X.KNOWN_RATIO}) — hai vai đang đứng nhầm chỗ`);
+  assert.ok(X.KEEP_RATIO >= 0.75, `"gần trọn" mà chỉ ${X.KEEP_RATIO} thì "gần trọn" không còn nghĩa gì`);
+  assert.ok(X.KNOWN_RATIO <= 0.75, `"đủ tốt để tin đường tắt" mà tới ${X.KNOWN_RATIO} thì đường tắt gần như không bao giờ được đi`);
+  // Cả hai là **tỉ lệ**; ngưỡng "mỏng bất thường" là **số ký tự**. Không cùng vai, không thay
+  // chỗ cho nhau được — và test này nói ra điều đó thay vì để nó là ngầm hiểu.
+  assert.ok(X.KEEP_RATIO < 1 && X.KNOWN_RATIO > 0);
+  assert.ok(S.DEFAULTS.docsMinChars > 1, 'ngưỡng mỏng là số ký tự, không phải tỉ lệ');
+});
+
+test('hai ngưỡng — nới "giữ gần trọn" xuống là đi sâu quá tay và **xén mất phần cuối bài**', () => {
+  // Hậu quả, không phải hằng số: khối con giữ khoảng hai phần ba nội dung. Với "gần trọn" đúng
+  // nghĩa nó bị loại và cả bài được giữ; nới xuống một nửa thì nó thắng vì sâu hơn, và phần
+  // còn lại biến mất khỏi Nguồn mà Nguồn vẫn có tiêu đề, vẫn đọc trôi chảy.
+  const page = el('body', {}, [el('div', { class: 'wrap' }, [
+    el('div', { class: 'part-one' }, [el('h1', {}, ['Cai dat']), el('p', {}, [`PHAN MOT: ${prose(6)}`])]),
+    el('div', { class: 'part-two' }, [el('p', {}, [`PHAN HAI: ${prose(3)}`])]),
+  ])]);
+
+  const one = X.scoreBlock(page.querySelector('.part-one'));
+  const whole = X.scoreBlock(page);
+  assert.ok(one / whole > X.KNOWN_RATIO && one / whole < X.KEEP_RATIO,
+    `fixture phải rơi vào **giữa** hai ngưỡng thì hoán vị mới lộ ra: ${(one / whole).toFixed(2)}`);
+
+  const { markdown } = X.readDocument(page);
+  assert.ok(markdown.includes('PHAN MOT'), 'mất phần đầu bài');
+  assert.ok(markdown.includes('PHAN HAI'), 'thân bài bị xén mất phần cuối — Nguồn vẫn trông đầy đủ');
+});
+
+test('hai ngưỡng — siết "đủ tốt" lên là bỏ qua selector quen ở đúng trang nó dành cho', () => {
+  // Mặt kia của cùng một hoán vị: `.theme-doc-markdown` ôm bài viết nhưng không ôm khối bình
+  // luận bên dưới, nên nó không bao giờ đạt tới mức "gần trọn". Đường tắt bị bỏ thì phép chấm
+  // điểm dừng ở lớp bọc chung, và bình luận trôi vào Nguồn.
+  const page = el('body', {}, [el('div', { class: 'docPage' }, [
+    el('main', {}, [el('div', { class: 'theme-doc-markdown' }, [
+      el('h1', {}, ['Cau hinh nang cao']), el('p', {}, [prose(10)]),
+    ])]),
+    el('div', { class: 'thread' }, [el('p', {}, [`BINH LUAN: ${prose(4)}`])]),
+  ])]);
+
+  const article = X.scoreBlock(page.querySelector('.theme-doc-markdown'));
+  const whole = X.scoreBlock(page);
+  assert.ok(article / whole > X.KNOWN_RATIO && article / whole < X.KEEP_RATIO,
+    `fixture phải rơi vào **giữa** hai ngưỡng: ${(article / whole).toFixed(2)}`);
+
+  const { markdown } = X.readDocument(page);
+  assert.ok(markdown.includes('Cau hinh nang cao'));
+  assert.equal(markdown.includes('BINH LUAN'), false, 'đường tắt bị bỏ qua, Nguồn dính khối ngoài bài');
+});
+
 // ------------------------------------------------------------------ dọn điều hướng
 
 test('dọn — breadcrumb, prev/next, mục lục và "Edit this page" không vào Nguồn', () => {
@@ -320,6 +378,41 @@ test('nấc 2 — tab đang đứng sẵn ở đúng trang được yêu cầu t
   const tab = fakeTab([{ url: 'https://docs.acme.io/#/b', root: b }]);
   const shot = await X.readViaTab('https://docs.acme.io/#/b', tab, NOW);
   assert.equal(shot.root, b);
+});
+
+test('nhịp chờ nấc 2 — ba con số ba vai: số lượt đọc, mili-giây giữa hai lượt, số lượt lặp', () => {
+  // Cùng hình với hai ngưỡng ở trên, và cùng hình với `formTries` ↔ `titleTries` của ticket 004:
+  // ba con số cạnh nhau trong một object, hoán vị đôi nào cũng ra một cấu hình "chạy được".
+  // `tries` ↔ `stepMs` còn giữ nguyên cả tích số (40×250 = 250×40), nên canh tổng ngân sách
+  // KHÔNG bắt được nó — phải canh đơn vị của từng vai.
+  const { tries, stepMs, stableRounds } = X.SETTLE;
+  assert.ok(tries >= stableRounds * 5,
+    `cửa sổ đứng yên (${stableRounds}) phải nằm gọn trong ngân sách đọc (${tries}), còn chỗ cho trang kịp đổi`);
+  assert.ok(stableRounds >= 1 && stableRounds <= 5,
+    `${stableRounds} lượt lặp thì đó không còn là một cửa sổ`);
+  assert.ok(stepMs >= 50 && stepMs <= 2000,
+    `${stepMs} không phải một nhịp hỏi tính bằng mili-giây — dưới ~50ms là vòng lặp bận`);
+  assert.ok(Number.isInteger(tries) && tries >= 5 && tries <= 100,
+    `${tries} không phải một số lượt đọc`);
+  const seconds = (tries * stepMs) / 1000;
+  assert.ok(seconds >= 5 && seconds <= 60, `trần chờ một trang render là ${seconds}s — ngoài mọi khoảng hợp lý`);
+});
+
+test('nhịp chờ nấc 2 — chốt được bằng chính giá trị mặc định, không chỉ bằng giá trị test tự đặt', async () => {
+  // Mọi test nấc 2 khác đều tiêm `settle` riêng cho chạy nhanh, nên `SETTLE` mặc định chưa từng
+  // được một test nào đi qua — mà đó mới là con số chạy thật.
+  const a = PAGE_A();
+  const b = PAGE_B();
+  const tab = fakeTab([
+    { url: 'https://docs.acme.io/#/a', root: a },
+    { url: 'https://docs.acme.io/#/b', root: a },
+    { url: 'https://docs.acme.io/#/b', root: a },
+    { url: 'https://docs.acme.io/#/b', root: a },
+    { url: 'https://docs.acme.io/#/b', root: b },
+  ]);
+  const shot = await X.readViaTab('https://docs.acme.io/#/b', tab, { wait: async () => {} });
+  assert.equal(shot.root, b);
+  assert.ok(shot.polls < X.SETTLE.tries, `chốt ở lượt ${shot.polls}, sát trần ${X.SETTLE.tries}`);
 });
 
 test('nấc 2 — tab trắng mãi thì báo rỗng, không trả một Nguồn không có chữ nào', async () => {
