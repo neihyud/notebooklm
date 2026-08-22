@@ -181,7 +181,14 @@ const DOCS_SCRIPTS = [
     await waitForTab(tab.id, M.TYPES.PING_NOTEBOOKLM);
     const answer = await ask(tab.id, { type: M.TYPES.PUSH_SOURCE, source });
     if (!answer.ok) throw new Error(answer.error || 'tab NotebookLM không đẩy được');
-    return answer.result;
+    // Nhãn đường đặt ở **đây**, không ở chỗ gọi và không ở lớp NotebookLM: hàm này *là* đường
+    // lui, nên nhãn không lệch được khỏi đường đã chạy thật. Lớp bên kia không biết mình là
+    // đường thứ mấy — thứ tự ưu tiên là quyết định của ADR 0012 và nó sống ở đây.
+    //
+    // Cùng khoá `via` với `pushTextSource` (hợp đồng ticket 015 đã khoá), vì engine hàng đợi
+    // đọc **một** khoá cho cả hai đường: hai tên khoá là hai chỗ để một đường im lặng trôi vào
+    // hạng "không rõ" mà bảng tổng kết vẫn đọc trôi chảy.
+    return { ...(answer.result || {}), via: 'dom' };
   }
 
   /**

@@ -665,3 +665,122 @@ test('runQueue — đẩy hỏng không tiêu mất chỉ số phần (ADR 0010)
   // thứ lần import sau không đọc ra được.
   assert.deepEqual(names(log), ['P — phần 2']);
 });
+
+// ------------------------------------------------- đường đẩy lên bảng tổng kết (ticket 019)
+
+/**
+ * Adapter đẩy **có nói ra đường mình vừa đi** — đúng hình dạng giá trị trả về của
+ * `pushTextSource` (ADR 0012), stub tại chỗ chứ không đi qua `buildParams` (ticket 020 đang giữ
+ * shape ấy).
+ *
+ * Bảng tra theo **tên Nguồn**, không theo thứ tự gọi: nếu tra theo thứ tự thì chính phép hoán vị
+ * cần bắt — gán `via` của Nguồn A cho Nguồn B — sẽ không phân biệt được với một fixture đúng.
+ */
+function viaAdapters(viaByName, opts = {}) {
+  const base = fakeAdapters(opts);
+  return {
+    ...base,
+    push: async (source) => {
+      await base.push(source);
+      const via = viaByName[source.name];
+      assert.ok(via !== undefined, `fixture thiếu đường đẩy cho Nguồn "${source.name}"`);
+      return { ok: true, via };
+    },
+  };
+}
+
+test('runQueue — bảng tổng kết nói TỪNG Nguồn đi đường nào, không chỉ đếm (ADR 0012)', async () => {
+  // **Bốn** Nguồn, và Nguồn rơi về đường lui là Nguồn **thứ hai**. Ba ràng buộc chồng lên nhau,
+  // mỗi cái loại một lớp phép hoán vị:
+  //   - n ≥ 2, nếu không "đường của Nguồn này" trùng khít "đường của cả lượt" (v9, luật fixture
+  //     một phần tử) và mọi phép hoán vị đều xanh;
+  //   - không đứng đầu và không đứng cuối — nằm đầu thì `[0]` lọt, nằm cuối thì `at(-1)` lọt;
+  //   - không đứng ở **tâm đối xứng**. Đây là chỗ bản đầu của test này để lọt: với ba Nguồn
+  //     `[rpc, dom, rpc]`, phép đảo ngược danh sách là phép **đồng nhất**, nên một bản
+  //     `formatSummary` đọc nhãn theo chỉ số đảo ngược vẫn xanh 777/777. Bốn Nguồn với Nguồn
+  //     đặc biệt ở vị trí hai thì `[rpc, dom, rpc, rpc]` khác hẳn bản đảo ngược của nó.
+  const a = viaAdapters({
+    'Video mo-dau': 'rpc', 'Video giua': 'dom', 'Video ke': 'rpc', 'Video ket': 'rpc',
+  });
+  const log = await E.runQueue({
+    items: [video('mo-dau'), video('giua'), video('ke'), video('ket')],
+    notebookId: 'NB-1',
+    extract: a.extract,
+    push: a.push,
+  });
+
+  assert.deepEqual(
+    log.sources.map((s) => [s.name, s.pushVia]),
+    [['Video mo-dau', 'rpc'], ['Video giua', 'dom'], ['Video ke', 'rpc'], ['Video ket', 'rpc']],
+  );
+  assert.deepEqual(log.summary.pushVia, { rpc: 3, dom: 1 });
+
+  // Neo **tên ↔ nhãn trên cùng một dòng**: đếm không thôi thì hoán vị `via` giữa hai Nguồn vẫn
+  // cho đúng một bảng "3 RPC, 1 đường lui", và đó chính là phép cần chết.
+  const table = E.formatSummary(log);
+  assert.match(table, /\+ Video mo-dau: [^\n]* — đường RPC$/m, table);
+  assert.match(table, /\+ Video giua: [^\n]* — đường lui \(DOM\)$/m, table);
+  assert.match(table, /\+ Video ke: [^\n]* — đường RPC$/m, table);
+  assert.match(table, /\+ Video ket: [^\n]* — đường RPC$/m, table);
+  assert.match(table, /Nguồn đã tạo: 4 \(1 đường lui \(DOM\), 3 đường RPC\)/, table);
+});
+
+test('runQueue — adapter đẩy không nói đường nào thì bảng nói "không rõ", KHÔNG nói RPC', async () => {
+  // Hạng mặc định là chỗ dễ nói dối nhất: đoán `'rpc'` cho một adapter im lặng là làm bảng tổng
+  // kết báo đường chính đang sống vào đúng lúc nó vừa chết (shape trôi theo cohort, ADR 0012).
+  const a = fakeAdapters(); // `push` trả về `undefined`
+  const log = await E.runQueue({
+    items: [video('v1')],
+    notebookId: 'NB-1',
+    extract: a.extract,
+    push: a.push,
+  });
+
+  assert.equal(log.sources[0].pushVia, '');
+  assert.deepEqual(log.summary.pushVia, { '': 1 });
+  const table = E.formatSummary(log);
+  assert.match(table, /\+ Video v1: [^\n]* — đường không rõ$/m);
+  assert.doesNotMatch(table, /đường RPC/);
+});
+
+test('runQueue — Nguồn đẩy hỏng không có dòng đường đẩy nào: nó không phải Nguồn đã tạo', async () => {
+  // Đối chứng cho hai test trên: phép đếm đường đẩy chạy trên `log.sources`, và một lượt đẩy
+  // ném ra thì không có Nguồn nào để đếm — nếu nó vẫn hiện một đường, con số "bao nhiêu Nguồn
+  // rơi về đường lui" đang đếm cả những Nguồn chưa hề tồn tại.
+  const a = viaAdapters({ 'Video v1': 'rpc', 'Video v2': 'rpc' }, { failPush: ['Video v2'] });
+  const log = await E.runQueue({
+    items: [video('v1'), video('v2')],
+    notebookId: 'NB-1',
+    extract: a.extract,
+    push: a.push,
+  });
+
+  assert.deepEqual(log.sources.map((s) => s.name), ['Video v1']);
+  assert.deepEqual(log.summary.pushVia, { rpc: 1 });
+  assert.match(E.formatSummary(log), /Nguồn đã tạo: 1 \(1 đường RPC\)/);
+});
+
+test('runQueue — `via` trùng tên thuộc tính kế thừa vẫn đếm đủ và vẫn gọi tên được', async () => {
+  // Hạng "đường lạ" tồn tại để đón một giá trị chưa biết — mà đúng lớp giá trị ấy là chỗ phép
+  // tra trần và phép đếm trên object literal cùng hỏng: `counts['constructor'] || 0` lấy được
+  // **hàm** `Object` nên phép cộng thành phép nối chuỗi, còn `counts['__proto__'] = 1` bị setter
+  // nuốt lặng và Nguồn ấy biến mất khỏi phép đếm. Cả hai đều là mất mát **âm thầm**, đúng thứ
+  // ADR 0008 dựng bảng tổng kết để chặn.
+  for (const odd of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const a = viaAdapters({ 'Video v1': 'rpc', 'Video v2': odd, 'Video v3': 'rpc' });
+    const log = await E.runQueue({
+      items: [video('v1'), video('v2'), video('v3')],
+      notebookId: 'NB-1',
+      extract: a.extract,
+      push: a.push,
+    });
+
+    const counted = Object.values(log.summary.pushVia).reduce((sum, n) => sum + n, 0);
+    assert.equal(counted, 3, `${odd}: ba Nguồn mà phép đếm đường đẩy chỉ thấy ${counted}`);
+    assert.deepEqual(log.summary.pushVia, { rpc: 2, [odd]: 1 }, odd);
+    // Và nó phải **gọi tên ra được**, không in một hàm ra bảng tổng kết.
+    const table = E.formatSummary(log);
+    assert.match(table, new RegExp(`\\+ Video v2: [^\\n]* — đường lạ \\(${odd}\\)$`, 'm'), table);
+    assert.doesNotMatch(table, /native code|\[object Object\]/, table);
+  }
+});

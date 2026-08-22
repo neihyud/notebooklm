@@ -591,3 +591,95 @@ test('service worker — Nguồn quá lớn đi thẳng đường lui, KHÔNG g�
   assert.equal(posts(sw).length, 0, 'đã gửi request cho một Nguồn lẽ ra không được gửi');
   assert.deepEqual([...sw.messaged(M.TYPES.PUSH_SOURCE)], [NOTEBOOK_TAB]);
 });
+
+// ======================================== đường đẩy lên bảng tổng kết (ticket 019)
+
+/**
+ * Kịch bản `POST` **theo đúng lượt**, không lặp lại phản hồi cuối như `scriptedPost`.
+ *
+ * Đó là cả điểm khác: một lượt chạy hỗn hợp cần lượt 1 khác lượt 2 khác lượt 3, và một fixture
+ * "lặp lại cái cuối" sẽ im lặng biến mọi lượt thừa thành cùng một hạng. Gửi nhiều hơn số lượt đã
+ * soạn là hỏng fixture, không phải chuyện để đoán.
+ */
+function postsInOrder(replies) {
+  let sent = 0;
+  return async (_href, init) => {
+    if (((init && init.method) || 'GET') !== 'POST') return null;
+    assert.ok(sent < replies.length,
+      `fixture soạn ${replies.length} lượt POST mà đường đẩy gửi lượt thứ ${sent + 1}`);
+    const reply = replies[sent];
+    sent += 1;
+    return fakeResponse(reply.status, reply.text);
+  };
+}
+
+/**
+ * **Bốn** Nhánh, nên bốn Nguồn — và Nhánh rơi về đường lui là Nhánh **thứ hai**.
+ *
+ * Luật fixture một phần tử của `WORKSPACE_PROTOCOL.md` v9 cắn đúng ở đây: với một Nguồn thì
+ * "đường của Nguồn này" và "đường của cả lượt" là **cùng một câu**, nên gán `via` của Nguồn A
+ * cho Nguồn B không phân biệt được với hành vi đúng. Nằm đầu thì `[0]` lọt, nằm cuối thì
+ * `at(-1)` lọt.
+ *
+ * Bốn chứ không ba, và vị trí hai chứ không phải chính giữa: `[rpc, dom, rpc]` **bằng chính bản
+ * đảo ngược của nó**, nên với ba Nhánh một bản `formatSummary` đọc nhãn theo chỉ số đảo ngược
+ * vẫn xanh cả suite. "Không đầu không cuối" chưa đủ — còn phải không nằm ở tâm đối xứng.
+ */
+const FOUR_BRANCHES = [
+  { url: `${SITE}/guide/cai-dat`, title: 'Cài đặt', branch: 'Hướng dẫn' },
+  { url: `${SITE}/api/tong-quan`, title: 'Tổng quan', branch: 'API' },
+  { url: `${SITE}/faq/thuong-gap`, title: 'Câu hỏi thường gặp', branch: 'Hỏi đáp' },
+  { url: `${SITE}/blog/ghi-chu`, title: 'Ghi chú phát hành', branch: 'Nhật ký' },
+];
+
+const OK_BODY = wrap(wrbFrame(okPayload(2)));
+/** `INVALID_ARGUMENT` — hạng "chắc chắn chưa ghi gì", đường lui được chạy (ADR 0012). */
+const DRIFT_BODY = wrap(wrbFrame(null, [3, 'shape đã trôi', []]));
+
+test('service worker — lượt chạy HỖN HỢP: bảng tổng kết nói ĐÚNG Nguồn nào đi đường nào', async () => {
+  // Đây là câu hỏi đầu tiên của mọi lượt chạy thật: đường chính có chạy không (ADR 0012, và
+  // shape `params` chưa từng đối chiếu với capture thật — ticket 020). Trước ticket này câu trả
+  // lời chỉ nằm trong `console.warn` của DevTools service worker.
+  const { sw, answer } = await runDocsImport({
+    fetch: postsInOrder([
+      { status: 200, text: OK_BODY },
+      { status: 200, text: DRIFT_BODY },
+      { status: 200, text: OK_BODY },
+      { status: 200, text: OK_BODY },
+    ]),
+  }, FOUR_BRANCHES);
+
+  assert.equal(answer.ok, true, answer.error);
+  assert.equal(posts(sw).length, 4, 'bốn Nguồn phải là bốn lượt gửi — ràng buộc 2 của ADR 0012');
+  assert.deepEqual([...sw.messaged(M.TYPES.PUSH_SOURCE)], [NOTEBOOK_TAB],
+    'đúng Nguồn thứ hai rơi về đường lui, và nó đi qua tab NotebookLM');
+  assert.equal(sw.warnings.length, 1, 'một Nguồn rơi về đường lui là một dòng cảnh báo');
+
+  // Tên Nguồn ↔ nhãn đường, **trên cùng một dòng**. Con số tổng một mình không phân biệt được
+  // lượt chạy này với lượt chạy đã hoán vị đường giữa hai Nguồn: cả hai đều ra "3 RPC, 1 lui".
+  const table = answer.result.summary;
+  assert.match(table, /\+ docs\.acme\.dev — Hướng dẫn: [^\n]* — đường RPC$/m, table);
+  assert.match(table, /\+ docs\.acme\.dev — API: [^\n]* — đường lui \(DOM\)$/m, table);
+  assert.match(table, /\+ docs\.acme\.dev — Hỏi đáp: [^\n]* — đường RPC$/m, table);
+  assert.match(table, /\+ docs\.acme\.dev — Nhật ký: [^\n]* — đường RPC$/m, table);
+  assert.match(table, /Nguồn đã tạo: 4 \(1 đường lui \(DOM\), 3 đường RPC\)/, table);
+});
+
+test('service worker — lượt đi trọn đường RPC không có dòng đường lui nào (đối chứng)', async () => {
+  // Đối chứng cho test trên: nếu bảng nói "đường lui" ở cả lượt sạch thì phép đo kia xanh vì lý
+  // do khác với lý do nó tưởng.
+  const { answer } = await runDocsImport({}, FOUR_BRANCHES);
+  const table = answer.result.summary;
+  assert.match(table, /Nguồn đã tạo: 4 \(4 đường RPC\)/, table);
+  assert.doesNotMatch(table, /đường lui/, table);
+  assert.doesNotMatch(table, /đường không rõ/, table);
+});
+
+test('service worker — Nguồn quá lớn không gửi request nào, và bảng vẫn gọi tên đường lui', async () => {
+  // Hạng `tooLarge` chưa ra khỏi `pushTextSource` (ràng buộc 4 của ADR 0012: SW bị Chrome giết ở
+  // 30 giây). Nó vẫn là một Nguồn đã vào notebook qua đường lui, nên bảng phải nói ra — nếu
+  // không, một lượt chạy 55 Nguồn quá khổ trông y hệt một lượt RPC sạch.
+  const { sw, answer } = await runDocsImport({ answer: hugeDoc });
+  assert.equal(posts(sw).length, 0, 'đã gửi request cho một Nguồn lẽ ra không được gửi');
+  assert.match(answer.result.summary, /Nguồn đã tạo: 2 \(2 đường lui \(DOM\)\)/, answer.result.summary);
+});

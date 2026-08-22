@@ -21,6 +21,44 @@
   /** Ngăn giữa hai phần trong một Nguồn gộp. Header ngữ cảnh của từng phần do khâu trích dựng. */
   const PART_SEPARATOR = '\n\n---\n\n';
 
+  /**
+   * Nhãn người đọc cho **đường đẩy** của một Nguồn — hai giá trị `pushTextSource` trả về
+   * (ADR 0012). Bảng tra ở đây, không rải trong `formatSummary`: hai nhãn cùng kiểu chuỗi cho
+   * hai vai ngược nhau, và đổi chỗ chúng vẫn cho một bảng đọc trôi chảy nói ngược sự thật —
+   * đúng hình mà `WORKSPACE_PROTOCOL.md` ghi cho bảng xác nhận ở ticket 007.
+   *
+   * Trường trên Nguồn tên `pushVia` chứ không phải `via`, và đó là chủ ý: repo này đã có ba thứ
+   * khác mang tên `via` — đường trích transcript (`panel|innertube|dom`), nấc trích tài liệu
+   * (`fetch|tab`), kiểu cây sidebar (`lists|blocks|flat`) — và không thứ nào liên quan tới đây.
+   */
+  const PUSH_VIA_LABEL = Object.freeze({
+    rpc: 'đường RPC',
+    dom: 'đường lui (DOM)',
+  });
+
+  /**
+   * Đường đẩy mà adapter vừa đi, đọc từ giá trị nó trả về.
+   *
+   * Adapter im lặng là hạng **không rõ**, không phải đường chính. Đoán `'rpc'` ở đây là làm bảng
+   * tổng kết báo đường chính đang sống vào đúng lúc nó vừa chết — mà đó là cả lý do ticket này
+   * tồn tại: khi shape payload trôi theo cohort (ADR 0012), mọi lượt đẩy lặng lẽ rơi về đường
+   * lui và không có triệu chứng nào khác.
+   */
+  function pushViaOf(result) {
+    const via = result && typeof result === 'object' ? result.via : null;
+    return typeof via === 'string' ? via.trim() : '';
+  }
+
+  /**
+   * `Object.hasOwn` chứ không phải `PUSH_VIA_LABEL[via] || …`: bảng tra là object literal, nên
+   * phép tra trần cũng thấy cả thuộc tính kế thừa. Một `via` tên `'toString'` hay `'constructor'`
+   * lấy được một **hàm** (truthy) và bảng tổng kết in ra `function toString() { [native code] }`
+   * thay vì rơi vào đúng nhánh "đường lạ" mà nhánh ấy tồn tại để đón.
+   */
+  const pushViaLabel = (via) => (Object.hasOwn(PUSH_VIA_LABEL, via)
+    ? PUSH_VIA_LABEL[via]
+    : (via ? `đường lạ (${via})` : 'đường không rõ'));
+
   // ------------------------------------------------------------------ trạng thái
 
   /**
@@ -181,8 +219,9 @@
       source.name = gstate ? sealedName(bundle.group, gstate, supplement) : labelOf(items[0]);
 
       trace(queue, 'push', 'start', source.name);
+      let result;
       try {
-        await cfg.push(source);
+        result = await cfg.push(source);
       } catch (error) {
         if (gstate) {
           if (supplement) gstate.supplements -= 1;
@@ -196,6 +235,11 @@
         return;
       }
       trace(queue, 'push', 'end', source.name);
+      // Đường đẩy gắn vào **chính Nguồn vừa đẩy**, ngay tại lượt đẩy ấy: đó là chỗ duy nhất còn
+      // biết cặp (Nguồn, đường) là của nhau. Ghép lại sau bằng thứ tự hai danh sách là mở đúng
+      // cửa cho việc gán `via` của Nguồn A cho Nguồn B, mà hai chuỗi ấy cùng kiểu và cùng tập
+      // giá trị hợp lệ nên bảng tổng kết vẫn đọc trôi chảy.
+      source.pushVia = pushViaOf(result);
       log.sources.push(source);
       // Nguồn gộp vẫn ghi vào Sổ **từng mục một**, để một lần import lẻ sau đó biết là trùng
       // (ADR 0006).
@@ -342,7 +386,19 @@
   function summarize(log) {
     const imported = [];
     const seen = new Map();
+    // Đếm theo **Nguồn đã tạo**, không theo lượt đẩy đã thử: một lượt đẩy ném ra thì không có
+    // Nguồn nào trong notebook, và đếm nó vào đây là báo một con số "đã rơi về đường lui" gồm
+    // cả những Nguồn chưa hề tồn tại.
+    //
+    // Đếm bằng `Map`, không bằng object trần, và đó không phải chuyện sạch sẽ: trên một object
+    // literal thì `counts['constructor'] || 0` lấy được **hàm** `Object` nên phép cộng thành
+    // phép nối chuỗi, còn `counts['__proto__'] = 1` bị setter nuốt lặng và Nguồn ấy **biến mất
+    // khỏi phép đếm** — đúng hạng hỏng âm thầm mà cả bảng tổng kết này tồn tại để chặn
+    // (ADR 0008). `Map` không có prototype để đụng vào; bản đổ ra vẫn là object thuần JSON.
+    const viaCounts = new Map();
     for (const source of log.sources) {
+      const via = source.pushVia || '';
+      viaCounts.set(via, (viaCounts.get(via) || 0) + 1);
       for (const id of source.itemIds) {
         imported.push(id);
         seen.set(id, (seen.get(id) || 0) + 1);
@@ -362,12 +418,25 @@
       dropped: log.dropped.length,
       deferred: (log.deferred || []).length,
       sources: log.sources.length,
+      pushVia: Object.fromEntries(viaCounts),
       words: log.sources.reduce((sum, s) => sum + s.words, 0),
       stopped: log.stopped,
       leaked,
       duplicated,
       balanced: leaked.length === 0 && duplicated.length === 0,
     };
+  }
+
+  /**
+   * Phần trong ngoặc của dòng "Nguồn đã tạo": bao nhiêu Nguồn đi đường nào.
+   *
+   * Sắp theo khoá để thứ tự không đổi theo thứ tự đẩy — một bảng tổng kết đổi thứ tự giữa hai
+   * lần chạy giống nhau là một bảng không so được với lần trước. Rỗng khi chưa Nguồn nào ra đời.
+   */
+  function pushViaTally(counts) {
+    const keys = Object.keys(counts || {}).sort();
+    if (keys.length === 0) return '';
+    return ` (${keys.map((via) => `${counts[via]} ${pushViaLabel(via)}`).join(', ')})`;
   }
 
   /** Bảng tổng kết dạng chữ, để popup và log cùng đọc được. */
@@ -377,10 +446,14 @@
       `Notebook đích: ${log.notebookId}`,
       `Hàng đợi: ${s.queued} mục — ${s.imported} đã import, ${s.skipped} bỏ qua, ${s.dropped} rớt`
         + `${s.deferred ? `, ${s.deferred} còn nợ` : ''}`,
-      `Nguồn đã tạo: ${s.sources}`,
+      `Nguồn đã tạo: ${s.sources}${pushViaTally(s.pushVia)}`,
     ];
+    // Đường đẩy đi cùng **từng** dòng Nguồn, không chỉ nằm ở con số tổng: hai Nguồn hoán vị
+    // đường cho nhau vẫn cho đúng cùng một con số tổng, nên con số một mình không phân biệt
+    // được. Dòng này là chỗ duy nhất nói được "Nguồn NÀY đi đường nào".
     for (const source of log.sources) {
-      lines.push(`  + ${source.name}: ${source.itemIds.length} mục, ${source.words} từ${source.overflow ? ' (vượt trần)' : ''}`);
+      lines.push(`  + ${source.name}: ${source.itemIds.length} mục, ${source.words} từ`
+        + `${source.overflow ? ' (vượt trần)' : ''} — ${pushViaLabel(source.pushVia)}`);
     }
     if (log.skipped.length) {
       lines.push('Bỏ qua:');
