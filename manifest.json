@@ -12,7 +12,8 @@
   ],
   "host_permissions": [
     "*://*.youtube.com/*",
-    "https://notebooklm.google.com/*"
+    "https://notebooklm.google.com/*",
+    "https://notebook.google.com/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.js"
@@ -50,7 +51,8 @@
     },
     {
       "matches": [
-        "https://notebooklm.google.com/*"
+        "https://notebooklm.google.com/*",
+        "https://notebook.google.com/*"
       ],
       "js": [
         "src/common/shared.js",

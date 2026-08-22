@@ -41,8 +41,6 @@ importScripts(
   const READY_TRIES = 40;
   const READY_STEP_MS = 250;
 
-  const NOTEBOOK_URL = 'https://notebooklm.google.com/notebook/';
-
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const messageOf = (error) => (error && error.message ? String(error.message) : String(error));
 
@@ -96,8 +94,13 @@ importScripts(
     return tabs.find((tab) => S.parseVideoId(tab.url || '') === videoId) || null;
   }
 
+  /**
+   * Tab NotebookLM đang mở đúng notebook này. Hỏi trên **mọi** host của `NOTEBOOK_HOSTS`, không
+   * chỉ host ta tự mở: tài khoản đã chuyển sang "Gemini Notebook" ngồi ở host kia, và bỏ sót
+   * host ấy nghĩa là mỗi lần đẩy lại mở thêm một tab bên cạnh tab đã có.
+   */
   async function findNotebookTab(notebookId) {
-    const tabs = await tabsMatching(['https://notebooklm.google.com/*']);
+    const tabs = await tabsMatching(S.NOTEBOOK_MATCH_PATTERNS);
     return tabs.find((tab) => S.parseNotebookId(tab.url || '') === notebookId) || null;
   }
 
@@ -148,7 +151,7 @@ importScripts(
    */
   async function pushSource(source) {
     const existing = await findNotebookTab(source.notebookId);
-    const tab = existing || await chrome.tabs.create({ url: NOTEBOOK_URL + source.notebookId, active: false });
+    const tab = existing || await chrome.tabs.create({ url: S.notebookUrl(source.notebookId), active: false });
     await waitForTab(tab.id, M.TYPES.PING_NOTEBOOKLM);
     const answer = await ask(tab.id, { type: M.TYPES.PUSH_SOURCE, source });
     if (!answer.ok) throw new Error(answer.error || 'tab NotebookLM không đẩy được');

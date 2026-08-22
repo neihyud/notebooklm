@@ -624,3 +624,45 @@ test('parseNotebookId — trang chủ, đường dẫn lạ, id quá ngắn hay 
   assert.equal(S.parseNotebookId('không phải url'), null);
   assert.equal(S.parseNotebookId(null), null);
 });
+
+test('parseNotebookId — nhận cả hai host của cùng một sản phẩm, không chỉ host cũ', () => {
+  // Google đổi tên NotebookLM thành "Gemini Notebook" (2026-07-16) và chuyển theo cohort: cùng
+  // một lúc có tài khoản còn ở `notebooklm.google.com`, có tài khoản đã sang `notebook.google.com`.
+  // Thiếu một trong hai thì với đúng một nửa người dùng, tab notebook đang mở không được nhận ra.
+  const id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+  assert.equal(S.parseNotebookId(`https://notebooklm.google.com/notebook/${id}`), id);
+  assert.equal(S.parseNotebookId(`https://notebook.google.com/notebook/${id}`), id);
+  assert.equal(S.parseNotebookId('https://notebook.google.com.evil.test/notebook/a1b2c3d4e5'), null);
+});
+
+test('parseNotebookId — nhận đúng tập host mà NOTEBOOK_HOSTS khai, không hơn không kém', () => {
+  const id = 'a1b2c3d4e5';
+  for (const host of S.NOTEBOOK_HOSTS) {
+    assert.equal(S.parseNotebookId(`https://${host}/notebook/${id}`), id, `khai ${host} mà không nhận nó`);
+  }
+  // Host Google khác vẫn là host Google — nhưng không phải notebook.
+  assert.equal(S.parseNotebookId(`https://gemini.google.com/notebook/${id}`), null);
+  assert.equal(S.parseNotebookId(`https://docs.google.com/notebook/${id}`), null);
+});
+
+test('NOTEBOOK_MATCH_PATTERNS — mẫu cho manifest và tabs.query suy từ đúng NOTEBOOK_HOSTS', () => {
+  assert.deepEqual([...S.NOTEBOOK_MATCH_PATTERNS], [
+    'https://notebooklm.google.com/*',
+    'https://notebook.google.com/*',
+  ]);
+  // Suy, chứ không chép: mẫu phải trỏ đúng những host mà `parseNotebookId` nhận.
+  assert.deepEqual(
+    S.NOTEBOOK_MATCH_PATTERNS.map((pattern) => new URL(pattern.replace(/\*$/, '')).hostname),
+    [...S.NOTEBOOK_HOSTS],
+  );
+});
+
+test('notebookUrl — tab do extension tự mở đi vào host cũ, và chính nó nhận lại được id', () => {
+  // Chiều redirect chỉ có một: host cũ 302 sang host mới cho tài khoản đã chuyển. Mở thẳng host
+  // mới cho tài khoản chưa chuyển thì không có gì bảo đảm — nên phần tử đầu của NOTEBOOK_HOSTS
+  // là host cũ, và hoán vị hai phần tử ấy phải làm test này đỏ.
+  const id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+  assert.equal(S.notebookUrl(id), `https://notebooklm.google.com/notebook/${id}`);
+  assert.equal(S.notebookUrl(id), `https://${S.NOTEBOOK_HOSTS[0]}/notebook/${id}`);
+  assert.equal(S.parseNotebookId(S.notebookUrl(id)), id);
+});

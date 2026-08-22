@@ -120,15 +120,38 @@
 
   // --------------------------------------------------- NotebookLM: bóc notebookId
 
-  const NOTEBOOK_HOSTS = new Set(['notebooklm.google.com']);
+  /**
+   * Hai host của **cùng một sản phẩm**. Google đổi tên NotebookLM thành "Gemini Notebook"
+   * (2026-07-16): `notebooklm.google.com` 302 sang `notebook.google.com`, và `batchexecute`
+   * dual-serve trên cả hai. Việc chuyển chạy theo cohort, nên cùng một lúc có tài khoản còn ở
+   * host cũ, tài khoản đã sang host mới. Nhận thiếu một trong hai thì với đúng nhóm tài khoản
+   * kia, content script không nạp và cả đường đẩy **im lặng** không làm gì.
+   *
+   * Thứ tự có nghĩa: phần tử đầu là host mà extension tự mở tab tới (`notebookUrl`). Chiều
+   * redirect chỉ có một — host cũ dẫn sang host mới cho tài khoản đã chuyển, chiều ngược lại
+   * không có gì bảo đảm.
+   */
+  const NOTEBOOK_HOSTS = Object.freeze(['notebooklm.google.com', 'notebook.google.com']);
+  const NOTEBOOK_HOST_SET = new Set(NOTEBOOK_HOSTS);
+
+  /**
+   * Mẫu host cho `host_permissions`, `content_scripts.matches` và `chrome.tabs.query` — suy từ
+   * đúng danh sách trên. Ba chỗ ấy phải nhắc tới cùng một tập host: khai ở chỗ này mà quên chỗ
+   * kia là hỏng lặng, và `test/manifest.test.js` đối chiếu cả ba với hằng số này.
+   */
+  const NOTEBOOK_MATCH_PATTERNS = Object.freeze(NOTEBOOK_HOSTS.map((host) => `https://${host}/*`));
+
   const NOTEBOOK_ID_RE = /^[A-Za-z0-9_-]{8,}$/;
+
+  /** URL của một notebook, dùng khi phải mở tab mới. */
+  const notebookUrl = (notebookId) => `https://${NOTEBOOK_HOSTS[0]}/notebook/${str(notebookId)}`;
 
   /**
    * Bóc id Notebook đích từ URL của tab NotebookLM đang mở.
    *
    * Đây là khoá của Sổ đã import (ADR 0006), nên nhận nhầm còn tệ hơn không nhận: một chuỗi
    * lạ vẫn dựng được khoá "hợp lệ", và chống trùng lặp sai *âm thầm*. Vì vậy chỉ đúng host
-   * NotebookLM và đúng đoạn path `notebook/<id>` mới được nhận.
+   * NotebookLM — một trong `NOTEBOOK_HOSTS` — và đúng đoạn path `notebook/<id>` mới được nhận.
    */
   function parseNotebookId(input) {
     const raw = str(input).trim();
@@ -140,7 +163,7 @@
     } catch {
       return null;
     }
-    if (!NOTEBOOK_HOSTS.has(url.hostname.toLowerCase())) return null;
+    if (!NOTEBOOK_HOST_SET.has(url.hostname.toLowerCase())) return null;
 
     const segments = url.pathname.split('/').filter(Boolean);
     if (segments[0] !== 'notebook') return null;
@@ -494,10 +517,13 @@
     EXT_PREFIX,
     MAX_WORDS_PER_SOURCE,
     DEFAULTS,
+    NOTEBOOK_HOSTS,
+    NOTEBOOK_MATCH_PATTERNS,
     collapse,
     parseVideoId,
     parsePlaylistId,
     parseNotebookId,
+    notebookUrl,
     dedupe,
     deaccent,
     foldLabel,

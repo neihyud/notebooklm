@@ -8,11 +8,19 @@
 //   - xoá một file khỏi mảng `js` → mồ côi;
 //   - đảo hai file trong một mảng `js` → sai chuỗi phụ thuộc;
 //   - bỏ `"world": "MAIN"` của page-bridge → cầu chạy ở ISOLATED world, không thấy `ytcfg`;
-//   - gỡ một quyền → API tương ứng thành `undefined` giữa lúc chạy.
+//   - gỡ một quyền → API tương ứng thành `undefined` giữa lúc chạy;
+//   - bỏ một host NotebookLM khỏi `NOTEBOOK_HOSTS`, khỏi manifest, hay khỏi mẫu `tabs.query`
+//     → content script không nạp với đúng một nửa tài khoản (ticket 014).
 // Mỗi assertion in ra chi tiết lệch chứ không chỉ true/false.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+// shared.js là classic script gắn API vào globalThis — import lấy side effect. Manifest và
+// service worker phải khai đúng tập host mà nó định nghĩa, nên đây là bên thứ hai của mọi
+// đối chiếu host dưới đây, thay cho một danh sách chép tay.
+import '../src/common/shared.js';
+
+const S = globalThis.NBLM_SHARED;
 
 const url = (name) => new URL(`../${name}`, import.meta.url);
 const read = (name) => readFileSync(url(name), 'utf8');
@@ -153,24 +161,69 @@ test('manifest — không khai quyền thừa: quyền nào cũng phải có cod
   assert.deepEqual(unused, [], `quyền không ai dùng — gỡ đi: ${unused.join(', ')}`);
 });
 
+/**
+ * Mẫu host mà service worker thật sự đưa vào `chrome.tabs.query`.
+ *
+ * Đối số của `tabsMatching` có hai dạng: mảng chuỗi viết thẳng, hoặc một hằng số của
+ * `shared.js`. Phải quy được **cả hai** về mẫu thật — nếu chỉ đọc dạng thứ nhất thì đổi sang
+ * hằng số là mất luôn phần canh, mà test vẫn xanh vì mẫu YouTube còn viết thẳng.
+ */
+function tabQueryPatterns(source) {
+  const calls = [...source.matchAll(/tabsMatching\(([^)]*)\)/g)].map((m) => m[1]);
+  assert.ok(calls.length > 0, 'không đọc được lời gọi tabsMatching nào trong service worker');
+  return calls.flatMap((args) => {
+    const literals = [...args.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    const constant = args.match(/S\.([A-Z][A-Z_]+)/);
+    const resolved = literals.length ? literals : (constant && S[constant[1]]) || [];
+    assert.ok(resolved.length > 0, `không quy được đối số của tabsMatching(${args}) về mẫu host`);
+    return [...resolved];
+  });
+}
+
 test('manifest — host_permissions phủ đúng những host mà code đi hỏi tab', () => {
   // Chỉ những mẫu đi vào `chrome.tabs.query`: `targetUrlPatterns` của menu chuột phải **không**
   // cần quyền host, nên gộp chúng vào đây là ép khai một quyền không dùng tới.
   const hosts = MANIFEST.host_permissions || [];
-  const queries = [...SW_SOURCE.matchAll(/tabsMatching\(\[([^\]]*)\]\)/g)].map((m) => m[1]);
-  const patterns = queries.flatMap((args) => [...args.matchAll(/'([^']+)'/g)].map((m) => m[1]));
-  assert.ok(patterns.length > 0, 'không đọc được mẫu host nào trong service worker');
-  for (const pattern of patterns) {
+  for (const pattern of tabQueryPatterns(SW_SOURCE)) {
     assert.ok(hosts.includes(pattern), `service worker hỏi tab theo mẫu ${pattern} mà host_permissions không có`);
   }
 });
 
-test('manifest — content script chỉ nạp trên đúng hai host của spec', () => {
+test('manifest — service worker hỏi tab trên MỌI host NotebookLM, không chỉ host nó tự mở', () => {
+  // Một tab đang mở ở host này phải được nhận ra khi extension đi tìm host kia. Không thì mỗi
+  // lần đẩy lại mở thêm một tab bên cạnh tab đã có — người dùng chỉ thấy "sao nhiều tab thế".
+  const patterns = tabQueryPatterns(SW_SOURCE);
+  const missing = S.NOTEBOOK_MATCH_PATTERNS.filter((pattern) => !patterns.includes(pattern));
+  assert.deepEqual(missing, [], `service worker không bao giờ hỏi tới ${missing.join(', ')}`);
+});
+
+test('manifest — mỗi hàm tìm tab hỏi mẫu host của đúng parser mà chính nó lọc bằng', () => {
+  // Hai mẫu host là hai chuỗi cùng kiểu, và hoán vị chúng giữa hai hàm không làm gì đỏ ở tầng
+  // dưới: `findVideoTab` hỏi tab NotebookLM sẽ **luôn** không thấy gì, `findNotebookTab` hỏi
+  // tab YouTube cũng vậy — cả hai lặng lẽ mở thêm tab mới mỗi lượt. Ràng buộc thật: hỏi theo
+  // mẫu của host nào thì lọc bằng parser của đúng host ấy.
+  const finders = [...SW_SOURCE.matchAll(/async function (find\w+Tab)\b([\s\S]*?)\n  }\n/g)];
+  assert.ok(finders.length >= 2, `chỉ thấy ${finders.length} hàm tìm tab — biểu thức quét hỏng`);
+  for (const [, name, body] of finders) {
+    const patterns = tabQueryPatterns(body);
+    const asksNotebook = S.NOTEBOOK_MATCH_PATTERNS.every((pattern) => patterns.includes(pattern));
+    assert.equal(asksNotebook, body.includes('S.parseNotebookId'),
+      `${name} hỏi tab theo ${patterns.join(', ')} nhưng lọc bằng parser của host khác`);
+  }
+});
+
+test('manifest — content script chỉ nạp trên đúng những host của spec, và trên tất cả', () => {
   const matches = MANIFEST.content_scripts.flatMap((entry) => entry.matches);
-  assert.deepEqual([...new Set(matches)].sort(), [
-    '*://*.youtube.com/*',
-    'https://notebooklm.google.com/*',
-  ]);
+  assert.deepEqual([...new Set(matches)].sort(), ['*://*.youtube.com/*', ...S.NOTEBOOK_MATCH_PATTERNS].sort());
+});
+
+test('manifest — content script NotebookLM khai đủ mọi host, thiếu một là im lặng không nạp', () => {
+  // Suy từ chuỗi nạp nào mang `notebooklm/content.js` chứ không đếm chỉ số: chèn thêm một
+  // content_scripts ở giữa không được làm test này quay sang canh nhầm chuỗi khác.
+  const entry = MANIFEST.content_scripts.find((e) => e.js.includes('src/notebooklm/content.js'));
+  assert.ok(entry, 'src/notebooklm/content.js không được khai trong content_scripts — nó là JS mồ côi');
+  assert.deepEqual([...entry.matches].sort(), [...S.NOTEBOOK_MATCH_PATTERNS].sort(),
+    'khai thiếu một host thì với đúng cohort kia, content script không nạp và đường đẩy chết lặng');
 });
 
 // ------------------------------------------------------------------ phím tắt
@@ -183,6 +236,36 @@ test('manifest — phím tắt Alt+Shift+Y gọi đúng lệnh mà service worke
   for (const name of names) {
     assert.ok(SW_SOURCE.includes(`'${name}'`), `manifest khai lệnh "${name}" mà không ai nghe nó`);
   }
+});
+
+/** Phần code của một file, bỏ dòng chú thích — hằng số nằm trong prose không phải hard-code. */
+function codeOf(path) {
+  return read(path)
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !(trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*'));
+    })
+    .join('\n');
+}
+
+// ------------------------------------------- hostname không rời hằng số của shared.js
+
+test('manifest — hostname NotebookLM chỉ nằm ở shared.js, không file nào khác viết lại', () => {
+  // Cùng lý do với selector ở dưới, và là đúng cái bug của ticket 014: hostname viết rải rác
+  // thì một lần đổi tên sản phẩm chỉ được vá ở những chỗ ai đó *nhớ ra*, chỗ còn lại chết lặng.
+  const HOST_SHAPED = /\bnotebook(?:lm)?\.google\.com\b/g;
+  const home = 'src/common/shared.js';
+  const declared = codeOf(home).match(HOST_SHAPED) || [];
+  assert.deepEqual([...new Set(declared)].sort(), [...S.NOTEBOOK_HOSTS].sort(),
+    `${home} phải là chỗ duy nhất khai hostname, và khai đủ: ${declared.join(', ')}`);
+
+  const offenders = EXTENSION_JS
+    .filter((path) => path !== home)
+    .map((path) => [path, codeOf(path).match(HOST_SHAPED) || []])
+    .filter(([, found]) => found.length > 0)
+    .map(([path, found]) => `${path}: ${found.join(', ')}`);
+  assert.deepEqual(offenders, [], `hard-code hostname — dùng S.NOTEBOOK_MATCH_PATTERNS / S.notebookUrl:\n${offenders.join('\n')}`);
 });
 
 // ------------------------------------------------ selector không rời file của lớp mình
@@ -207,14 +290,7 @@ test('manifest — không file nào ngoài selectors.js của lớp mình mang s
 
   const offenders = [];
   for (const path of EXTENSION_JS.filter((p) => !SELECTOR_HOME.test(p))) {
-    const code = read(path)
-      .split('\n')
-      .filter((line) => {
-        const trimmed = line.trim();
-        return !(trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*'));
-      })
-      .join('\n');
-    const found = code.match(SELECTOR_SHAPED) || [];
+    const found = codeOf(path).match(SELECTOR_SHAPED) || [];
     if (found.length > 0) offenders.push(`${path}: ${found.join(', ')}`);
   }
   assert.deepEqual(offenders, [], offenders.join('\n'));
