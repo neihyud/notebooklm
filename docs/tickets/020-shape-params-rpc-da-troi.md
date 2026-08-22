@@ -198,7 +198,7 @@ M7 (`canFallBackToDom(INVALID_ARGUMENT)` → `false`) giết **6 test**, gồm m
 tiền đề. Đó là chỗ dựa của cả quyết định "sửa mù", và nó có canh.
 
 ### Phép Lead tự chạy — cặp ngoài danh sách M1–M11
-Danh sách của peel canh *hình dạng* rất kỹ nhưng không canh **tương ứng giữa nhiều Nguồn trong một
+Danh sách của peer canh *hình dạng* rất kỹ nhưng không canh **tương ứng giữa nhiều Nguồn trong một
 lượt**. Lead chạy hai biến thể:
 
 | phép | kết quả |
