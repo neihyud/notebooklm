@@ -386,26 +386,125 @@
 
   // ==================================================================== đường gửi
 
+  // ------------------------------------------------------ shape của `params`
+
+  /**
+   * Ba chỗ giữ chỗ của `TEXT_PARAMS_SPECIMEN` — cố ý là ba chuỗi **tự gọi tên mình**.
+   *
+   * Hai chuỗi đầu đúng bằng hai chuỗi mà ticket 020 dặn owner dùng lúc chụp capture
+   * (`AAA-TIEU-DE-AAA` / `BBB-NOI-DUNG-BBB`), nên một capture chụp đúng cách **dán thẳng được**
+   * vào mẫu dưới đây. Hệ quả quan trọng hơn: **chiều** của cặp tiêu đề/nội dung nằm trong chính
+   * chuỗi chứ không trong một comment cạnh nó — đọc mẫu là đọc ra chiều, không phải tin lời.
+   */
+  const PARAMS_MARKS = Object.freeze({
+    title: 'AAA-TIEU-DE-AAA',
+    content: 'BBB-NOI-DUNG-BBB',
+    notebookId: 'CCC-NOTEBOOK-CCC',
+  });
+
+  /** Chỉ dấu **loại nguồn = văn bản**, slot 3 của spec. Cả hai nguồn công khai đều ghi `2`. */
+  const SOURCE_KIND_TEXT = 2;
+
+  /** Phần tử **cuối** của spec text. Cả hai nguồn đều có; không nguồn nào nói nó nghĩa là gì. */
+  const TEXT_SPEC_TAIL = 1;
+
+  const deepFreeze = (node) => {
+    if (Array.isArray(node)) node.forEach((entry) => deepFreeze(entry));
+    return Object.freeze(node);
+  };
+
+  /**
+   * **Mẫu `params` của biến thể text — chỗ DUY NHẤT trong repo phát biểu shape ấy.**
+   *
+   * ## Xuất xứ: hai implementation công khai, KHÔNG phải một capture
+   *
+   * Không ai trong dự án đăng nhập được NotebookLM, nên mẫu này **chưa từng được đối chiếu với
+   * một request thật**. Nó dựng từ hai bộ reverse-engineer độc lập (ticket 020):
+   *
+   *   - `teng-lin/notebooklm-py` — `src/notebooklm/_source/add.py`
+   *   - `jacob-bd/notebooklm-mcp-cli` — `docs/API_REFERENCE.md`
+   *
+   * Mức tin cậy **khác nhau theo từng phần tử**, nên nó ghi ngay cạnh từng phần tử bên dưới:
+   * `[cả hai]` = hai nguồn viết giống nhau; `[bất đồng]` = hai nguồn viết khác nhau và ta đã
+   * chọn một bên, ghi rõ bên kia nói gì.
+   *
+   * ## Vì sao sửa mù mà vẫn cân được
+   *
+   * Shape sai làm server trả `INVALID_ARGUMENT`, và `canFallBackToDom` cho hạng ấy rơi về đường
+   * DOM — chưa ghi gì, không mất gì. Ô duy nhất mất dữ liệu là *giữ nguyên* cặp `[content,
+   * title]` cũ: nó **thành công**, với một Nguồn mang tên bằng cả transcript — không sửa được,
+   * không xoá được, ăn một suất trong quota 50 (ADR 0010). Toàn bộ lập luận ấy đứng trên tính
+   * hỏng đóng của bộ đọc; xem test *"CHỖ DỰA CỦA TICKET 020"* trong `notebooklm-rpc.test.js`.
+   *
+   * ## Khi capture về thì sửa ở đâu
+   *
+   * Sửa **đúng mẫu này, một chỗ**: lấy `f.req` ở tab Payload, `JSON.parse` lớp ngoài, lấy
+   * `envelope[0][0][1]`, `JSON.parse` tiếp, rồi thay ba giá trị thật bằng ba chỗ giữ chỗ trên.
+   * Không có bản sao thứ hai nào phải sửa theo — test **đọc** mẫu này chứ không chép lại nó, và
+   * một test chép lại shape đúng là cái bẫy đã cho ticket 015 đi lọt.
+   */
+  const TEXT_PARAMS_SPECIMEN = deepFreeze([
+    // [0] — **danh sách entry**, và luôn đúng MỘT entry: `ADD_SOURCE` nhiều entry âm thầm bỏ
+    //   qua các hàng thất bại trừ khi mọi hàng đều fail (ràng buộc 2 của ADR 0012). Nguồn gộp
+    //   mang nhiều `itemIds` vẫn là một entry.
+    //   [bất đồng] `notebooklm-py` bọc **một** lớp quanh spec ở ô này, `notebooklm-mcp-cli` bọc
+    //   **hai**. Chọn theo `notebooklm-py` — cũng là độ sâu code đang có trước ticket 020, nên
+    //   đây là ô duy nhất trong ba chỗ lệch mà ticket giữ nguyên thay vì đổi.
+    [
+      // Spec của một Nguồn văn bản — **11 phần tử** [cả hai]. `notebooklm-py` ghi lý do tại
+      // chỗ: đợt di trú wire Gemini-3.5 (#1546) kéo spec text từ 8 lên 11 (slot 3 `None` → `2`,
+      // thêm `1` ở đuôi). Shape trước ticket 020 chỉ có **2** phần tử — nó là shape *trước* đợt
+      // di trú ấy, không phải một shape thiếu.
+      [
+        null, // 0 [cả hai] — không nguồn nào nói nó nghĩa là gì
+        // 1 [cả hai] — cặp chuỗi, **tiêu đề TRƯỚC, nội dung SAU**. Phần tử đắt nhất của cả mẫu:
+        //   hoán vị nó **không** hỏng đóng. Request vẫn thành công, chỉ là Nguồn mang tên bằng
+        //   nguyên transcript — vĩnh viễn (ADR 0010), và ADR 0009 đọc tên Nguồn để biết phần
+        //   nào đã có. Cả hai nguồn đặt tiêu đề trước; code trước ticket 020 đặt ngược.
+        [PARAMS_MARKS.title, PARAMS_MARKS.content],
+        null,             // 2 [cả hai]
+        SOURCE_KIND_TEXT, // 3 [cả hai] — chỉ dấu loại nguồn
+        null, null, null, null, null, null, // 4..9 [cả hai] — sáu ô trống, không nguồn nào giải thích
+        TEXT_SPEC_TAIL,   // 10 [cả hai]
+      ],
+    ],
+    // [1] — id Notebook đích [cả hai].
+    PARAMS_MARKS.notebookId,
+    // [2] — [bất đồng, và **không nguồn nào cho ta một giá trị chép được**].
+    //   `notebooklm-mcp-cli` viết `[2]` rồi một phần tử `settings` thứ tư; `notebooklm-py` viết
+    //   một `build_template_block()` mà tài liệu không trích nội dung. Chọn `[2]` vì đó là
+    //   literal duy nhất trong hai nguồn mà ta chép được — `settings` không có giá trị nào để
+    //   chép, nên ta **không** dựng phần tử thứ tư.
+    //   Con số `2` ở đây **không phải** `SOURCE_KIND_TEXT` của slot 3: hai chỗ trùng số, không
+    //   trùng nghĩa; đừng nối chúng thành một hằng số.
+    //   Và chỗ không khớp ghi thẳng ra: chính chú thích di trú của `notebooklm-py` nói cái đuôi
+    //   phẳng `[2],None,None` đã **gộp vào** template block, tức một spec 11 phần tử lẽ ra
+    //   không còn `[2]` phẳng đứng cạnh — mà `notebooklm-mcp-cli` thì có cả hai. Không đo được
+    //   bên nào đúng cho cohort của owner. Ô này sai thì hỏng đóng, nên nó là chỗ rẻ để sai.
+    [2],
+  ]);
+
+  const MARK_ROLES = new Map(Object.entries(PARAMS_MARKS).map(([role, mark]) => [String(mark), role]));
+
+  /** Mẫu → một `params` thật, thay đúng ba chỗ giữ chỗ và **sao lại** mọi mảng con. */
+  function fillMarks(node, values) {
+    if (Array.isArray(node)) return node.map((entry) => fillMarks(entry, values));
+    const role = typeof node === 'string' ? MARK_ROLES.get(node) : undefined;
+    return role === undefined ? node : values[role];
+  }
+
   /**
    * `params` của biến thể **text**, và chỉ biến thể text.
    *
-   * Hai ràng buộc nằm ngay trong hình dạng này, mỗi cái một lý do đã đo:
+   * Hai ràng buộc nằm trong chính hình dạng ấy, mỗi cái một lý do đã đo:
    *
-   *   1. **Một entry, luôn luôn.** `ADD_SOURCE` nhiều entry *âm thầm bỏ qua các hàng thất bại*
-   *      trừ khi mọi entry đều fail — đúng loại rủi ro `packSources()` mà ADR 0008 dựng bảng
-   *      tổng kết để chặn, mở lại ở một tầng thấp hơn nơi bảng tổng kết không nhìn thấy. Nguồn
-   *      gộp mang nhiều `itemIds` vẫn là **một** entry.
+   *   1. **Một entry, luôn luôn** — xem chú thích ô `[0]` của `TEXT_PARAMS_SPECIMEN`.
    *   2. **Không có biến thể URL.** Đường URL đổ mọi nguyên nhân (domain chết, 404, 403, 500)
    *      về một mã `9` duy nhất, và *luôn* để lại ghost row ăn quota phải vào NotebookLM xoá
    *      tay. Đường text là ca duy nhất trong bảng probe từ chối **sạch**.
    *
-   * `[content, title]` là hai chuỗi **cạnh nhau trong một mảng** — đúng cặp mà
-   * `WORKSPACE_PROTOCOL.md` đã ghi cho hộp thoại DOM (ô tiêu đề ↔ ô nội dung, ticket 004),
-   * nhưng ở đây dễ hoán vị hơn chứ không khó hơn: hoán vị vẫn ra một Nguồn "thành công", chỉ
-   * là nó mang tên bằng cả transcript, và tên Nguồn là vĩnh viễn (ADR 0010).
-   *
-   * **Shape này trôi theo cohort và chưa được đối chiếu với một capture thật.** Nó là chỗ đầu
-   * tiên phải soi khi phản hồi trả về `INVALID_ARGUMENT`.
+   * Hàm này không phát biểu shape — nó chỉ điền vào mẫu. Mức tin cậy của từng phần tử đọc ở
+   * `TEXT_PARAMS_SPECIMEN`.
    */
   function buildParams(config) {
     const cfg = config || {};
@@ -417,8 +516,16 @@
     if (!notebookId) throw new Error('buildParams: thiếu id Notebook đích');
     if (!S.collapse(content)) throw new Error('buildParams: Nguồn rỗng — không đẩy một nguồn không có chữ nào');
 
-    return [[[null, [content, title]]], notebookId];
+    return fillMarks(TEXT_PARAMS_SPECIMEN, { title, content, notebookId });
   }
+
+  /** Mẫu shape + ba chỗ giữ chỗ, mở ra cho test **đọc** chứ không để chép lại. */
+  const TEXT_PARAMS = Object.freeze({
+    specimen: TEXT_PARAMS_SPECIMEN,
+    marks: PARAMS_MARKS,
+    kindText: SOURCE_KIND_TEXT,
+    tail: TEXT_SPEC_TAIL,
+  });
 
   /**
    * Một request `batchexecute` hoàn chỉnh. Không gửi gì cả — chỉ mô tả.
@@ -435,8 +542,11 @@
     if (!at) throw new Error(`buildRequest: thiếu token CSRF (${WIZ_KEYS.at})`);
     if (!sid) throw new Error(`buildRequest: thiếu session id (${WIZ_KEYS.sid})`);
 
+    // `buildParams` chạy trước vì nó là chỗ kiểm đầu vào; `source-path` thì đọc thẳng từ cấu
+    // hình chứ **không** móc ra khỏi `params` theo chỉ số. Hai đường dựng độc lập nên test hỏi
+    // được câu đáng hỏi — hai chỗ có cùng một id không — thay vì đúng theo cấu trúc.
     const params = buildParams(cfg);
-    const notebookId = params[1];
+    const notebookId = S.collapse(cfg.notebookId);
     const envelope = [[[RPC_ID, JSON.stringify(params), null, 'generic']]];
 
     const query = new URLSearchParams({
@@ -552,6 +662,7 @@
     WIZ_KEYS,
     GRPC_CODE,
     SOURCE_STATUS_READY,
+    TEXT_PARAMS,
     MAX_BODY_CHARS,
     parseFrames,
     parseWizGlobalData,

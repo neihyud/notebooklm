@@ -248,7 +248,7 @@ test('request — notebookId trong `source-path` và trong params là CÙNG mộ
   // Hai chỗ cùng kiểu chuỗi: lệch nhau thì request vẫn gửi đi được, và Nguồn vào nhầm notebook
   // là vĩnh viễn (ADR 0010).
   const req = R.buildRequest({ notebookId: NB, source: { ...SOURCE, notebookId: NB }, tokens: TOKENS, lang: 'en' });
-  const [, inParams] = paramsOf(req);
+  const inParams = atMark(paramsOf(req), SPEC.marks.notebookId);
   assert.equal(inParams, NB);
   assert.equal(new URL(req.url).searchParams.get('source-path'), `/notebook/${inParams}`);
 });
@@ -263,14 +263,6 @@ test('request — client chỉ tự đặt đúng một header, và KHÔNG mư�
   assert.deepEqual(Object.keys(req.headers), ['Content-Type']);
   assert.match(req.headers['Content-Type'], /application\/x-www-form-urlencoded/);
   assert.equal(req.method, 'POST');
-});
-
-test('request — tiêu đề và nội dung nằm đúng ô của mình trong params', () => {
-  // Đúng cặp mà WORKSPACE_PROTOCOL đã ghi cho hộp thoại DOM (ticket 004), nhưng ở đây là hai
-  // phần tử **cạnh nhau trong một mảng** — dễ hoán vị hơn chứ không khó hơn. Khoá hẳn hình
-  // dạng: shape này trôi theo cohort, nên sửa nó phải là một lần sửa có chủ ý.
-  const [entries] = paramsOf(build());
-  assert.deepEqual(entries[0], [null, [BODY, TITLE]]);
 });
 
 test('request — MỘT request MỘT nguồn: params không bao giờ mang hơn một entry', () => {
@@ -290,6 +282,102 @@ test('request — từ chối dựng khi thiếu notebookId, thân Nguồn, hay 
 
 test('request — endpoint dựng từ hằng số host của shared.js, không viết lại hostname', () => {
   assert.equal(new URL(build().url).hostname, S.NOTEBOOK_HOSTS[0]);
+});
+
+// ------------------------------- shape của `params`: mẫu có xuất xứ, và nó nằm ở MỘT chỗ
+
+const SPEC = R.TEXT_PARAMS;
+
+/**
+ * Đường đi tới một chỗ giữ chỗ **trong mẫu**. Cả cụm test dưới đây đọc mẫu chứ không chép lại
+ * shape: ticket 015 xanh 766 với một cặp `content`/`title` đảo đúng vì test của nó đối chiếu
+ * `buildParams` với một hằng số chép tay từ ticket, nên phép hoán vị chỉ chứng minh code khớp
+ * hằng số ấy. Khi capture về, chỗ phải sửa là `TEXT_PARAMS_SPECIMEN` — mọi test ở đây tự đi theo.
+ */
+function pathTo(node, mark, trail = []) {
+  if (node === mark) return trail;
+  if (!Array.isArray(node)) return null;
+  for (let i = 0; i < node.length; i += 1) {
+    const found = pathTo(node[i], mark, [...trail, i]);
+    if (found) return found;
+  }
+  return null;
+}
+
+const nodeAt = (root, path) => path.reduce((node, i) => node[i], root);
+
+/** Giá trị `buildParams` đặt vào đúng ô mà **mẫu** dành cho chỗ giữ chỗ `mark`. */
+function atMark(params, mark) {
+  const path = pathTo(SPEC.specimen, mark);
+  assert.ok(path, `mẫu shape không còn chỗ giữ chỗ \`${mark}\``);
+  return nodeAt(params, path);
+}
+
+/** Spec của một Nguồn — mảng **chứa** cặp tiêu đề/nội dung, tìm qua mẫu chứ không qua chỉ số. */
+function entryOf(params) {
+  const path = pathTo(SPEC.specimen, SPEC.marks.title);
+  assert.ok(path && path.length >= 2, 'mẫu shape không còn chỗ giữ chỗ tiêu đề');
+  return nodeAt(params, path.slice(0, -2));
+}
+
+const swap = (text, mark, value) => text.split(JSON.stringify(mark)).join(JSON.stringify(value));
+
+test('shape — mẫu `params` giữ đủ ba chỗ giữ chỗ, mỗi cái đúng MỘT lần', () => {
+  // Test này canh chính **cái mẫu**, không canh code. Khi owner dán capture đè lên
+  // `TEXT_PARAMS_SPECIMEN`, ba chuỗi `AAA-…`/`BBB-…`/`CCC-…` phải còn nguyên trong đó: dán một
+  // capture còn nguyên giá trị thật thì `buildParams` gửi đi tiêu đề của capture cho MỌI Nguồn,
+  // request vẫn thành công, và tên Nguồn sai là vĩnh viễn (ADR 0010).
+  const flat = JSON.stringify(SPEC.specimen);
+  for (const [role, mark] of Object.entries(SPEC.marks)) {
+    const hits = flat.split(JSON.stringify(mark)).length - 1;
+    assert.equal(hits, 1, `${role}: chỗ giữ chỗ \`${mark}\` xuất hiện ${hits} lần trong mẫu`);
+  }
+});
+
+test('shape — `buildParams` chỉ thay ba chỗ giữ chỗ, không đụng phần tử nào khác của mẫu', () => {
+  // Phát biểu đầy đủ nhất về shape, và nó đối chiếu với **mẫu** chứ không với một hằng số chép
+  // tay. Một `fillMarks` đánh rơi phần tử, nhân đôi một mảng con, hay bỏ sót ô thứ ba đều chết ở
+  // đây mà không phải viết lại shape lần thứ hai trong test.
+  let expected = JSON.stringify(SPEC.specimen);
+  expected = swap(expected, SPEC.marks.title, TITLE);
+  expected = swap(expected, SPEC.marks.content, BODY);
+  expected = swap(expected, SPEC.marks.notebookId, NB);
+  assert.deepEqual(paramsOf(build()), JSON.parse(expected));
+});
+
+test('shape — tiêu đề và nội dung vào ĐÚNG ô mà mẫu dành cho chúng', () => {
+  // Cặp correspondence-critical của WORKSPACE_PROTOCOL, bản nặng nhất trong repo: hoán vị
+  // **không** hỏng đóng. Request vẫn ra một Nguồn "thành công", chỉ là nó mang tên bằng cả
+  // transcript — không sửa được, không xoá được, ăn một suất quota 50 (ADR 0010).
+  //
+  // Chiều được phát biểu đúng **một** lần, trong mẫu, bằng hai chuỗi tự gọi tên mình; test đọc
+  // vị trí của từng chuỗi rồi đòi `buildParams` đặt đúng đối số vào đó.
+  const params = paramsOf(build());
+  assert.notEqual(TITLE, BODY, 'hai chuỗi giống nhau thì phép hoán vị không đo được gì');
+  assert.equal(atMark(params, SPEC.marks.title), TITLE, 'ô tiêu đề đang mang THÂN Nguồn');
+  assert.equal(atMark(params, SPEC.marks.content), BODY, 'ô nội dung đang mang TÊN Nguồn');
+});
+
+test('shape — chỉ dấu loại nguồn văn bản còn nguyên, và phần tử cuối KHÔNG phải nó', () => {
+  // Hai hằng số cùng đơn vị, hai vai (WORKSPACE_PROTOCOL): `2` nói "nguồn này là văn bản" ở slot
+  // 3, `1` là phần tử cuối spec sau đợt di trú 8→11. Hoán vị chúng vẫn ra một spec 11 phần tử
+  // parse được, và server thì nhận một loại nguồn khác.
+  const entry = entryOf(paramsOf(build()));
+  assert.notEqual(SPEC.kindText, SPEC.tail, 'hai hằng số bằng nhau thì hoán vị không đo được gì');
+  assert.notEqual(entry.indexOf(SPEC.kindText), -1,
+    `spec không còn chỉ dấu loại nguồn nào: ${JSON.stringify(entry)}`);
+  assert.equal(entry.at(-1), SPEC.tail, `phần tử cuối của spec: ${JSON.stringify(entry)}`);
+  assert.notEqual(entry.at(-1), SPEC.kindText, 'chỉ dấu loại nguồn trôi xuống đuôi spec');
+});
+
+test('shape — mỗi lượt dựng một mảng MỚI, mẫu thì đông cứng đến tận đáy', () => {
+  // `buildParams` trả về chính mẫu (hay một mảng con của mẫu) thì lượt đẩy sau sửa được payload
+  // của lượt trước — và vì mẫu `Object.freeze`, lỗi ấy lộ ra ở một chỗ chẳng liên quan.
+  const a = R.buildParams({ notebookId: NB, source: SOURCE });
+  const b = R.buildParams({ notebookId: NB, source: { ...SOURCE, name: 'Ten Nguon khac' } });
+  assert.equal(Object.isFrozen(a), false, 'params trả về phải là mảng mới, không phải mẫu');
+  assert.notEqual(atMark(a, SPEC.marks.title), atMark(b, SPEC.marks.title));
+  assert.equal(Object.isFrozen(entryOf(SPEC.specimen)), true, 'mẫu chỉ đông cứng lớp ngoài');
 });
 
 // =========================================================== một lượt đẩy
@@ -369,6 +457,32 @@ test('đẩy — `notReady` nói rõ Nguồn ĐÃ được tạo, vì engine s�
   assert.match(error.message, /ĐÃ được tạo/);
   assert.match(error.message, /chạy lại/);
   assert.equal(error.fallback, false, 'Nguồn đã tồn tại thì đường lui chỉ dựng thêm bản thứ hai');
+});
+
+test('đẩy — CHỖ DỰA CỦA TICKET 020: shape sai thì hỏng ĐÓNG, và đó là lý do được sửa mù', async () => {
+  // Ticket 020 đổi shape `params` **mà không có capture nào** — không ai trong phòng đăng nhập
+  // được NotebookLM. Cả biện hộ của lần sửa ấy nằm ở đúng một chuỗi sự kiện: shape sai → server
+  // trả `INVALID_ARGUMENT` → `canFallBackToDom` cho hạng ấy rơi về đường DOM → chưa ghi gì,
+  // không mất gì. Ô duy nhất mất dữ liệu trong bảng cân của ticket là *giữ nguyên* cặp cũ, vì nó
+  // **thành công** với một Nguồn mang tên bằng cả transcript.
+  //
+  // Nên đây không phải một dòng trong bảng hạng lỗi — nó là **tiền đề**. Đổi
+  // `canFallBackToDom(INVALID_ARGUMENT)` thành `false`, hay để bộ đọc coi một phản hồi từ chối
+  // là `ok`, thì lập luận của ticket 020 sụp và lần đổi shape kia thành đổi mù không lưới.
+  const drift = wrap(wrbFrame(null, [R.GRPC_CODE.INVALID_ARGUMENT, 'shape đã trôi', []]));
+  const { impl, calls } = fakeFetch([{ status: 200, text: drift }]);
+  const { read } = tokenReader([TOKENS]);
+  const error = await push({ fetchImpl: impl, readTokens: read }).then(() => null, (e) => e);
+
+  assert.ok(error, 'một phản hồi từ chối mà không ném là ghi vào Sổ một lượt thành công không có thật');
+  assert.equal(error.outcome.outcome, 'rejected');
+  assert.equal(error.outcome.code, R.GRPC_CODE.INVALID_ARGUMENT);
+  assert.equal(error.fallback, true, 'INVALID_ARGUMENT không rơi về đường lui = ticket 020 mất lưới');
+  assert.equal(R.canFallBackToDom(error.outcome), true);
+
+  // Và lượt bị từ chối ấy mang **đúng** shape `buildParams` đang dựng — nếu không thì phép đo
+  // trên nói về một payload khác với payload sẽ đi trên dây.
+  assert.deepEqual(paramsOf({ body: calls[0].init.body }), R.buildParams({ notebookId: NB, source: SOURCE }));
 });
 
 test('đẩy — 429 KHÔNG thử lại: một lượt có thể đã ghi rồi, gửi lại là dựng Nguồn thứ hai', async () => {
@@ -453,7 +567,7 @@ test('module — chỉ có đường text, không có biến thể URL nào', ()
   // **luôn để lại ghost row ăn quota** (50 nguồn/notebook, xoá tay trong NotebookLM). Khoá bề
   // mặt module lại để việc thêm một biến thể URL không lọt vào bằng một lần sửa vô ý.
   assert.deepEqual(Object.keys(R).sort(), [
-    'GRPC_CODE', 'MAX_BODY_CHARS', 'RPC_ID', 'SOURCE_STATUS_READY', 'WIZ_KEYS',
+    'GRPC_CODE', 'MAX_BODY_CHARS', 'RPC_ID', 'SOURCE_STATUS_READY', 'TEXT_PARAMS', 'WIZ_KEYS',
     'buildParams', 'buildRequest', 'canFallBackToDom', 'parseFrames', 'parseWizGlobalData',
     'pushTextSource', 'readResponse', 'tooLargeForRpc',
   ]);
