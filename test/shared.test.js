@@ -514,6 +514,36 @@ test('normalizeDocUrl — cùng một trang chỉ ra một định danh, dù lin
     S.normalizeDocUrl('https://docs.example.com/api', BASE));
 });
 
+// ------------------------------------------------- docPageId / sameDocPage (ticket 008)
+
+test('docPageId — cùng một trang viết kiểu nào cũng ra một định danh, dùng chung với normalizeDocUrl', () => {
+  // Dùng chung `docIdentity` với `normalizeDocUrl` là ràng buộc, không phải tiện tay: khoá khử
+  // trùng lặp của hàng đợi và phép so của nấc 2 mà lệch nhau thì không có triệu chứng nào.
+  assert.equal(S.docPageId('https://DOCS.example.com/api/config/'), 'https://docs.example.com/api/config');
+  assert.equal(S.docPageId('https://docs.example.com/api/config'), S.normalizeDocUrl('/api/config/', BASE));
+  assert.equal(S.docPageId('https://docs.example.com/#/guide/intro/'), 'https://docs.example.com/#/guide/intro');
+});
+
+test('docPageId — neo trong trang không tách thành trang khác, hash-route thì có', () => {
+  assert.equal(S.docPageId('https://docs.example.com/guide/intro#cai-dat'), 'https://docs.example.com/guide/intro');
+  assert.notEqual(S.docPageId('https://docs.example.com/#/a'), S.docPageId('https://docs.example.com/#/b'));
+});
+
+test('docPageId — thứ không phải URL http(s) trả chuỗi rỗng, không trả một khoá trông hợp lệ', () => {
+  for (const bad of ['', null, 'khong-phai-url', 'mailto:ai@example.com', 'javascript:void(0)']) {
+    assert.equal(S.docPageId(bad), '', String(bad));
+  }
+});
+
+test('sameDocPage — chỉ bỏ qua http↔https, mọi khác biệt còn lại vẫn là hai trang', () => {
+  assert.equal(S.sameDocPage('http://d.local/guide/', 'https://d.local/guide'), true, 'nâng cấp giao thức');
+  assert.equal(S.sameDocPage('https://d.local/#/a', 'https://d.local/#/a/'), true);
+  assert.equal(S.sameDocPage('https://d.local/#/a', 'https://d.local/#/b'), false, 'hash-route khác trang');
+  assert.equal(S.sameDocPage('https://d.local/a', 'https://other.local/a'), false, 'khác host');
+  assert.equal(S.sameDocPage('http://localhost:3000/a', 'http://localhost:8080/a'), false, 'khác port');
+  assert.equal(S.sameDocPage('https://d.local/a', ''), false, 'thiếu một vế thì không phải "giống nhau"');
+});
+
 test('normalizeDocUrl — docs chạy trên http thì giữ http, không nâng thành https', () => {
   // Đổi scheme theo trang đang mở, không ép https: docs nội bộ chỉ có http sẽ fetch hỏng.
   const httpBase = 'http://docs.noi-bo.local/guide/intro';

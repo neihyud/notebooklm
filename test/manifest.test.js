@@ -187,11 +187,26 @@ test('manifest — phím tắt Alt+Shift+Y gọi đúng lệnh mà service worke
 
 // ------------------------------------------------ selector không rời file của lớp mình
 
+/**
+ * File được phép mang selector: `selectors.js` **của một lớp**, tức `src/<lớp>/selectors.js`.
+ *
+ * Suy ra từ cây thư mục chứ không liệt kê tay: một lớp mới (`src/docs/` ở ticket 008) mà phải
+ * sửa danh sách ở đây thì danh sách ấy sẽ được sửa bằng cách *thêm bất cứ file nào đang vướng*,
+ * và quy tắc chết lặng. Ràng buộc thật là "mỗi lớp một file, đúng tên đó".
+ */
+const SELECTOR_HOME = /^src\/[^/]+\/selectors\.js$/;
+
 test('manifest — không file nào ngoài selectors.js của lớp mình mang selector CSS', () => {
   const SELECTOR_SHAPED = /ytd-[\w-]+|ytp-[\w-]+|mat-[\w-]+|mdc-[\w-]+|\[(?:class|id|role|type|visibility|target-id|aria-[\w-]+|data-[\w-]+)[\^*$~|]?=/g;
-  const allowed = new Set(['src/youtube/selectors.js', 'src/notebooklm/selectors.js']);
+  const homes = EXTENSION_JS.filter((p) => SELECTOR_HOME.test(p));
+  assert.ok(homes.length >= 2, `chỉ thấy ${homes.length} file selectors.js — biểu thức quét hỏng, không phải cây sạch`);
+  // Một chỗ được miễn trừ mà không chứa gì là một miễn trừ không ai biết đã thừa.
+  for (const home of homes) {
+    assert.ok((read(home).match(SELECTOR_SHAPED) || []).length > 0, `${home} được miễn trừ mà không mang selector nào`);
+  }
+
   const offenders = [];
-  for (const path of EXTENSION_JS.filter((p) => !allowed.has(p))) {
+  for (const path of EXTENSION_JS.filter((p) => !SELECTOR_HOME.test(p))) {
     const code = read(path)
       .split('\n')
       .filter((line) => {

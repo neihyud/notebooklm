@@ -13,6 +13,12 @@ importScripts(
   '/src/common/shared.js',
   '/src/common/messages.js',
   '/src/youtube/srt.js',
+  // Lớp tài liệu (ticket 008). Ba file này là hàm thuần trên một cây node được truyền tới, nên
+  // chúng nạp được ở đây dù service worker không có `document`: chỗ *gọi* chúng là hàng đợi tài
+  // liệu, mà hàng đợi thì sống ở đây. Cây node đến từ tab qua `chrome.scripting` — ticket 010.
+  '/src/docs/selectors.js',
+  '/src/docs/markdown.js',
+  '/src/docs/extract.js',
   '/src/background/queue-engine.js',
   '/src/background/importer.js',
 );

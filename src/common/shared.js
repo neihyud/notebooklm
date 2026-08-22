@@ -406,6 +406,44 @@
   }
 
   /**
+   * Định danh trang của một URL đứng **một mình** — không có trang gốc nào để giải tương đối.
+   *
+   * `normalizeDocUrl` trả `null` cho cả ba chuyện khác hẳn nhau (khác host, giao thức lạ, trỏ
+   * về chính trang gốc), nên nó không dùng làm phép so "hai URL này có cùng một trang không".
+   * Đây là hàm cho việc đó, và nó dùng chung đúng `docIdentity` ở trên: hai cách viết của cùng
+   * một trang phải ra cùng một chuỗi ở *mọi* chỗ trong repo, nếu không khoá khử trùng lặp và
+   * phép so của nấc 2 lệch nhau — mà lệch thì không có triệu chứng nào.
+   */
+  function docPageId(input) {
+    const raw = collapse(input);
+    if (!raw) return '';
+    let url;
+    try {
+      url = new URL(raw);
+    } catch {
+      return '';
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return docIdentity(url, url.protocol);
+  }
+
+  /**
+   * Hai URL có trỏ về **cùng một trang tài liệu** không.
+   *
+   * Bỏ qua `http` ↔ `https`, và chỉ chỗ này bỏ qua: nâng cấp giao thức là chuyện máy chủ tự
+   * làm giữa lúc điều hướng, nên coi nó là hai trang khác nhau sẽ từ chối oan mọi trang docs
+   * chạy http. Khác host, khác đường dẫn, khác hash-route thì vẫn là hai trang — đó là thứ
+   * phép so này sinh ra để chốt: nội dung đọc được phải thuộc về đúng URL đã yêu cầu.
+   */
+  function sameDocPage(a, b) {
+    const left = docPageId(a);
+    const right = docPageId(b);
+    if (!left || !right) return false;
+    const bare = (id) => id.replace(/^https?:/, '');
+    return bare(left) === bare(right);
+  }
+
+  /**
    * Chuẩn hoá một link trong trang tài liệu về định danh trang, hoặc `null` nếu không phải
    * link điều hướng: khác host, giao thức lạ, hoặc neo trỏ về chính trang đang mở (mục lục
    * "On this page" toàn loại này — import vào là nhân bản trùng lặp).
@@ -472,6 +510,8 @@
     bundleName,
     estimateSources,
     ledgerKey,
+    docPageId,
+    sameDocPage,
     normalizeDocUrl,
     mergeSelectorOverrides,
   });
