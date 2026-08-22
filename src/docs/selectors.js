@@ -54,8 +54,29 @@
      * đúng hai thẻ này — không theo class, vì mỗi bộ dựng docs đặt tên một kiểu.
      */
     navList: ['ul', 'ol'],
-    /** Một mục của danh sách. Cấp cha–con của Bảng chọn là quan hệ `li` ⊃ `ul` ⊃ `li`. */
+    /**
+     * Một mục của danh sách. Cấp cha–con của Bảng chọn là quan hệ mục ⊃ mục — và **không** đòi
+     * `<ul>` nằm ngay dưới `<li>`: MkDocs Material chèn `<nav class="md-nav">` vào giữa, nên
+     * đọc theo "con trực tiếp" cho 0 nhánh con và cả sidebar 94 mục suy biến thành danh sách
+     * phẳng (ticket 012, quan sát D).
+     */
     navItem: ['li'],
+    /**
+     * Ranh giới mục ở những theme **không** dùng `<li>` — nấc `blocks` của `buildTree`.
+     *
+     * Đây là một **đường tắt theo tên theme**, cùng hạng với `mainBlock` ở trên và cùng cái giá:
+     * sai thì mất đường tắt, không mất nội dung (lượt chạy rơi về `flat` và vẫn giữ đủ link).
+     * Vì vậy danh sách này chỉ ghi thứ **đã đo trên trang thật**, không đoán thêm.
+     *
+     * VitePress: sidebar là `div`/`section` mang `VPSidebarItem`, còn `<li>` vẫn có mặt nhưng
+     * Vue nhét **cả cụm** mục con vào đúng một `<li>` (fragment `<!--[-->`), nên `<li>` không
+     * phải ranh giới mục. Chữ hoa trong `SidebarItem` là cố ý: selector thuộc tính phân biệt
+     * hoa–thường, nên nó **không** đụng `theme-doc-sidebar-item-*` của Docusaurus.
+     *
+     * Trang Cài đặt ghi đè được nhóm này như mọi nhóm khác — một theme lạ khai một dòng ở đây là
+     * đọc lại được cây của nó mà không phải sửa code.
+     */
+    navItemBlock: ['[class*="SidebarItem"]'],
     /**
      * Danh sách **lồng trong** danh sách: dấu hiệu "đây là một cây mục lục" chứ không phải một
      * hàng link ngang. Hàng link ở footer cũng là `<ul>`, nhưng nó phẳng.

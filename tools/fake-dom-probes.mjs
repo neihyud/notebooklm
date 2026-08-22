@@ -12,7 +12,7 @@
 // (`isArray`/`iter`/danh sách phương thức) chứ không bằng tên constructor: tên constructor thì
 // `FakeNodeList` ≠ `HTMLCollection` ở *mọi* phép thử, và tín hiệu thật chìm mất.
 
-import { FakeElement, el, input } from '../test/helpers/fake-dom.js';
+import { FakeElement, el, input, cmt } from '../test/helpers/fake-dom.js';
 
 /**
  * Mô tả một giá trị thành chuỗi so sánh được, giống hệt nhau ở cả hai cây khi hai bên **hành xử**
@@ -53,6 +53,9 @@ export function describe(value) {
 
     if (isFragment(v)) return `Fragment(mode=${v.mode === undefined ? '-' : String(v.mode)})`;
     if (isElement(v)) return elementLabel(v);
+    // Comment **trước** text: cả hai đều có `.data` và đều không có `tagName`, nên gộp chúng lại
+    // là một cây giả trả text ở chỗ trang thật trả comment vẫn in ra hai dòng giống hệt nhau.
+    if (v.nodeType === 8) return `#comment(${JSON.stringify(v.data)})`;
     if (typeof v.data === 'string' && v.tagName === undefined) return `#text(${JSON.stringify(v.data)})`;
 
     if (typeof v.length === 'number') {
@@ -89,6 +92,9 @@ export function describe(value) {
  */
 export function buildReal(spec, doc) {
   if (typeof spec === 'string') return spec;
+  // `{ cmt: '[' }` — comment node. Trang thật đầy loại này (marker fragment của Vue/React) và
+  // chúng **không có `tagName`**, nên mọi phép duyệt `childNodes` trong `src/` đi qua chúng.
+  if (spec.cmt !== undefined) return doc.createComment(String(spec.cmt));
   const node = doc.createElement(spec.t);
   for (const [name, value] of Object.entries(spec.a || {})) node.setAttribute(name, value);
   for (const child of spec.c || []) node.append(buildReal(child, doc));
@@ -98,6 +104,7 @@ export function buildReal(spec, doc) {
 /** Cùng bản mô tả, dựng trên cây giả. `input`/`textarea` thành `FakeInput`, đúng như DOM thật. */
 export function buildFake(spec) {
   if (typeof spec === 'string') return spec;
+  if (spec.cmt !== undefined) return cmt(String(spec.cmt));
   const tag = String(spec.t).toLowerCase();
   const node = tag === 'input' || tag === 'textarea' || tag === 'select'
     ? input(spec.t, spec.a || {})
@@ -146,6 +153,24 @@ export const PAGE = {
   ],
 };
 
+/**
+ * Một cụm fragment kiểu Vue SSR: `<!--[-->` … `<!--]-->` kẹp hai mục, lẫn một text node.
+ *
+ * Đây là hình dạng thật của sidebar VitePress, và nó là chỗ `ownLabel` của `src/docs/sidebar.js`
+ * đọc chữ **của riêng một mục** (ticket 018).
+ */
+export const FRAGMENT = {
+  t: 'li',
+  a: { id: 'frag' },
+  c: [
+    { cmt: '[' },
+    { t: 'div', a: { class: 'VPSidebarItem' }, c: ['Một'] },
+    ' giữa ',
+    { t: 'div', a: { class: 'VPSidebarItem' }, c: ['Hai'] },
+    { cmt: ']' },
+  ],
+};
+
 /** Cây phẳng ba con, không có text node — để phép thử về tập hợp đọc dễ. */
 export const TRIO = {
   t: 'div',
@@ -163,12 +188,12 @@ export const PROBES = [
   // ---------------------------------------------------------------- children
   {
     id: 'children/shape', group: 'children', fixture: PAGE,
-    why: 'sidebar.js:326 childrenMatching, picker.js:89/238, panel.js:281/348, playlist-bar.js:142',
+    why: 'sidebar.js:347 directItems, picker.js:89/238, panel.js:281/348, playlist-bar.js:142',
     body: (root) => root.children,
   },
   {
     id: 'children/excludes-text', group: 'children', fixture: PAGE,
-    why: 'sidebar.js:326 lọc con trực tiếp — text node lọt vào là .matches nổ',
+    why: 'sidebar.js:347 directItems lọc con trực tiếp — text node lọt vào là .matches nổ',
     body: (root) => [root.children.length, root.childNodes.length],
   },
   {
@@ -218,7 +243,7 @@ export const PROBES = [
   // ---------------------------------------------------------------- childNodes
   {
     id: 'childNodes/shape', group: 'childNodes', fixture: PAGE,
-    why: 'sidebar.js:331 ownLabel, markdown.js:186/284 inlineOf/blocksOf',
+    why: 'sidebar.js:371 ownLabel, markdown.js:186/284 inlineOf/blocksOf',
     body: (root) => root.childNodes,
   },
   {
@@ -241,7 +266,7 @@ export const PROBES = [
   },
   {
     id: 'childNodes/text-nodes', group: 'childNodes', fixture: PAGE,
-    why: 'sidebar.js:333 lấy child.textContent của mọi childNodes',
+    why: 'sidebar.js:376 lấy child.textContent của text node trong childNodes',
     body: (root) => [...root.childNodes].map((n) => (n.tagName ? n.tagName : `#text:${n.textContent}`)),
   },
 
@@ -283,7 +308,7 @@ export const PROBES = [
   // ---------------------------------------------------------------- querySelectorAll
   {
     id: 'qsa/shape', group: 'querySelectorAll', fixture: PAGE,
-    why: 'sidebar.js:160, extract.js, markdown.js, panel.js — 31 lượt gọi trong src',
+    why: 'sidebar.js:152, extract.js, markdown.js, panel.js — 31 lượt gọi trong src',
     body: (root) => root.querySelectorAll('li'),
   },
   {
@@ -380,12 +405,12 @@ export const PROBES = [
   // ---------------------------------------------------------------- matches / closest
   {
     id: 'matches/tag', group: 'matches', fixture: PAGE,
-    why: 'sidebar.js:319 isList, :326 childrenMatching, extract.js',
+    why: 'sidebar.js:351/378 directItems + ownLabel khớp selector trên con trực tiếp, extract.js',
     body: (root) => [root.matches('div'), root.matches('ul'), root.matches('*')],
   },
   {
     id: 'matches/descendant', group: 'matches', fixture: PAGE,
-    why: "nestedList 'ul ul' đi qua matches trong sidebar.js:319",
+    why: "nestedList 'ul ul' đi qua matches trong sidebar.js:196 hasNestedList",
     body: (root) => {
       const inner = root.querySelector('ul ul');
       return [inner.matches('ul ul'), inner.matches('div ul'), root.matches('div ul')];
@@ -402,7 +427,7 @@ export const PROBES = [
   },
   {
     id: 'closest/self', group: 'matches', fixture: PAGE,
-    why: 'sidebar.js:161 anchor.closest(sel.OWN_UI) — nếu không tính chính node thì Bảng chọn tự dò trúng mình',
+    why: 'sidebar.js:153 anchor.closest(sel.OWN_UI) — nếu không tính chính node thì Bảng chọn tự dò trúng mình',
     body: (root) => root.closest('div'),
   },
   {
@@ -423,7 +448,7 @@ export const PROBES = [
   // ---------------------------------------------------------------- textContent
   {
     id: 'text/nested', group: 'textContent', fixture: PAGE,
-    why: 'extract.js, sidebar.js:134 labelOf, automation.js:76/148 — 25 lượt trong src',
+    why: 'extract.js, sidebar.js:139 labelOf, automation.js:76/148 — 25 lượt trong src',
     body: (root) => root.textContent,
   },
   {
@@ -432,7 +457,7 @@ export const PROBES = [
   },
   {
     id: 'text/of-text-node', group: 'textContent', fixture: PAGE,
-    why: 'sidebar.js:333 parts.push(child.textContent) trên text node',
+    why: 'sidebar.js:376 parts.push(child.textContent) trên text node',
     body: (root) => root.childNodes[0].textContent,
   },
   {
@@ -444,7 +469,7 @@ export const PROBES = [
   // ---------------------------------------------------------------- attributes
   {
     id: 'attr/missing', group: 'attributes', fixture: TRIO,
-    why: "sidebar.js:162 linkKind(anchor.getAttribute('href')) — link không có href",
+    why: "sidebar.js:154 linkKind(anchor.getAttribute('href')) — link không có href",
     body: (root) => root.getAttribute('href'),
   },
   {
@@ -476,7 +501,7 @@ export const PROBES = [
   },
   {
     id: 'attr/tagName-case', group: 'attributes', fixture: PAGE,
-    why: 'sidebar.js:332 child.tagName, markdown.js:38 tagOf, automation.js:207',
+    why: 'sidebar.js:377 typeof child.matches, markdown.js:38 tagOf, automation.js:207',
     body: (root, ctx) => [root.tagName, ctx.doc.createElement('ytd-transcript-renderer').tagName],
   },
   {
@@ -832,10 +857,30 @@ export const PROBES = [
     },
   },
 
+  // ---------------------------------------------------------------- text node vs comment
+  {
+    id: 'nodes/nodeType', group: 'nodes', fixture: FRAGMENT,
+    why: 'sidebar.js ownLabel() lọc text node bằng nodeType === 3; thiếu nodeType ở cây giả thì '
+      + 'phép lọc chạy 0 vòng trong test và đủ vòng trên trang thật',
+    body: (root) => Array.from(root.childNodes).map((n) => n.nodeType),
+  },
+  {
+    id: 'nodes/comment-has-no-tagName', group: 'nodes', fixture: FRAGMENT,
+    why: 'phân biệt text node bằng `!tagName` gộp luôn comment: nhãn của một mục VitePress không '
+      + 'tên ra `"[ ]"` thay vì rỗng, nên nó không bị gộp và hiện lên Bảng chọn',
+    body: (root) => Array.from(root.childNodes)
+      .map((n) => `${typeof n.tagName}:${typeof n.matches}:${JSON.stringify(n.textContent)}`),
+  },
+  {
+    id: 'nodes/textContent-skips-comment', group: 'nodes', fixture: FRAGMENT,
+    why: 'labelOf()/ownLabel() đọc textContent; gộp cả ruột comment là cây giả trả nhiều chữ hơn '
+      + 'trang thật ở đúng chỗ Vue/React rải marker',
+    body: (root) => [root.textContent, root.childNodes.length, root.children.length],
+  },
   // ---------------------------------------------------------------- linh tinh
   {
     id: 'misc/getBoundingClientRect', group: 'misc', fixture: PAGE,
-    why: 'sidebar.js:178 narrowness — nhánh mặc định (không tiêm options.metrics) của điểm '
+    why: 'sidebar.js:179 narrowness — nhánh mặc định (không tiêm options.metrics) của điểm '
       + 'WEIGHT.column; thiếu ở cây giả nên nhánh ấy chưa test nào đi qua',
     body: (root) => {
       if (typeof root.getBoundingClientRect !== 'function') return 'không có getBoundingClientRect';
@@ -845,14 +890,14 @@ export const PROBES = [
   },
   {
     id: 'misc/contains', group: 'misc', fixture: PAGE,
-    accepted: 'sidebar.js:222 within() tự đi ngược parentElement; cùng lý do với attr/has — '
+    accepted: 'sidebar.js:226 within() tự đi ngược parentElement; cùng lý do với attr/has — '
       + 'phương thức vắng mặt là hỏng ồn ào',
-    why: 'sidebar.js:222 within() tự đi ngược parentElement thay vì gọi contains',
+    why: 'sidebar.js:226 within() tự đi ngược parentElement thay vì gọi contains',
     body: (root) => [typeof root.contains, typeof root.compareDocumentPosition],
   },
   {
     id: 'misc/parent-of-root', group: 'misc', fixture: PAGE,
-    why: 'sidebar.js:213/234/341 và extract.js:91 đều dừng vòng lặp bằng parentElement rỗng',
+    why: 'sidebar.js:217/238 và extract.js:91 đều dừng vòng lặp bằng parentElement rỗng',
     body: (root) => [root.parentElement, root.parentNode],
   },
   {

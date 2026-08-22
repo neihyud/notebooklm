@@ -16,15 +16,20 @@
 // cho cả ba chuyện khác hẳn nhau (khác host, giao thức lạ, trỏ về chính trang đang mở), nên
 // `linkKind` ở dưới phân biệt lại. Gộp ba chuyện ấy làm một là mất đúng dấu hiệu mạnh nhất.
 //
-// Hai chỗ mất dữ liệu **im lặng** mà file này canh — cả hai đều để Bảng chọn mở ra bình thường,
+// Ba chỗ mất dữ liệu **im lặng** mà file này canh — cả ba đều để Bảng chọn mở ra bình thường,
 // vẫn đầy link, chỉ thiếu:
 //
-//   - *Ngưỡng của đường `<ul>`.* VitePress dựng sidebar bằng `<div>` lồng nhau nhưng vẫn lẫn
-//     một `<ul>` nhỏ mấy link mạng xã hội. Ngưỡng kiểu "gom được ≥3 link là tin" đi theo đúng
-//     cái `<ul>` ấy và trả về một cây ba mục. Ngưỡng đúng là **tỉ lệ trên số link thật trong
-//     container** (`LIST_COVER_RATIO`), không phải một con số tuyệt đối.
-//   - *Sổ "đã nhận".* Mỗi lượt dựng cây có sổ **của riêng nó**. Dùng chung thì lượt `<ul>` nhận
-//     mất một phần link rồi lối xếp phẳng bỏ qua đúng những link đó vì sổ nói "nhận rồi".
+//   - *Ngưỡng của đường danh sách.* Một sidebar `<div>` lồng nhau vẫn lẫn một `<ul>` nhỏ mấy
+//     link mạng xã hội. Ngưỡng kiểu "gom được ≥3 link là tin" đi theo đúng cái `<ul>` ấy và trả
+//     về một cây ba mục. Ngưỡng đúng là **tỉ lệ trên số link thật trong container**
+//     (`LIST_COVER_RATIO`), không phải một con số tuyệt đối.
+//   - *Sổ "đã nhận".* Mỗi **nấc** dựng cây có sổ của riêng nó. Dùng chung thì nấc trước nhận mất
+//     một phần link rồi nấc sau bỏ qua đúng những link đó vì sổ nói "nhận rồi".
+//   - *Cấp cha–con đọc không ra.* Đây là chỗ mất dữ liệu khó thấy nhất, vì **không link nào
+//     biến mất**: cây phẳng vẫn đủ 94 mục. Thứ mất là đơn vị **Nhánh** của ADR 0005 — một nhánh
+//     40 trang thành 40 Nguồn thay vì một, và lượt import ấy chạy trót lọt từ đầu tới cuối, chỉ
+//     tiêu hết quota. Ticket 012 đo được đúng chuyện đó trên MkDocs Material (94 mục phẳng) và
+//     VitePress (17 mục phẳng); ticket 018 là chỗ sửa, và `buildTree` giờ có ba nấc.
 //
 // File này không chạm `chrome.*` và không chạm `document` toàn cục; bề ngang cột cũng là adapter
 // được tiêm, nên toàn bộ kiểm được bằng cây giả — `test/docs-sidebar.test.js`.
@@ -315,74 +320,117 @@
    */
   const newLedger = () => new Set();
 
-  const isList = (node, sel) => node.matches(sel.css('navList'));
+  /**
+   * Ranh giới của một mục ở nấc đang chạy — và đây là chỗ ticket 018 đổi.
+   *
+   * Nấc 1 chỉ tin `<li>`; nấc 2 tin thêm `navItemBlock`, tức những theme đánh dấu mục bằng một
+   * `<div>`/`<section>` mang tên riêng. Hai nấc chứ không phải một selector gộp là **có chủ ý**:
+   * gộp thì một tên class lạc trong sidebar Docusaurus cũng đổi được cách đọc của một trang đang
+   * chạy tốt, và `via` mất luôn khả năng nói ra *đã phải dùng tới đường tắt theme hay chưa*.
+   */
+  const itemSelector = (sel, withBlocks) => (withBlocks
+    ? `${sel.css('navItem')}, ${sel.css('navItemBlock')}`
+    : sel.css('navItem'));
 
   /**
-   * Con trực tiếp khớp một nhóm selector — `children` chứ không `querySelectorAll`.
+   * Mục con **trực tiếp** của một khối: đi xuống qua mọi lớp bọc *không phải mục*, và **dừng
+   * ngay** ở mục đầu tiên gặp trên mỗi nhánh.
    *
-   * `Array.from` là bắt buộc: `children` là một `HTMLCollection`, và nó **không có** phương
-   * thức nào của Array. Gọi thẳng `.filter` lên nó là một `TypeError` ở mỗi lượt dựng cây.
+   * Chỗ cũ (`childrenMatching(li, 'ul, ol')`) chỉ nhìn đúng một cấp phần tử, nên MkDocs Material
+   * — chèn `<nav class="md-nav">` giữa `<li>` và `<ul>` con — cho 0 nhánh con và cả sidebar 94
+   * mục suy biến thành một danh sách phẳng (ticket 012, quan sát D).
+   *
+   * "Dừng ngay ở mục đầu tiên" là ranh giới ticket 018 dặn giữ, và nó không phải một con số cấp:
+   * `querySelectorAll` mọi cấp thì trên một sidebar lồng ba cấp, **cháu thành con** và nhánh
+   * "Nâng cao" mất sạch mục con của nó trong khi Bảng chọn vẫn đầy mục.
    */
-  const childrenMatching = (node, selector) => Array.from(node.children).filter((child) => child.matches(selector));
-
-  /** Chữ của riêng một `<li>`: bỏ chữ của những danh sách con nằm trong nó. */
-  function ownLabel(node, sel) {
-    const parts = [];
-    for (const child of node.childNodes) {
-      if (child.tagName && isList(child, sel)) continue;
-      parts.push(child.textContent);
-    }
-    return S.collapse(parts.join(' '));
-  }
-
-  /** Danh sách ngoài cùng trong `container` — kể cả chính `container` nếu nó đã là một danh sách. */
-  function topLists(container, sel) {
-    const nested = (node) => {
-      for (let n = node.parentElement; n && n !== container; n = n.parentElement) {
-        if (isList(n, sel)) return true;
+  function directItems(node, selector) {
+    const out = [];
+    const walk = (parent) => {
+      for (const child of Array.from(parent.children)) {
+        if (child.matches(selector)) out.push(child);
+        else walk(child);
       }
-      return false;
     };
-    const out = isList(container, sel) ? [container] : [];
-    if (out.length > 0) return out;
-    for (const list of container.querySelectorAll(sel.css('navList'))) {
-      if (!nested(list)) out.push(list);
-    }
+    walk(node);
     return out;
   }
 
   /**
-   * Cây theo `ul/li`: mỗi `<li>` là một mục, danh sách lồng trong `<li>` là nhánh con của nó.
+   * Chữ của **riêng** một mục: bỏ cả nhánh dẫn tới mục con, và chỉ nhặt **text node**.
    *
-   * `<li>` không có link mà có nhánh con vẫn là một mục — nhiều theme dựng tên nhóm bằng một
-   * `<span>` không bấm được. Nó không import được một mình, nhưng tick nó là chọn cả nhánh, và
-   * đó chính là đơn vị người dùng chọn (`CONTEXT.md`, "Nhánh tài liệu").
+   * Bỏ cả **nhánh dẫn tới** mục con chứ không chỉ đúng cái mục con: MkDocs treo nhánh con dưới
+   * một `<nav>` mà `<nav>` ấy còn mang một `<label class="md-nav__title">` lặp lại tên nhóm —
+   * trừ đúng mục con thôi thì nhóm "Getting started" ra nhãn `"Getting started Getting started"`
+   * (đo trên squidfunk.github.io).
+   *
+   * `nodeType === 3` chứ không phải "không có `tagName`": **comment cũng không có `tagName`**, và
+   * `textContent` của nó là ruột comment. VitePress đánh dấu fragment của Vue bằng `<!--[-->` và
+   * `<!--]-->`, nên nhặt cả comment cho một nhóm không tên cái nhãn `"[ ]"` — vừa đủ khác rỗng để
+   * lọt qua phép gộp mục vô danh ở dưới, và người dùng thấy một mục tên `[ ]` trên Bảng chọn.
    */
-  function collectFromLists(container, links, seen, options) {
+  function ownLabel(node, kids) {
+    const parts = [];
+    const walk = (parent) => {
+      for (const child of Array.from(parent.childNodes)) {
+        if (child.nodeType === 3) { parts.push(child.textContent); continue; }
+        // Không phải element thì không có gì để đi xuống — và **comment** rơi đúng vào đây.
+        if (child.nodeType !== 1) continue;
+        // Một điều kiện, không ba. `kids` đã là mục **đầu tiên** trên mỗi nhánh, nên "nhánh này
+        // dẫn tới một mục con" bao trọn cả "chính nó là mục con" (`within(kid, kid)`) lẫn "nó là
+        // cái `<ul>` bọc mục con". Hai vế kia từng có mặt và **không đổi kết quả ở chỗ nào** —
+        // gỡ từng vế, suite vẫn xanh 771/771 và cả bốn bộ tạo thật vẫn đúng.
+        if (kids.some((kid) => within(kid, child))) continue;
+        walk(child);
+      }
+    };
+    walk(node);
+    return S.collapse(parts.join(' '));
+  }
+
+  /**
+   * Cây theo **mục**: mỗi mục là một node, mục lồng trong mục là nhánh con của nó.
+   *
+   * Mục không có link mà có nhánh con vẫn là một mục — nhiều theme dựng tên nhóm bằng một
+   * `<span>`, `<label>` hay `<h2>` không bấm được. Nó không import được một mình, nhưng tick nó
+   * là chọn cả nhánh, và đó chính là đơn vị người dùng chọn (`CONTEXT.md`, "Nhánh tài liệu").
+   */
+  function collectFromItems(container, links, seen, options, withBlocks) {
     const sel = selectorsOf(options);
+    const selector = itemSelector(sel, Boolean(withBlocks));
     const byAnchor = new Map(links.map((record) => [record.anchor, record]));
     const taken = [];
     let next = 0;
 
-    const itemsOf = (list, depth) => {
+    const itemsOf = (node, depth) => {
       const nodes = [];
-      for (const li of childrenMatching(list, sel.css('navItem'))) {
-        const sublists = childrenMatching(li, sel.css('navList'));
-        // Link của **chính mục này**: `<a>` đầu tiên không nằm trong một danh sách con — nếu
-        // không, một nhóm không bấm được sẽ mượn link của mục con đầu tiên và hai mục cùng trỏ
-        // một trang.
-        const anchor = Array.from(li.querySelectorAll(sel.css('link')))
-          .find((a) => byAnchor.has(a) && !seen.has(a) && !sublists.some((sub) => within(a, sub)));
+      for (const item of directItems(node, selector)) {
+        const kids = directItems(item, selector);
+        // Link của **chính mục này**: `<a>` đầu tiên không nằm trong một mục con — nếu không,
+        // một nhóm không bấm được sẽ mượn link của mục con đầu tiên và hai mục cùng trỏ một trang.
+        const anchor = Array.from(item.querySelectorAll(sel.css('link')))
+          .find((a) => byAnchor.has(a) && !seen.has(a) && !kids.some((kid) => within(a, kid)));
         const record = anchor ? byAnchor.get(anchor) : null;
+        const label = record ? record.label : ownLabel(item, kids);
+
+        // Lớp bọc **không tên và không link** không phải một Nhánh: Vue dựng cả cụm mục con của
+        // VitePress vào đúng một `<li>` trống, và giữ nó lại là chen một mục trắng vào giữa cây
+        // — rồi chính nó thành Nhánh của mọi trang bên dưới, nên Nguồn gộp mang tên rỗng, và tên
+        // Nguồn thì vĩnh viễn (ADR 0010). Nhánh con của nó lên thẳng chỗ của nó, **giữ nguyên
+        // `depth`**.
+        if (!record && !label) {
+          nodes.push(...itemsOf(item, depth));
+          continue;
+        }
         if (record) {
           seen.add(anchor);
           taken.push(record);
         }
-        const children = sublists.flatMap((sub) => itemsOf(sub, depth + 1));
+        const children = itemsOf(item, depth + 1);
         if (!record && children.length === 0) continue;
         nodes.push({
           id: `n${next++}`,
-          label: record ? record.label : ownLabel(li, sel),
+          label,
           url: record ? record.url : '',
           depth,
           children,
@@ -391,8 +439,7 @@
       return nodes;
     };
 
-    const nodes = topLists(container, sel).flatMap((list) => itemsOf(list, 0));
-    return { nodes, taken };
+    return { nodes: itemsOf(container, 0), taken };
   }
 
   /** Lối xếp phẳng: mỗi link một mục, đúng thứ tự tài liệu, không cấp cha–con. */
@@ -409,21 +456,40 @@
   }
 
   /**
-   * Cây mục lục của một container: đường `<ul>` trước, xếp phẳng làm lối lui.
+   * Cây mục lục của một container: ba nấc, và `via` nói ra nấc nào đã trả lời.
+   *
+   *   `lists`  — mục là `<li>`. Docusaurus, Sphinx + RTD, và (từ ticket 018) MkDocs Material,
+   *              vì `directItems` đi xuyên được lớp `<nav>` chen giữa `<li>` và `<ul>` con.
+   *   `blocks` — mục mang tên theme (`navItemBlock`). VitePress: `<li>` có mặt nhưng chỉ là một
+   *              fragment của Vue, ranh giới mục thật là `div.VPSidebarItem`.
+   *   `flat`   — không đọc ra cấp cha–con. **Kết quả hợp lệ**, không phải trạng thái lỗi: cả tập
+   *              link vẫn vào Bảng chọn, chỉ là không có nhánh để tick.
+   *
+   * Bốn nhãn (kể cả `none` của `readSidebar`) đều cho một Bảng chọn mở được, nên chúng là một
+   * **cặp correspondence-critical**: hoán vị hai nhãn không làm hỏng lần chạy nào. Cái phải canh
+   * là *nhãn nào ứng với hình dạng sidebar nào* — `test/docs-sidebar.test.js`, bảng `VIA_TABLE`.
+   *
+   * Thứ tự hai nấc đầu cũng là một hoán vị im lặng: đọc `blocks` trước thì Docusaurus vẫn dựng
+   * được cây (selector là tập cha), chỉ là nhãn nói sai đường đã đi và một tên class lạc đủ sức
+   * đổi cách đọc của một trang đang chạy tốt.
    *
    * Ngưỡng là **tỉ lệ trên số link thật trong container**, không phải một con số tuyệt đối. Một
    * ngưỡng tuyệt đối kiểu "≥3 link là tin" đi theo cái `<ul>` mạng xã hội lẫn trong sidebar
-   * `<div>` của VitePress và trả về một cây ba mục, trong khi 12 trang còn lại biến mất — bảng
-   * vẫn mở, vẫn có link, không dòng nào báo.
+   * `<div>` và trả về một cây ba mục, trong khi 12 trang còn lại biến mất — bảng vẫn mở, vẫn có
+   * link, không dòng nào báo.
    */
   function buildTree(container, pageUrl, options) {
     const links = navLinks(container, pageUrl, options);
     const total = links.length;
-    // Mỗi lượt một sổ. Đây là cả nội dung của ràng buộc, và nó nằm gọn trong hai dòng này.
-    const lists = collectFromLists(container, links, newLedger(), options);
-    if (total > 0 && lists.taken.length >= total * LIST_COVER_RATIO) {
-      return { nodes: lists.nodes, via: 'lists', taken: lists.taken.length, total };
-    }
+    const enough = (tree) => total > 0 && tree.taken.length >= total * LIST_COVER_RATIO;
+
+    // Mỗi nấc một sổ. Đây là cả nội dung của ràng buộc, và nó nằm gọn trong ba lời gọi này.
+    const lists = collectFromItems(container, links, newLedger(), options, false);
+    if (enough(lists)) return { nodes: lists.nodes, via: 'lists', taken: lists.taken.length, total };
+
+    const blocks = collectFromItems(container, links, newLedger(), options, true);
+    if (enough(blocks)) return { nodes: blocks.nodes, via: 'blocks', taken: blocks.taken.length, total };
+
     const flat = collectFlat(links, newLedger());
     return { nodes: flat.nodes, via: 'flat', taken: flat.taken.length, total };
   }
@@ -549,7 +615,8 @@
     depthOf,
     findSidebar,
     newLedger,
-    collectFromLists,
+    directItems,
+    collectFromItems,
     collectFlat,
     buildTree,
     flatten,

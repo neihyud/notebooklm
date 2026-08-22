@@ -14,7 +14,7 @@
 //
 //   node tools/audit-fake-dom.mjs
 //
-// Bảy ràng buộc mà cây giả phải trung thực, nếu không nó *giấu* lỗi thay vì lộ ra:
+// Tám ràng buộc mà cây giả phải trung thực, nếu không nó *giấu* lỗi thay vì lộ ra:
 //
 //   1. `querySelectorAll` duyệt **tiền thứ tự** đúng như DOM thật — bẫy "wrapper luôn đứng
 //      trước `<button>` thật" chỉ tồn tại nhờ thứ tự đó.
@@ -34,6 +34,11 @@
 //      cây giả dễ tính ở đây là chỗ để `{type: 'click'}` sống sót tới tận trang thật.
 //   7. Nút form đang `disabled` **không** phát click khi gọi `.click()` — đó là toàn bộ tác dụng
 //      của việc tắt một cái nút, và `picker.js`/`playlist-bar.js` tắt nút thật.
+//   8. `childNodes` có **cả comment**, và comment mang `nodeType === 8` chứ không mang `tagName`
+//      — trang thật đầy marker fragment của Vue (`<!--[-->`) và React (`<!--$-->`). Một cây giả
+//      không có chúng cho `src/` một cây sạch hơn trang thật: `ownLabel` của `src/docs/sidebar.js`
+//      phân biệt text node bằng `!tagName` chạy đúng ở đây và gộp `"[ ]"` vào nhãn trên
+//      vitepress.dev (ticket 018). Đối lại, `textContent` **bỏ** comment, đúng DOM Standard §4.4.
 
 /** Tách selector thành các nhánh (phân tách bởi `,`), mỗi nhánh là dãy compound (tổ tiên → node). */
 function parseSelector(selector) {
@@ -276,6 +281,13 @@ function siblingOf(node, step, onlyElements) {
 }
 
 class FakeText {
+  /**
+   * `nodeType` là **property**, và nó vắng mặt ở đây tới ticket 018 — đúng hạng lỗi im lặng mà
+   * `WORKSPACE_PROTOCOL.md` v8 gọi tên: `child.nodeType === 3` trả `false` cho một text node
+   * thật, nên code lọc theo nó chạy 0 vòng trong test và đủ vòng trên trang thật.
+   */
+  nodeType = 3;
+
   constructor(data) {
     this.data = String(data);
     this.parentNode = null;
@@ -307,6 +319,52 @@ class FakeText {
 }
 
 /**
+ * Comment node — có mặt vì **trang thật đầy comment và chúng không có `tagName`**.
+ *
+ * Vue SSR đánh dấu ranh giới fragment bằng `<!--[-->` / `<!--]-->` (VitePress dựng cả cụm mục
+ * sidebar như thế), React 18 dùng `<!--$-->`. Một cây giả không có comment thì mọi phép duyệt
+ * `childNodes` trong `src/` chạy trên một cây **sạch hơn trang thật**, và mọi lỗi kiểu "gộp
+ * nhầm ruột comment vào chữ" chỉ lộ ra ở Chrome. Đã lộ đúng một lần: `ownLabel` của
+ * `src/docs/sidebar.js` cho nhóm không tên của VitePress cái nhãn `"[ ]"` (ticket 018).
+ *
+ * `nodeType = 8` và **không** có `tagName`/`matches` — đúng hình dạng của `Comment` thật, nên
+ * code phân biệt bằng `nodeType` mới đi đúng nhánh còn code phân biệt bằng `!tagName` thì hỏng
+ * ở đây y như trên trang thật.
+ */
+class FakeComment {
+  nodeType = 8;
+
+  constructor(data) {
+    this.data = String(data);
+    this.parentNode = null;
+  }
+
+  get parentElement() {
+    return this.parentNode instanceof FakeElement ? this.parentNode : null;
+  }
+
+  get textContent() {
+    return this.data;
+  }
+
+  get nextSibling() {
+    return siblingOf(this, 1, false);
+  }
+
+  get previousSibling() {
+    return siblingOf(this, -1, false);
+  }
+
+  cloneNode() {
+    return new FakeComment(this.data);
+  }
+
+  remove() {
+    if (this.parentNode) this.parentNode.removeChildNode(this);
+  }
+}
+
+/**
  * Phần chung của `Element` và `ShadowRoot` — đúng những gì mixin `ParentNode` của DOM cho cả hai:
  * `children`, `childNodes`, `append`, `querySelector(All)`, `textContent`.
  *
@@ -329,8 +387,13 @@ class FakeParent {
     return liveList(() => this.#kids.filter((n) => n instanceof FakeElement), HTML_COLLECTION_API, 'HTMLCollection');
   }
 
+  /**
+   * `textContent` thật **bỏ comment** ("the concatenation of the textContent of every child node,
+   * excluding comments and processing instructions" — DOM Standard §4.4). Gộp cả comment vào là
+   * cây giả trả nhiều chữ hơn trang thật ở đúng chỗ Vue/React rải marker.
+   */
   get textContent() {
-    return this.#kids.map((n) => n.textContent).join('');
+    return this.#kids.filter((n) => n.nodeType !== 8).map((n) => n.textContent).join('');
   }
 
   /**
@@ -643,6 +706,9 @@ export function el(tagName, attributes = {}, children = []) {
   for (const child of children) node.append(child);
   return node;
 }
+
+/** Comment node để rải vào fixture: `cmt('[')` là đúng thứ Vue SSR chèn quanh một fragment. */
+export const cmt = (data) => new FakeComment(data);
 
 /**
  * Event giả — nhưng là `Event` **thật** của Node, vì `dispatchEvent` của DOM thật từ chối mọi

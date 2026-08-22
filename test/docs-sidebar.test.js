@@ -4,20 +4,26 @@
 // Vì vậy mọi test dựng cây ở đây so **số mục dựng được với số link thật trong container**, chứ
 // không kiểm "có link":
 //
-//   1. Ngưỡng yếu kiểu "có ≥3 link là xong" cho đường `<ul>`: VitePress dựng sidebar bằng
-//      `<div>` lồng nhau nhưng vẫn lẫn một `<ul>` nhỏ (mấy link mạng xã hội), nên ngưỡng ấy
-//      trả về một cây ba mục và bỏ sót 12 trang — `dựng cây — VitePress…`.
-//   2. Dùng chung sổ "đã nhận" giữa hai lượt dựng: lượt `<ul>` nhận mất một phần link, rồi lối
+//   1. Ngưỡng yếu kiểu "có ≥3 link là xong" cho đường danh sách: một sidebar dựng bằng `<div>`
+//      lồng nhau vẫn lẫn một `<ul>` nhỏ (mấy link mạng xã hội), nên ngưỡng ấy trả về một cây ba
+//      mục và bỏ sót 12 trang — `dựng cây — `<div>` lồng nhau…`.
+//   2. Dùng chung sổ "đã nhận" giữa hai lượt dựng: nấc `<li>` nhận mất một phần link, rồi lối
 //      xếp phẳng mất sạch chính những link đó — `sổ "đã nhận" — …`.
 //
-// Ba cặp cùng kiểu mà file này canh, và test nào chết khi hoán vị:
+// Ticket 018 thêm chỗ thứ ba, và nó im lặng hơn cả hai chỗ trên vì **không link nào biến mất**:
+// cấp cha–con đọc không ra thì cây vẫn đủ 94 mục, chỉ là đơn vị **Nhánh** của ADR 0005 suy biến
+// và một nhánh 40 trang ra 40 Nguồn. Bảng `VIA_TABLE` ở cuối file canh chỗ đó.
+//
+// Bốn cặp cùng kiểu mà file này canh, và test nào chết khi hoán vị:
 //   - `NARROW_RATIO` ↔ `LIST_COVER_RATIO` (cùng là tỉ lệ link): `hai ngưỡng — …` (ba test).
 //   - trọng số `current` ↔ trọng số `links`: `chấm điểm — link trỏ về trang đang mở là dấu
 //     hiệu mạnh nhất…`.
 //   - link cùng site ↔ link khác host, và mục cha ↔ mục con: `link — …`, `nhánh — …`.
+//   - bốn nhãn `via` (`lists` ↔ `blocks` ↔ `flat` ↔ `none`), cùng kiểu chuỗi và cùng cho một
+//     Bảng chọn mở được: `via — mỗi nhãn ứng với ĐÚNG một hình dạng sidebar…`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { el } from './helpers/fake-dom.js';
+import { el, cmt } from './helpers/fake-dom.js';
 import '../src/common/shared.js';
 import '../src/docs/selectors.js';
 import '../src/docs/sidebar.js';
@@ -276,9 +282,10 @@ test('dựng cây — mục lục trong trang, link khác host và giao thức l
   assert.equal(urls.some((u) => u.includes('#yeu-cau')), false, 'neo trong trang là chính trang này');
 });
 
-test('dựng cây — VitePress: sidebar bằng `<div>` lồng nhau, lẫn một `<ul>` nhỏ', () => {
-  // Đúng cái bẫy mà ticket gọi tên. Ngưỡng yếu kiểu "gom được ≥3 link là tin" đi theo `ul` mạng
-  // xã hội và trả về một cây ba mục: Bảng chọn vẫn mở, vẫn có link, và 12 trang biến mất.
+test('dựng cây — `<div>` lồng nhau không tên theme, lẫn một `<ul>` nhỏ', () => {
+  // Đúng cái bẫy mà ticket 009 gọi tên. Ngưỡng yếu kiểu "gom được ≥3 link là tin" đi theo `ul`
+  // mạng xã hội và trả về một cây ba mục: Bảng chọn vẫn mở, vẫn có link, và 12 trang biến mất.
+  // `flat` ở đây là câu trả lời **đúng** — không tên theme nào đọc ra được cấp cha–con.
   const items = Array.from({ length: 12 }, (_, i) => el('div', { class: 'item' }, [link(`/guide/muc-${i}`, `Mục ${i}`)]));
   const page = el('body', {}, [
     el('div', { class: 'VPSidebar' }, [
@@ -314,15 +321,18 @@ test('sổ "đã nhận" — mỗi lượt dựng một sổ; dùng chung là m�
   assert.equal(links.length, 15);
 
   const shared = B.newLedger();
-  const viaLists = B.collectFromLists(container, links, shared, {});
+  const viaLists = B.collectFromItems(container, links, shared, {}, false);
+  const viaBlocks = B.collectFromItems(container, links, shared, {}, true);
   const viaFlat = B.collectFlat(links, shared);
-  assert.equal(viaLists.taken.length, 3, 'lượt `<ul>` phải nhận đúng 3 link mạng xã hội');
+  assert.equal(viaLists.taken.length, 3, 'lượt `<li>` phải nhận đúng 3 link mạng xã hội');
+  assert.equal(viaBlocks.taken.length, 0, 'dùng chung sổ thì nấc `blocks` mất sạch 3 link nấc trước đã nhận');
   assert.equal(viaFlat.taken.length, 12, 'dùng chung sổ thì lối xếp phẳng mất đúng 3 link kia');
 
   // Và đây là hành vi đúng: hai sổ riêng, lối xếp phẳng nhận trọn 15.
   const alone = B.collectFlat(links, B.newLedger());
   assert.equal(alone.taken.length, 15);
-  assert.equal(B.buildTree(container, PAGE, {}).taken, 15, 'buildTree phải cấp sổ riêng cho từng lượt');
+  assert.equal(B.collectFromItems(container, links, B.newLedger(), {}, true).taken.length, 3);
+  assert.equal(B.buildTree(container, PAGE, {}).taken, 15, 'buildTree phải cấp sổ riêng cho từng nấc');
 });
 
 // ------------------------------------------------------------ hai ngưỡng, hai vai
@@ -492,4 +502,290 @@ test('nhánh — mục chưa tick nằm giữa không cắt nhánh của mục c
 test('nhánh — không tick gì thì không mục nào có Nhánh', () => {
   assert.deepEqual(branchNames([]), []);
   assert.deepEqual([...B.branchesOf([], () => true)], []);
+});
+
+// ------------------------------------- bốn bộ tạo, bốn nhãn `via` (ticket 018)
+//
+// Ticket 012 đo trên trang thật: MkDocs Material ra **94 mục phẳng** và VitePress ra 17 mục
+// phẳng, nên đơn vị **Nhánh** của ADR 0005 suy biến — một nhánh 40 trang thành 40 Nguồn thay vì
+// một, và lần import ấy vẫn chạy trót lọt từ đầu tới cuối.
+//
+// Bốn fixture dưới đây là bốn **hình dạng HTML** khác hẳn nhau, không phải bốn lần dựng lại cùng
+// một hình. Đó là cả nội dung của phép canh: `via` có bốn nhãn hợp lệ (`lists`, `blocks`, `flat`,
+// `none`) và **cả bốn đều cho một Bảng chọn mở được**, nên một fixture một-bộ-tạo không phân
+// biệt được nhãn nào với nhãn nào (`WORKSPACE_PROTOCOL.md` v9, luật fixture một phần tử).
+
+/**
+ * MkDocs Material — `<nav class="md-nav">` chen **giữa** `<li>` và `<ul>` con.
+ *
+ * Ba cấp, và mục "đặc biệt" (nhóm **có** link của riêng nó, nằm sau một lớp `<div>` bọc) nằm ở
+ * **giữa** danh sách: nằm đầu thì `[0]` lọt, nằm cuối thì `at(-1)` lọt.
+ */
+function mkdocsPage() {
+  const li = (kids) => el('li', { class: 'md-nav__item' }, kids);
+  // `md-nav__title` **lặp lại tên nhóm** — đúng như trang thật, và nó nằm trong `<nav>` chứ không
+  // trong `<ul>`. Trừ chữ theo mục con thôi (không trừ cả nhánh dẫn tới mục con) là nhãn ra
+  // `"Bắt đầu Bắt đầu"`; đo được trên squidfunk.github.io: `"Getting started Getting started"`.
+  const sub = (title, kids) => el('nav', { class: 'md-nav' }, [
+    el('label', { class: 'md-nav__title' }, [el('span', { class: 'md-nav__icon' }, ['']), title]),
+    el('ul', { class: 'md-nav__list' }, kids),
+  ]);
+  const leaf = (href, text) => li([el('a', { class: 'md-nav__link', href }, [el('span', { class: 'md-ellipsis' }, [text])])]);
+  /** Mục lục **trong trang** mà MkDocs treo dưới mục đang mở: toàn neo `#`, không mục nào import được. */
+  const toc = () => el('nav', { class: 'md-nav md-nav--secondary' }, [
+    el('label', { class: 'md-nav__title' }, ['Trên trang này']),
+    el('ul', { class: 'md-nav__list' }, [
+      li([el('a', { class: 'md-nav__link', href: '#yeu-cau' }, ['Yêu cầu'])]),
+      li([el('a', { class: 'md-nav__link', href: '#buoc-1' }, ['Bước 1'])]),
+    ]),
+  ]);
+
+  return el('body', {}, [
+    el('div', { class: 'app' }, [
+      el('div', { class: 'md-sidebar' }, [
+        el('nav', { class: 'md-nav md-nav--primary' }, [
+          el('ul', { class: 'md-nav__list' }, [
+            leaf('/', 'Trang chủ'),
+            // Nhóm **không** bấm được: tên nằm ở `<label>`, nhánh con nằm sau một `<nav>`.
+            li([
+              el('input', { class: 'md-nav__toggle' }, []),
+              el('label', { class: 'md-nav__link' }, [el('span', { class: 'md-ellipsis' }, ['Bắt đầu'])]),
+              sub('Bắt đầu', [
+                li([
+                  el('a', { class: 'md-nav__link', href: '/guide/cai-dat' }, [el('span', {}, ['Cài đặt'])]),
+                  toc(),
+                ]),
+                // Nhóm **có** link của riêng nó — `<div class="md-nav__container">` bọc thêm một lớp.
+                li([
+                  el('div', { class: 'md-nav__container' }, [
+                    el('a', { class: 'md-nav__link', href: '/guide/nang-cao' }, [el('span', {}, ['Nâng cao'])]),
+                    el('label', { class: 'md-nav__link' }, [el('span', { class: 'md-nav__icon' }, [''])]),
+                  ]),
+                  sub('Nâng cao', [
+                    leaf('/guide/nang-cao/bo-nho-dem', 'Bộ nhớ đệm'),
+                    leaf('/guide/nang-cao/proxy', 'Proxy'),
+                  ]),
+                ]),
+                leaf('/guide/giay-phep', 'Giấy phép'),
+              ]),
+            ]),
+            leaf('/api/', 'Tham chiếu API'),
+          ]),
+        ]),
+      ]),
+      el('main', { class: 'content' }, [el('h1', {}, ['Cài đặt'])]),
+    ]),
+  ]);
+}
+
+const MKDOCS_METRICS = metrics({ '.app': 1200, '.content': 900, '.md-sidebar': 240, 'nav': 240, 'ul': 240, 'li': 240, 'div': 240 });
+
+/**
+ * VitePress — mục là `div.VPSidebarItem`, và Vue dựng **cả cụm** mục con vào đúng **một** `<li>`
+ * (fragment `<!--[-->`). Nên `<li>` có mặt nhưng **không** phải ranh giới mục: đọc theo `<li>`
+ * cho mỗi nhóm đúng một mục và bỏ mất phần còn lại.
+ *
+ * Nhóm lồng ("Nâng cao") nằm **giữa** nhóm "Viết bài", không đầu không cuối.
+ */
+function vitepressPage() {
+  const vpLink = (href, text) => el('div', { class: 'VPSidebarItem level-1 is-link' }, [
+    el('div', { class: 'item' }, [
+      el('div', { class: 'indicator' }, []),
+      el('a', { class: 'VPLink link', href }, [el('p', { class: 'text' }, [text])]),
+    ]),
+  ]);
+  const vpGroup = (title, kids) => el('div', { class: 'VPSidebarItem level-1 collapsible' }, [
+    el('div', { class: 'item' }, [
+      el('div', { class: 'indicator' }, []),
+      el('h3', { class: 'text' }, [title]),
+      el('button', { class: 'caret' }, [el('span', { class: 'caret-icon' }, [''])]),
+    ]),
+    // `<!--[-->` / `<!--]-->`: marker fragment của Vue SSR, có thật trên trang VitePress.
+    el('ul', { class: 'items' }, [el('li', {}, [cmt('['), ...kids, cmt(']')])]),
+  ]);
+  const section = (title, kids) => el('div', { class: 'group' }, [
+    el('section', { class: 'VPSidebarItem level-0 collapsible' }, [
+      el('div', { class: 'item' }, [
+        el('div', { class: 'indicator' }, []),
+        el('h2', { class: 'text' }, [title]),
+        el('button', { class: 'caret' }, [el('span', { class: 'caret-icon' }, [''])]),
+      ]),
+      el('ul', { class: 'items' }, [el('li', {}, [cmt('['), ...kids, cmt(']')])]),
+    ]),
+  ]);
+  /** Nhóm cuối của vitepress.dev: **không có tiêu đề**, chỉ một `ul.items`. */
+  const untitled = (kids) => el('div', { class: 'group' }, [
+    el('div', { class: 'VPSidebarItem level-0' }, [
+      el('ul', { class: 'items' }, [el('li', {}, [cmt('['), ...kids, cmt(']')])]),
+    ]),
+  ]);
+
+  return el('body', {}, [
+    el('div', { class: 'app' }, [
+      el('aside', { class: 'VPSidebar' }, [
+        el('nav', { class: 'nav' }, [
+          el('span', { class: 'visually-hidden' }, ['Sidebar Navigation']),
+          section('Giới thiệu', [
+            vpLink('/guide/vitepress-la-gi', 'VitePress là gì'),
+            vpLink('/guide/cai-dat', 'Cài đặt'),
+          ]),
+          section('Viết bài', [
+            vpLink('/guide/markdown', 'Markdown'),
+            vpGroup('Nâng cao', [
+              vpLink('/guide/nang-cao/asset', 'Tài nguyên tĩnh'),
+              vpLink('/guide/nang-cao/i18n', 'Đa ngữ'),
+            ]),
+            vpLink('/guide/vue', 'Dùng Vue'),
+          ]),
+          section('Tuỳ biến', [vpLink('/guide/theme', 'Theme riêng')]),
+          untitled([vpLink('/reference/cau-hinh', 'Tham chiếu cấu hình')]),
+        ]),
+      ]),
+      el('main', { class: 'content' }, [el('h1', {}, ['Cài đặt'])]),
+    ]),
+  ]);
+}
+
+const VP_METRICS = metrics({ '.app': 1200, '.content': 900, '.VPSidebar': 220, 'nav': 220, 'ul': 220, 'li': 220, 'section': 220, 'div': 220 });
+
+/**
+ * Sidebar dựng bằng `<div>` **không mang tên theme nào** — và lẫn một `<ul>` mấy link mạng xã
+ * hội. Không đường nào đọc ra cấp cha–con, nên `flat` là câu trả lời **đúng**, không phải một
+ * trạng thái lỗi: cả 16 trang vẫn vào Bảng chọn, chỉ là không có nhánh.
+ */
+function plainDivPage() {
+  const items = Array.from({ length: 12 }, (_, i) => el('div', { class: 'item' }, [link(`/guide/muc-${i}`, `Mục ${i}`)]));
+  return el('body', {}, [
+    el('div', { class: 'menu' }, [
+      el('div', { class: 'group' }, [
+        el('div', { class: 'title' }, [link('/guide/cai-dat', 'Hướng dẫn')]),
+        el('div', { class: 'items' }, items),
+      ]),
+      el('ul', { class: 'social' }, [
+        item('/blog', 'Blog'), item('/nhom', 'Nhóm'), item('/lo-trinh', 'Lộ trình'),
+      ]),
+    ]),
+    el('main', { class: 'content' }, [el('h1', {}, ['Cài đặt'])]),
+  ]);
+}
+
+const PLAIN_METRICS = metrics({ '.menu': 272, '.content': 900, '.group': 272 });
+
+/** Trang không có link điều hướng nào: không có sidebar để dựng cây. */
+const noSidebarPage = () => el('body', {}, [el('article', {}, [el('h1', {}, ['Một trang lẻ']), el('p', {}, ['Không có menu.'])])]);
+
+/** Nhãn của con trực tiếp, theo thứ tự — phép so duy nhất nói được cấp cha–con. */
+const kidsOf = (nodes) => nodes.map((n) => n.label);
+const findLabel = (nodes, label) => B.flatten(nodes).find((n) => n.label === label);
+/** Cây có cấp cha–con thật hay không: `flat` phải cho `false`, ba nhãn kia phải cho `true`. */
+const hasDepth = (nodes) => B.flatten(nodes).some((n) => n.children.length > 0);
+
+/**
+ * **Tương ứng nhãn ↔ hình dạng sidebar.** Bốn nhãn đều hợp lệ và đều cho một Bảng chọn mở được,
+ * nên "có nhãn, và nhãn nằm trong tập hợp lệ" không canh được gì. Bảng này khoá *nhãn nào ứng
+ * với hình dạng nào* — hoán vị hai nhãn bất kỳ trong `buildTree`/`readSidebar` làm ít nhất hai
+ * dòng dưới đây đỏ.
+ */
+const VIA_TABLE = [
+  { name: 'Docusaurus — `ul`/`li` lồng thẳng', page: docsPage, metrics: DOCS_METRICS, via: 'lists', outcome: 'ok', total: 6, deep: true },
+  { name: 'MkDocs Material — `<nav>` chen giữa `li` và `ul`', page: mkdocsPage, metrics: MKDOCS_METRICS, via: 'lists', outcome: 'ok', total: 7, deep: true },
+  { name: 'VitePress — mục là `div.VPSidebarItem`, `<li>` chỉ là fragment', page: vitepressPage, metrics: VP_METRICS, via: 'blocks', outcome: 'ok', total: 8, deep: true },
+  { name: '`<div>` thuần, không tên theme nào', page: plainDivPage, metrics: PLAIN_METRICS, via: 'flat', outcome: 'ok', total: 16, deep: false },
+  { name: 'không có link điều hướng nào', page: noSidebarPage, metrics: {}, via: 'none', outcome: 'none', total: 0, deep: false },
+];
+
+test('via — mỗi nhãn ứng với ĐÚNG một hình dạng sidebar, không chỉ "nằm trong tập hợp lệ"', () => {
+  const seen = [];
+  for (const row of VIA_TABLE) {
+    const found = read(row.page(), { metrics: row.metrics });
+    seen.push(found.via);
+    assert.equal(found.outcome, row.outcome, `${row.name}: outcome`);
+    assert.equal(found.total, row.total, `${row.name}: số link thật trong container`);
+    assert.equal(found.taken, row.total, `${row.name}: dựng được ${found.taken}/${found.total} link`);
+    assert.equal(found.via, row.via, `${row.name}: nhãn phải là ${row.via}, đang là ${found.via}`);
+    // Nhãn mà không kèm hình dạng thì hoán vị hai nhãn vẫn xanh — đây là vế thứ hai.
+    assert.equal(hasDepth(found.nodes), row.deep,
+      `${row.name}: nhãn nói "${found.via}" nhưng cây ${row.deep ? 'không có' : 'lại có'} cấp cha–con`);
+  }
+  assert.equal(new Set(seen).size, 4, `bảng phải đo được cả bốn nhãn, đang chỉ thấy ${[...new Set(seen)].join(', ')}`);
+});
+
+test('MkDocs — `<nav>` chen giữa không được nuốt cấp cha–con, và cháu KHÔNG leo lên làm con', () => {
+  const found = read(mkdocsPage(), { metrics: MKDOCS_METRICS });
+  assert.deepEqual(kidsOf(found.nodes), ['Trang chủ', 'Bắt đầu', 'Tham chiếu API']);
+
+  const batDau = findLabel(found.nodes, 'Bắt đầu');
+  assert.equal(batDau.url, '', 'nhóm dựng bằng `<label>` không bấm được, nên không có URL');
+  // `<nav>` bọc nhánh con còn mang một `md-nav__title` lặp lại tên nhóm. Trừ chữ theo *mục con*
+  // thôi thì nhãn ra "Bắt đầu Bắt đầu" — đo được trên trang thật: "Getting started Getting started".
+  assert.equal(batDau.label, 'Bắt đầu');
+  // Mục lục **trong trang** treo dưới "Cài đặt" toàn neo `#`: không mục nào import được, nên
+  // không mục nào được vào cây. Giữ chúng lại là 11 mục rác trên Bảng chọn MkDocs thật.
+  assert.deepEqual(kidsOf(findLabel(found.nodes, 'Cài đặt').children), []);
+  assert.equal(B.flatten(found.nodes).length, 8, '7 link + 1 nhóm "Bắt đầu"; thừa ra là neo trong trang lọt vào cây');
+  // Đây là câu trả lời cho "test nào chết nếu phép bới nhảy **hai** cấp thay vì một": bới hai
+  // cấp (hay `querySelectorAll` mọi cấp) thì Bộ nhớ đệm/Proxy thành con của "Bắt đầu", và
+  // "Nâng cao" mất nhánh của nó.
+  assert.deepEqual(kidsOf(batDau.children), ['Cài đặt', 'Nâng cao', 'Giấy phép']);
+
+  const nangCao = findLabel(found.nodes, 'Nâng cao');
+  assert.deepEqual(kidsOf(nangCao.children), ['Bộ nhớ đệm', 'Proxy']);
+  assert.equal(nangCao.url, 'https://docs.acme.dev/guide/nang-cao', 'nhóm này CÓ link của riêng nó, không mượn link mục con');
+  assert.equal(nangCao.depth, 1);
+  assert.equal(nangCao.children[0].depth, 2);
+});
+
+test('VitePress — `<li>` fragment của Vue không thành một Nhánh vô danh chen giữa', () => {
+  const found = read(vitepressPage(), { metrics: VP_METRICS });
+  assert.deepEqual(kidsOf(found.nodes), ['Giới thiệu', 'Viết bài', 'Tuỳ biến', 'Tham chiếu cấu hình']);
+  assert.deepEqual(kidsOf(findLabel(found.nodes, 'Viết bài').children), ['Markdown', 'Nâng cao', 'Dùng Vue']);
+  assert.deepEqual(kidsOf(findLabel(found.nodes, 'Nâng cao').children), ['Tài nguyên tĩnh', 'Đa ngữ']);
+  assert.equal(findLabel(found.nodes, 'Giới thiệu').depth, 0);
+  assert.equal(findLabel(found.nodes, 'Đa ngữ').depth, 2);
+
+  // `<li>` bọc cụm không có tên và không có link. Giữ nó lại là một mục trắng trên Bảng chọn,
+  // và tệ hơn: nó thành **Nhánh** của mọi trang bên dưới, nên Nguồn gộp mang tên rỗng — mà tên
+  // Nguồn thì vĩnh viễn (ADR 0010).
+  assert.equal(B.flatten(found.nodes).some((n) => !n.label), false, 'còn mục không tên trong cây');
+  // Nhóm cuối của vitepress.dev không có tiêu đề, và `<li>` của nó kẹp giữa hai marker fragment.
+  // Nhặt cả ruột comment vào chữ thì nó ra nhãn `"[ ]"` — khác rỗng vừa đủ để **không** bị gộp,
+  // nên trên Bảng chọn hiện ra một Nhánh tên `[ ]` ôm trọn mục con. Đo được trên trang thật.
+  const cauHinh = findLabel(found.nodes, 'Tham chiếu cấu hình');
+  assert.equal(cauHinh.depth, 0, 'nhóm không tiêu đề phải tan đi, không thành một Nhánh tên `[ ]`');
+  assert.equal(B.flatten(found.nodes).some((n) => n.label.includes('[')), false, 'ruột comment lọt vào nhãn');
+});
+
+test('Nhánh — đọc được cấp cha–con là điều kiện để một nhánh ra MỘT Nguồn (ADR 0005)', () => {
+  // Đây là hậu quả thật của ticket, không phải cái nhãn: `flat` thì mỗi trang khai Nhánh của
+  // riêng nó, nên nhánh "Viết bài" 4 trang ra 4 Nguồn thay vì 1 — và lượt import vẫn trót lọt.
+  const deep = read(vitepressPage(), { metrics: VP_METRICS });
+  const namesOf = (tree, match) => {
+    const chosen = new Set(B.flatten(tree.nodes).filter(match).map((n) => n.id));
+    return new Set([...B.branchesOf(tree.nodes, (n) => chosen.has(n.id)).values()].map((n) => n.label));
+  };
+  const written = (n) => n.url && (n.url.includes('/guide/markdown') || n.url.includes('/guide/nang-cao') || n.url.includes('/guide/vue'));
+  assert.deepEqual([...namesOf(deep, (n) => written(n) || n.label === 'Viết bài')], ['Viết bài']);
+
+  const flat = read(plainDivPage(), { metrics: PLAIN_METRICS });
+  assert.equal(flat.via, 'flat');
+  assert.equal(namesOf(flat, (n) => Boolean(n.url)).size, 16, 'sidebar phẳng thật thì 16 trang là 16 Nhánh — đó là câu trả lời đúng');
+});
+
+test('directItems — dừng ở mục ĐẦU TIÊN mỗi nhánh; bới xuống mọi cấp là cháu thành con', () => {
+  // Ranh giới ticket 018 dặn giữ, và nó **không** kiểm được qua `buildTree`: sổ "đã nhận" cộng
+  // với luật "mục không link không nhánh thì bỏ" khiến một phép bới-mọi-cấp cho ra đúng cùng
+  // một cây trên mọi fixture ở trên — lượt duyệt sâu nhận hết link trước, rồi bản sao phẳng bị
+  // bỏ. Nói cách khác bất biến này đang tựa vào hai cơ chế và chỉ một cái được canh. Ở đây canh
+  // thẳng chính phép bới.
+  const page = mkdocsPage();
+  const outer = page.querySelector('ul.md-nav__list');
+  const labelsOf = (nodes) => nodes.map((n) => S.collapse(n.textContent).split(' ')[0]);
+
+  assert.equal(B.directItems(outer, 'li').length, 3, 'ba mục cấp 0: Trang chủ, Bắt đầu, Tham chiếu API');
+  const batDau = B.directItems(outer, 'li')[1];
+  // `<nav>` chen giữa phải đi xuyên được — đây là vế "MkDocs" của ticket.
+  assert.deepEqual(labelsOf(B.directItems(batDau, 'li')), ['Cài', 'Nâng', 'Giấy']);
+  // Và đây là vế ngược lại, đối chứng bằng chính DOM: bới mọi cấp thấy nhiều hơn hẳn.
+  assert.equal(batDau.querySelectorAll('li').length, 7,
+    'đối chứng hỏng: nếu `querySelectorAll` cũng thấy 3 thì phép so trên không phân biệt được gì');
 });
