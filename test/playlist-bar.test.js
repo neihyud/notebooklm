@@ -311,6 +311,56 @@ test('thanh nổi — Mục hàng đợi gửi đi mang Nguồn gộp khoá theo
   }
 });
 
+// ------------------- mỗi con số đi cùng ĐÚNG nhãn của nó (chữ người dùng đọc)
+
+/**
+ * Con số đứng ngay **trước** một mảnh chữ. Neo là mảnh ngắn định danh được nhóm, không phải
+ * cả câu: câu chữ còn sửa, và sửa câu không được làm test chết.
+ */
+function numberBefore(text, mark) {
+  const at = String(text).search(mark);
+  assert.notEqual(at, -1, `không có nhãn ${mark} trong: ${text}`);
+  const numbers = String(text).slice(0, at).match(/\d+/g) || [];
+  return Number(numbers.at(-1));
+}
+
+test('thanh nổi — dòng đếm: mỗi con số đi cùng đúng nhãn, và chỉ đổi khi nhóm của nó đổi', async () => {
+  const doc = makeDoc([row(1), row(2), row(3)]);
+  const { controller } = controllerOn(doc);
+  controller.mount();
+  await controller.list();
+  doc.querySelector(`#${B.CHECKBOX_PREFIX}${vid(2)}`).click();
+
+  const read = () => textOf(doc.querySelector(`#${B.COUNT_ID}`));
+  // 3 mục đã liệt kê, 1 đã chọn — hai con số phải khác nhau, nếu không hoán vị hai nhãn
+  // không lộ ra ở đâu cả.
+  assert.equal(numberBefore(read(), /mục đã liệt kê/), 3);
+  assert.equal(numberBefore(read(), /đã chọn/), 1);
+
+  // Vế quan hệ, không đọc một chữ nào của nhãn: tick thêm một ô chỉ được làm đổi con số của
+  // "đã chọn". Nhãn đúng mà cắm nhầm biến vẫn cho một dòng đếm cộng đủ.
+  doc.querySelector(`#${B.CHECKBOX_PREFIX}${vid(3)}`).click();
+  assert.equal(numberBefore(read(), /mục đã liệt kê/), 3, 'tick một ô lại làm đổi số mục đã liệt kê');
+  assert.equal(numberBefore(read(), /đã chọn/), 2);
+});
+
+test('thanh nổi — "đã liệt kê N mục qua M trang": hai con số không đổi chỗ cho nhau', async () => {
+  const doc = makeDoc();
+  const { controller } = controllerOn(doc, {
+    list: async () => ({
+      items: PL.readPlaylistPage(page([1, 2, 3])).items, pages: 2, complete: true, title: 'Playlist X',
+    }),
+  });
+  controller.mount();
+  await controller.list();
+
+  // 3 mục qua 2 trang. Hoán vị hai con số vẫn cho một câu đọc được, và "liệt kê 2 mục qua 3
+  // trang" là đúng cái người dùng cần thấy để biết mình chưa lấy hết.
+  const status = textOf(doc.querySelector(`#${B.STATUS_ID}`));
+  assert.equal(numberBefore(status, /mục/), 3);
+  assert.equal(numberBefore(status, /trang/), 2);
+});
+
 test('thanh nổi — close() dọn CẢ danh sách lẫn ô đã tick, không dọn nửa vời', async () => {
   // `install` bỏ luôn bộ điều khiển sau `close()`, nên hai dòng dọn state ở đó chỉ có tác
   // dụng qua chính API này: đóng rồi treo lại phải ra một thanh nổi trắng, không phải thanh

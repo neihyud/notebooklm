@@ -374,6 +374,111 @@ test('bảng xác nhận — ước lượng chỉ cộng thời lượng của 
 
 // ------------------------------------------------------------------ Nguồn gộp
 
+// ------------------- mỗi con số đi cùng ĐÚNG nhãn của nó (bảng người dùng đọc)
+
+/**
+ * `counts` là thứ test đọc, `lines` là thứ **người dùng đọc** — và bảng xác nhận tồn tại đúng
+ * để người dùng quyết định trước khi tiêu quota nguồn (ADR 0005). Hoán vị hai chuỗi nhãn mà
+ * giữ nguyên biến thì mọi `counts` vẫn đúng, mọi nhóm vẫn import được, tổng vẫn khớp — và
+ * bảng nói "3 video không công khai" về đúng những video private của chính người dùng.
+ *
+ * Mệnh đề "trích bằng đường DOM" còn là một lời hứa về **cách** trích (ADR 0003), nên nhãn
+ * gán nhầm không dừng ở sai chữ: nó thành mô tả sai đường đi.
+ *
+ * Neo là một **mảnh ngắn định danh được nhóm**, không phải cả câu — câu chữ còn sửa, và sửa
+ * câu không được làm test này chết. Chỉ khi đổi hẳn cách gọi một nhóm mới phải sửa một dòng
+ * ở đây, và lúc ấy sửa là đúng.
+ */
+const GROUP_MARKS = [
+  ['privateOwned', /private của bạn/],
+  ['unlisted', /không công khai/],
+  ['unavailable', /không có quyền xem/],
+];
+
+/** Con số đứng ngay **trước** một mảnh chữ — dùng cho dòng mang nhiều cặp (số, nhãn). */
+function numberBefore(text, mark) {
+  const at = String(text).search(mark);
+  assert.notEqual(at, -1, `không có nhãn ${mark} trong: ${text}`);
+  const numbers = String(text).slice(0, at).match(/\d+/g) || [];
+  return Number(numbers.at(-1));
+}
+
+/** Lô mà **mọi** con số của bảng khác nhau đôi một: hoán vị hai nhãn bất kỳ đều làm lệch. */
+function mixedList() {
+  const items = [
+    ...Array.from({ length: 3 }, (_, i) => renderer(vid(10 + i), { privacy: 'private' })),
+    ...Array.from({ length: 4 }, (_, i) => renderer(vid(20 + i), { privacy: 'unlisted' })),
+    renderer(vid(30)),
+    ...Array.from({ length: 2 }, (_, i) => renderer(vid(40 + i), { playable: false })),
+  ];
+  return PL.readPlaylistPage(firstPage('Playlist X', items)).items;
+}
+
+/** Trần chọn sao cho số Nguồn ước lượng (5) không trùng con số nào khác trong bảng. */
+const MIXED_OPTS = { wordsPerMinute: 150, maxWords: 14400 };
+
+test('bảng xác nhận — mỗi con số trong bảng đi cùng ĐÚNG nhãn của nhóm ấy', () => {
+  const table = PL.confirmation(mixedList(), MIXED_OPTS);
+
+  assert.deepEqual(
+    [table.counts.total, table.counts.importable, table.counts.privateOwned,
+      table.counts.unlisted, table.counts.unavailable, table.counts.estimatedSources],
+    [10, 8, 3, 4, 2, 5],
+    'sáu con số phải khác nhau đôi một, nếu không hoán vị nhãn không lộ ra ở đâu cả',
+  );
+
+  for (const [group, mark] of GROUP_MARKS) {
+    const matched = table.lines.filter((line) => mark.test(line));
+    assert.equal(matched.length, 1, `nhóm ${group} phải khớp đúng một dòng, đang khớp ${matched.length}`);
+    assert.equal(Number((matched[0].match(/\d+/) || [])[0]), table.counts[group],
+      `dòng của nhóm ${group} mang con số của nhóm khác: "${matched[0]}"`);
+  }
+
+  // Số Nguồn ước lượng cũng là một con số cạnh một nhãn, và nó là con số đắt nhất của bảng.
+  assert.equal(numberBefore(table.lines.at(-1), /Nguồn/), table.counts.estimatedSources);
+});
+
+test('bảng xác nhận — dòng đầu nói TỔNG trước, số sẽ import sau, không ngược lại', () => {
+  const table = PL.confirmation(mixedList(), MIXED_OPTS);
+  assert.deepEqual((table.lines[0].match(/\d+/g) || []).map(Number),
+    [table.counts.total, table.counts.importable]);
+  assert.notEqual(table.counts.total, table.counts.importable,
+    'hai con số phải khác nhau, nếu không dòng trên rỗng tuếch');
+});
+
+test('bảng xác nhận — thêm một video vào một nhóm chỉ làm đổi dòng của nhóm ấy', () => {
+  // Vế này không đọc một chữ nào của nhãn: nó canh mỗi câu chạy theo đúng **biến** của mình.
+  // Nhãn đúng mà cắm nhầm biến vẫn cho một bảng cộng đủ tổng, nên hoán vị chữ và hoán vị biến
+  // là hai lỗi khác nhau và mỗi lỗi cần một cái chết riêng.
+  const base = PL.confirmation(mixedList(), MIXED_OPTS);
+  const grown = PL.confirmation(
+    mixedList().concat(PL.readPlaylistPage(firstPage('X', [renderer(vid(50), { privacy: 'unlisted' })])).items),
+    MIXED_OPTS,
+  );
+
+  for (const [group, mark] of GROUP_MARKS) {
+    const before = base.lines.find((line) => mark.test(line));
+    const after = grown.lines.find((line) => mark.test(line));
+    if (group === 'unlisted') {
+      assert.notEqual(after, before, 'thêm một video không công khai mà dòng của nhóm ấy đứng yên');
+    } else {
+      assert.equal(after, before, `thêm một video không công khai lại làm đổi dòng của nhóm ${group}`);
+    }
+  }
+});
+
+test('readItem — lý do bỏ một mục mang TIÊU ĐỀ của chính mục ấy, không mang tên kênh', () => {
+  // Lý do này là thứ duy nhất người dùng có để nhận ra mục nào vừa bị bỏ. Tiêu đề và tên kênh
+  // là hai chuỗi cùng kiểu trên cùng một renderer, và hoán vị chúng vẫn cho một câu đọc được.
+  const items = PL.readPlaylistPage(firstPage('P', [
+    renderer(vid(1), { playable: false, title: 'Video đã bị xoá', channel: 'Kênh khác' }),
+  ])).items;
+
+  assert.match(items[0].reason, /Video đã bị xoá/);
+  assert.doesNotMatch(items[0].reason, /Kênh khác/,
+    'lý do mang tên kênh — người dùng không nhận ra mục nào bị bỏ');
+});
+
 test('groupFor — khoá theo playlist id, tên theo tiêu đề', () => {
   // Hai vế cùng kiểu chuỗi. Hoán vị vẫn ra một Nguồn gộp "hợp lệ", chỉ là tên Nguồn thành
   // `playlist:PLabc — phần 1` còn nhận diện import lại thì đứt mỗi lần đổi tên playlist.
