@@ -1,5 +1,5 @@
 ---
-status: open
+status: done
 labels: [ready-for-agent]
 blocked_by: [005, 006]
 spec: docs/spec/0001-notebooklm-importer.md
@@ -76,3 +76,78 @@ Hệ quả cho ticket này:
 - Ràng buộc auth giữ nguyên: đường này **không** vào `AUTH_OPS` (`src/youtube/bridge-protocol.js`).
   Owner đã duyệt một op không-auth cho `page-bridge.js`; đó vẫn là ranh giới.
 - Đường DOM đang hỏng trên một lớp video (ticket 017), nên **đừng** giả định có đường lui đang chạy.
+
+---
+
+## Nghiệm thu — 2026-08-22, Lead
+
+**Trạng thái: ĐÃ NHẬN**, sau hai vòng. Commit `34282f7` + `a920a1d`. ADR 0013.
+
+### Bằng chứng Lead tự chạy
+```
+bash test/run.sh                                → XANH — tests 722, 24 file   (nền 695 / 24)
+node tools/verify-live.mjs --video jNQXAC9IVRw  → XANH  DOM 3  / get_panel 3,  chữ trùng 100.0%
+node tools/verify-live.mjs --video dQw4w9WgXcQ  → XANH  DOM 24 / get_panel 24, chữ trùng 100.0%
+```
+Tức đường trích transcript giờ có **hai đường độc lập cùng cho một kết quả**, xác nhận trên trang
+thật — không phải hai đường cùng đọc một chỗ.
+
+### Vòng một — chọn bằng số đo, và số đo loại đúng thứ ticket mang tên
+Ticket mở ra với tên `timedtext`. Phép đo trên Chrome thật **loại nó**: HTTP 200 với **0 byte**.
+`get_transcript` cũng chết, HTTP 400 với mọi biến thể params kể cả chuỗi do chính YouTube đúc.
+Đường được chọn là `get_panel` — endpoint mà chính giao diện YouTube gọi. Đây là lý do brief bắt
+đo trước khi viết: cả hai ứng viên trong đầu bài đều đã chết, và không lập luận nào từ mã nguồn
+cho biết điều đó.
+
+Peer tự đổi cách chấm của cổng live cho đúng: hạ hai phát hiện của ticket 012 xuống **ghi nhận**
+(chúng đã thành ADR, để làm cổng là biến một dòng đỏ thành thứ vĩnh viễn không ai đọc) và đổi lại
+thêm một tiêu chí **đỏ** mới — `timedtext` bỗng trả về segment, vì ADR chọn `get_panel` *vì* nó
+không trả về gì.
+
+Nó cũng tự khai một chỗ **lúc đầu sống sót**: hoán vị *giá trị* của `NO_CAPTIONS` ↔ `BLANK` không
+giết test nào, vì mọi assert đều so theo tên hằng nên hai đầu dịch cùng nhau. Đã neo bằng chuỗi
+thật, lý do đúng: `attempts[].code` là hợp đồng dữ liệu đi ra ngoài, không phải chi tiết nội bộ.
+
+### Vòng hai — cặp Lead chọn, ngoài danh sách của peer, và nó hở ở CẢ HAI cổng
+**`hl` ↔ `gl`** trong ngữ cảnh `viaPanel` — hai chuỗi cùng kiểu lấy từ **cùng một** đối tượng
+`ytcfg`, mỗi chuỗi một vai trò và một giá trị mặc định riêng (`'vi'` ↔ `'VN'`).
+
+```
+bash test/run.sh                                → XANH — tests 716, 24 file.   không test nào chết
+node tools/verify-live.mjs --video dQw4w9WgXcQ  → XANH  DOM 24 / get_panel 24, chữ trùng 100.0%
+```
+
+**Cổng Chrome thật cũng không phạt.** Lý do chính là điều peer đã tự khai: cổng chỉ đo `hl=en`.
+Trên một video tiếng Anh với giao diện tiếng Anh, gửi sai **cả hai** trường vẫn rơi về đúng một
+kết quả — phép đo ấy về nguyên tắc không phân biệt được hai trường. Cùng hình với bài học ticket
+017 (fixture n=1), chỉ khác là `n=1` nằm trong **lựa chọn video**, không trong fixture. Đây là lần
+đầu một lỗ sống sót qua cổng live, và nó cho thấy cổng live cũng có hạng điểm mù của riêng nó.
+
+Vì sao đáng vá: `hl` chọn **ngôn ngữ transcript trả về**. Video đa ngữ thì hoán vị này lấy về bản
+sai ngôn ngữ — request vẫn 200, vẫn có segment, mốc vẫn tăng dần, Nguồn vẫn dựng. Tên Nguồn là
+vĩnh viễn (ADR 0010) và ADR 0009 đọc tên ấy để biết phần nào đã có.
+
+Sau vá, Lead chạy **bốn** phép, tất cả **ĐỎ**:
+
+| Phép | Kết quả |
+|---|---|
+| `cfg.hl` ↔ `cfg.gl`, giữ nguyên mặc định | ĐỎ |
+| `FALLBACK_LANGUAGE` ↔ `FALLBACK_COUNTRY`, giữ nguyên nguồn | ĐỎ |
+| hoán vị cả hai (phép gốc của Lead) | ĐỎ |
+| header `X-Youtube-Client-Name` ↔ `X-Youtube-Client-Version` | ĐỎ |
+
+Peer cũng gộp **hai bản chép tay** của khối `context.client` về một chỗ (`innertubeClient`) — đúng
+tinh thần ticket 014: đừng để một danh sách viết tay thứ hai lệch đi trong im lặng.
+
+### Nợ ghi lại
+- **Chưa đo `hl` thật sự đổi ngôn ngữ transcript.** Peer khẳng định từ tài liệu InnerTube, không
+  từ phép đo; chưa gửi `hl=de` cho một video có nhiều bản phụ đề. Số đo ấy sẽ **củng cố** lý do vá
+  chứ không đổi bản vá.
+- `get_panel` với **video private** chưa đo — không có video private để thử mà không đăng nhập.
+  ADR 0003 giữ nguyên nên đường này không bao giờ chạy cho private, nhưng "nó trả gì" thì chưa biết.
+- **Ca `BLANK` chưa gặp thật**: không video nào trong bốn video trả `content` mà 0 dòng. Ranh giới
+  `content` có/không đang dựa trên **n=1**.
+- **Phân trang chưa đo.** `get_panel` trả cả transcript trong một lượt ở 189 segment (264 KB);
+  video ba tiếng thì chưa biết, và không thấy `continuation` nào trong payload.
+- `attempts[].code` là dữ liệu đúng nhưng **chưa ai đọc** — chỗ đọc nó để quyết định ghi Sổ
+  (ADR 0009) nằm ở service worker, ngoài phạm vi ticket này.
