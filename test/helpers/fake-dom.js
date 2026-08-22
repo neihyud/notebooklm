@@ -4,15 +4,20 @@
 // jsdom. Nó chỉ hiện thực đúng phần API mà module sản phẩm được phép dùng:
 //
 //   querySelector(All) · matches · closest · getAttribute · textContent · cloneNode · remove
-//   · addEventListener · dispatchEvent / click (ghi lại **và** gọi listener đã gắn)
+//   · addEventListener · dispatchEvent / click (ghi lại **và** gọi listener đã gắn) · attachShadow
 //
-// Hai ràng buộc mà cây giả phải trung thực, nếu không nó *giấu* lỗi thay vì lộ ra:
+// Ba ràng buộc mà cây giả phải trung thực, nếu không nó *giấu* lỗi thay vì lộ ra:
 //
 //   1. `querySelectorAll` duyệt **tiền thứ tự** đúng như DOM thật — bẫy "wrapper luôn đứng
 //      trước `<button>` thật" chỉ tồn tại nhờ thứ tự đó.
-//   2. `querySelectorAll` trả về **NodeList**, không phải Array: có `length`, `forEach` và
-//      duyệt được bằng `for…of`, nhưng **không** có `filter`/`map`/`every`. Trả về Array cho
-//      tiện là cách chắc chắn nhất để một `TypeError` chỉ nổ ra trên trang thật.
+//   2. `querySelectorAll` trả về **NodeList** và `children` trả về **HTMLCollection**, không
+//      phải Array: có `length`, chỉ số, và duyệt được bằng `for…of`, nhưng **không** có
+//      `filter`/`map`/`every`. Trả về Array cho tiện là cách chắc chắn nhất để một `TypeError`
+//      chỉ nổ ra trên trang thật.
+//   3. Cây shadow **không** nằm trong `childNodes` của host, nên không lượt quét nào của trang
+//      đi vào nó và `closest()` từ bên trong dừng lại ở gốc shadow. Đó chính là hai tính chất
+//      Bảng chọn (ticket 009) dựa vào; một `attachShadow` giả mà chỉ append thẳng vào host sẽ
+//      cho mọi test về cách ly ấy "xanh" mà chẳng kiểm gì.
 
 /** Tách selector thành các nhánh (phân tách bởi `,`), mỗi nhánh là dãy compound (tổ tiên → node). */
 function parseSelector(selector) {
@@ -144,8 +149,13 @@ export class FakeElement {
     return (this.getAttribute('class') || '').split(/\s+/).filter(Boolean);
   }
 
+  /**
+   * `HTMLCollection`, không phải Array — cùng lý do với `NodeList` ở trên. `Element.children`
+   * thật chỉ có `length`/`item`/chỉ số/duyệt được; trả về Array ở đây là cho `children.filter`
+   * đi qua suốt cả suite rồi nổ `TypeError` đúng trên trang thật.
+   */
   get children() {
-    return this.childNodes.filter((n) => n instanceof FakeElement);
+    return new FakeNodeList(this.childNodes.filter((n) => n instanceof FakeElement));
   }
 
   get textContent() {
@@ -217,6 +227,19 @@ export class FakeElement {
     copy.attributes = new Map(this.attributes);
     if (deep) for (const child of this.childNodes) copy.append(child.cloneNode(true));
     return copy;
+  }
+
+  /**
+   * Gốc shadow: một cây riêng, treo ở `shadowRoot` chứ **không** vào `childNodes` của host.
+   * `parentElement` của nó là `null`, nên `closest()` từ trong ra dừng đúng ở đây — y như thật.
+   */
+  attachShadow(init) {
+    if (this.shadowRoot) return this.shadowRoot;
+    const shadow = new FakeElement('#shadow-root');
+    shadow.host = this;
+    shadow.mode = (init && init.mode) || 'closed';
+    this.shadowRoot = shadow;
+    return shadow;
   }
 
   addEventListener(type, handler) {

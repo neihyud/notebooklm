@@ -50,6 +50,24 @@
     link: ['a'],
     codeBlock: ['pre'],
     /**
+     * Danh sách của một cây mục lục. Đường dựng cây theo `<ul>` (`src/docs/sidebar.js`) đi trên
+     * đúng hai thẻ này — không theo class, vì mỗi bộ dựng docs đặt tên một kiểu.
+     */
+    navList: ['ul', 'ol'],
+    /** Một mục của danh sách. Cấp cha–con của Bảng chọn là quan hệ `li` ⊃ `ul` ⊃ `li`. */
+    navItem: ['li'],
+    /**
+     * Danh sách **lồng trong** danh sách: dấu hiệu "đây là một cây mục lục" chứ không phải một
+     * hàng link ngang. Hàng link ở footer cũng là `<ul>`, nhưng nó phẳng.
+     */
+    nestedList: ['ul ul', 'ul ol', 'ol ul', 'ol ol'],
+    /**
+     * Thẻ **không** bao giờ là khối chứa sidebar: chính cái link, hoặc một mục lẻ. Cùng lý do
+     * với việc `extract.js` loại `p`/`li` khỏi ứng viên thân bài — sidebar là khối **chứa** mục,
+     * không phải một mục. Thu hẹp xuống một `<li>` là vứt luôn mọi mục anh em của nó.
+     */
+    notAContainer: ['a', 'li'],
+    /**
      * Điều hướng lặp ở **mọi** trang: sidebar, breadcrumb, prev/next, mục lục "On this page".
      * Để nguyên thì mọi Nguồn đều dính cùng một mớ, và NotebookLM bắt đầu trích dẫn sang menu.
      *

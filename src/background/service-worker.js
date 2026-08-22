@@ -13,12 +13,19 @@ importScripts(
   '/src/common/shared.js',
   '/src/common/messages.js',
   '/src/youtube/srt.js',
-  // Lớp tài liệu (ticket 008). Ba file này là hàm thuần trên một cây node được truyền tới, nên
-  // chúng nạp được ở đây dù service worker không có `document`: chỗ *gọi* chúng là hàng đợi tài
-  // liệu, mà hàng đợi thì sống ở đây. Cây node đến từ tab qua `chrome.scripting` — ticket 010.
+  // Lớp tài liệu (ticket 008, 009). Trừ `picker.js`, chúng là hàm thuần trên một cây node được
+  // truyền tới, nên nạp được ở đây dù service worker không có `document`: chỗ *gọi* chúng là
+  // hàng đợi tài liệu, mà hàng đợi thì sống ở đây. Cây node đến từ tab qua `chrome.scripting`
+  // — ticket 010.
   '/src/docs/selectors.js',
   '/src/docs/markdown.js',
   '/src/docs/extract.js',
+  '/src/docs/sidebar.js',
+  // `picker.js` là giao diện: nó chỉ dựng được ở nơi có `document`, và chỗ nó thật sự chạy là
+  // tab tài liệu — ticket 010 tiêm nó vào đó khi người dùng gọi Bảng chọn. Khai ở đây để nó
+  // không thành JS mồ côi trong lúc chờ; `install()` cuối file tự im lặng khi không có
+  // `document`, nên ở service worker nó chỉ định nghĩa chứ không chạy gì.
+  '/src/docs/picker.js',
   '/src/background/queue-engine.js',
   '/src/background/importer.js',
 );
