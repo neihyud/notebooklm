@@ -240,6 +240,13 @@
   const notebookUrl = (notebookId) => `https://${NOTEBOOK_HOSTS[0]}/notebook/${str(notebookId)}`;
 
   /**
+   * Trang chủ NotebookLM. `GET` vào đây trả HTML mang `WIZ_global_data` — nơi đường RPC lấy
+   * token CSRF và session id (ADR 0012). Ở đây chứ không viết thẳng trong `notebooklm/rpc.js`:
+   * hostname chỉ được khai một chỗ, và ticket 014 là bài học vì sao.
+   */
+  const notebookHome = () => `https://${NOTEBOOK_HOSTS[0]}/`;
+
+  /**
    * Bóc id Notebook đích từ URL của tab NotebookLM đang mở.
    *
    * Đây là khoá của Sổ đã import (ADR 0006), nên nhận nhầm còn tệ hơn không nhận: một chuỗi
@@ -639,6 +646,7 @@
     parsePlaylistId,
     parseNotebookId,
     notebookUrl,
+    notebookHome,
     dedupe,
     deaccent,
     foldLabel,

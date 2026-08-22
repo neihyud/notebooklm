@@ -5,6 +5,7 @@
 //   - `src/background/queue-engine.js` — hai hàng đợi, Sổ đã import, bảng tổng kết;
 //   - `src/common/shared.js` — bóc videoId, bóc notebookId, đặt tên, khoá Sổ.
 //   - `src/background/docs-queue.js` — Bảng chọn → Mục hàng đợi, ranh giới Nhánh (ADR 0005).
+//   - `src/notebooklm/rpc.js` — dựng và đọc một lượt `batchexecute` (ADR 0012).
 // Còn lại ở đây là ba việc không test tự động được: tìm/đợi/tiêm tab, gọi `chrome.downloads`, và
 // nối các lối vào (nút trên trang, phím tắt, menu chuột phải, popup) vào cùng một đường.
 //
@@ -14,6 +15,7 @@ importScripts(
   '/src/common/shared.js',
   '/src/common/messages.js',
   '/src/youtube/srt.js',
+  '/src/notebooklm/rpc.js',
   '/src/background/queue-engine.js',
   '/src/background/docs-queue.js',
   '/src/background/importer.js',
@@ -52,6 +54,7 @@ const DOCS_SCRIPTS = [
   const E = root.NBLM_ENGINE;
   const I = root.NBLM_IMPORTER;
   const D = root.NBLM_DOCS_QUEUE;
+  const R = root.NBLM_RPC;
 
   const STATE_KEY = 'run-state';
   const NOTEBOOK_KEY = 'notebook-id';
@@ -166,19 +169,68 @@ const DOCS_SCRIPTS = [
   }
 
   /**
-   * Đẩy một Nguồn qua tab NotebookLM đang mở đúng Notebook đích.
+   * Đẩy một Nguồn qua **tab** NotebookLM đang mở đúng Notebook đích — đường lui của ADR 0012.
    *
    * Mở tab mới nếu chưa có — nhưng **không** đoán notebook nào: `source.notebookId` là thứ
    * người dùng đã chọn, và tab bên kia còn kiểm lại lần nữa trước khi đẩy (ADR 0010: Nguồn
    * vào nhầm notebook là vĩnh viễn).
    */
-  async function pushSource(source) {
+  async function pushViaDom(source) {
     const existing = await findNotebookTab(source.notebookId);
     const tab = existing || await chrome.tabs.create({ url: S.notebookUrl(source.notebookId), active: false });
     await waitForTab(tab.id, M.TYPES.PING_NOTEBOOKLM);
     const answer = await ask(tab.id, { type: M.TYPES.PUSH_SOURCE, source });
     if (!answer.ok) throw new Error(answer.error || 'tab NotebookLM không đẩy được');
     return answer.result;
+  }
+
+  /**
+   * Token CSRF + session id của đường RPC, đọc từ HTML trang chủ NotebookLM.
+   *
+   * Giữ lại giữa các lượt đẩy: một lượt chạy 55 nguồn mà mỗi nguồn tải lại cả trang chủ là 55
+   * request thừa. `fresh` là đường duy nhất bỏ bản đã giữ — người gọi đưa `true` đúng khi
+   * `batchexecute` trả HTTP 400, tức bản đang giữ vừa hết hạn.
+   *
+   * `credentials: 'include'`: cookie phiên đăng nhập của owner là **cả** phần auth của đường
+   * này. Không mượn `Authorization: SAPISIDHASH`, không đụng `AUTH_OPS` (ràng buộc 5, ADR 0012).
+   */
+  let wizTokens = null;
+  async function readWizTokens(fresh) {
+    if (wizTokens && !fresh) return wizTokens;
+    const res = await fetch(S.notebookHome(), { credentials: 'include' });
+    if (!res.ok) throw new Error(`không đọc được trang chủ NotebookLM (HTTP ${res.status})`);
+    wizTokens = R.parseWizGlobalData(await res.text());
+    return wizTokens;
+  }
+
+  /**
+   * Đẩy một Nguồn: **đường RPC trước, đường DOM làm đường lui** (ADR 0012).
+   *
+   * Đường lui chạy đúng khi lượt RPC **chắc chắn chưa ghi gì** — cờ `fallback` do
+   * `NBLM_RPC.canFallBackToDom` đặt, và ranh giới của nó không phải "hỏng nặng hay nhẹ". Một
+   * lượt *có thể* đã ghi mà rơi về đường lui là dựng hai Nguồn cho một mục, và Nguồn đã đẩy thì
+   * extension không sửa và không xoá được (ADR 0010).
+   */
+  async function pushSource(source) {
+    try {
+      return await R.pushTextSource({
+        source,
+        notebookId: source.notebookId,
+        // `hl` chỉ đổi ngôn ngữ câu lỗi trả về — không đổi hành vi, nhưng đọc được thì đỡ hơn.
+        lang: (chrome.i18n && chrome.i18n.getUILanguage && chrome.i18n.getUILanguage()) || 'en',
+        fetchImpl: (href, init) => fetch(href, init),
+        readTokens: readWizTokens,
+      });
+    } catch (error) {
+      if (!error.fallback) throw error;
+      // Lượt chạy vẫn xong, nên bảng tổng kết không có dòng nào cho chuyện này — và đó chính là
+      // vấn đề: khi shape trôi theo cohort, *mọi* lượt đẩy lặng lẽ rơi về đường lui và bảng tổng
+      // kết trông y hệt một lượt RPC sạch. Từ lúc đó cả extension chạy trên đúng đường mà ADR
+      // 0012 hạ xuống hàng hai vì nó **không có tín hiệu xong việc**, và không ai biết. Console
+      // của service worker là kênh duy nhất còn lại ở tầng này.
+      console.warn(`[nblm] đường RPC không dùng được, rơi về đường lui — ${messageOf(error)}`);
+      return pushViaDom(source);
+    }
   }
 
   // ------------------------------------------------ tab tài liệu và tab ẩn của nấc 2

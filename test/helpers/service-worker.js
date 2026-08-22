@@ -8,6 +8,8 @@
 import assert from 'node:assert/strict';
 import { createContext, runInContext } from 'node:vm';
 import { read, SW_PATH, SW_SOURCE, importScriptsOf } from './extension.js';
+// Phản hồi `batchexecute` giả — dựng theo hình dạng capture, không lấy từ một request thật nào.
+import { WIZ_HTML, SUCCESS_BODY } from './batchexecute.js';
 // Classic script gắn API vào globalThis — nhập ở đây chứ không dựa vào thứ tự nhập của file
 // test: `layerAnswer` đọc `M.TYPES` ngay lúc module này chạy.
 import '../../src/common/shared.js';
@@ -188,7 +190,31 @@ export function fakeChrome(given = {}) {
     _onInstalled: [],
     _onMessage: [],
   };
-  return { api, log, tabs };
+
+  /**
+   * `fetch` giả của service worker — lối ra thứ hai của một lượt đẩy, bên cạnh `chrome.tabs`.
+   *
+   * Ghi vào **cùng một sổ** với `chrome` giả: đường RPC và đường DOM là hai vai của cùng một
+   * lượt đẩy, và câu hỏi duy nhất đáng hỏi là "lượt này đi đường nào" — hai sổ riêng thì phải
+   * ghép tay mới trả lời được, mà ghép tay thì lệch.
+   *
+   * Mặc định là đường hạnh phúc: `GET` trả HTML mang `WIZ_global_data`, `POST` trả một frame
+   * `wrb.fr` thành công. Test nào cần một hạng lỗi thì đưa `given.fetch` trả về hạng ấy.
+   */
+  const fetchStub = async (href, init) => {
+    const method = (init && init.method) || 'GET';
+    note('fetch', null, { url: String(href), method, body: (init && init.body) || '' });
+    const override = given.fetch && await given.fetch(String(href), init);
+    if (override) return override;
+    return fakeResponse(200, method === 'GET' ? WIZ_HTML : SUCCESS_BODY);
+  };
+
+  return { api, log, tabs, fetchStub };
+}
+
+/** Đúng bề mặt `Response` mà đường RPC dùng tới: `status`, `ok`, `text()`. */
+export function fakeResponse(status, text) {
+  return { status, ok: status >= 200 && status < 300, text: async () => String(text == null ? '' : text) };
 }
 
 /**
@@ -196,12 +222,26 @@ export function fakeChrome(given = {}) {
  * cái tay cầm để gửi tin vào **chính listener mà nó tự đăng ký**.
  */
 export function bootServiceWorker(given = {}) {
-  const { api, log, tabs } = fakeChrome(given);
+  const { api, log, tabs, fetchStub } = fakeChrome(given);
   const chain = importScriptsOf(SW_SOURCE);
+
+  /**
+   * `console.warn` bắt lại được: đường lui của ADR 0012 chạy **thành công**, nên nó không để
+   * lại dấu vết nào trong bảng tổng kết. Dòng cảnh báo là thứ duy nhất nói ra rằng đường chính
+   * vừa chết, và một thứ chỉ có giá trị khi nó xuất hiện thì phải kiểm được là nó có xuất hiện.
+   */
+  const warnings = [];
+  const captureConsole = Object.create(console);
+  captureConsole.warn = (...args) => warnings.push(args.map((arg) => String(arg)).join(' '));
 
   const sandbox = {
     URL,
-    console,
+    // `URLSearchParams` không phải built-in của ECMAScript, nên một ngữ cảnh V8 mới không có nó;
+    // `notebooklm/rpc.js` dựng query và đọc body bằng nó.
+    URLSearchParams,
+    console: captureConsole,
+    // Lối ra thứ hai của một lượt đẩy (ADR 0012). Ghi vào cùng sổ với `chrome` giả.
+    fetch: fetchStub,
     // Nhịp chờ thật của service worker là 250ms × 40 lượt = 10 giây. Một test lái nó qua nhánh
     // "tab không bao giờ sẵn sàng" phải đi hết vòng ấy, nên đồng hồ chạy hết cỡ — số **lượt**
     // vẫn nguyên, chỉ khoảng cách giữa hai lượt là 0.
@@ -227,6 +267,7 @@ export function bootServiceWorker(given = {}) {
     log,
     tabs,
     listener,
+    warnings,
     send: (message, sender = {}) => new Promise((resolve) => {
       const kept = listener(message, sender, resolve);
       if (!kept) resolve(undefined);

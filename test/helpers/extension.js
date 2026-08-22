@@ -110,9 +110,11 @@ export function loadChainInFreshContext(files, given = {}) {
     createElement: stubElement,
   };
   const sandbox = {
-    // `URL` không phải built-in của ECMAScript, nên một ngữ cảnh V8 mới không có nó; `shared.js`
-    // thì dùng. Mọi thứ còn lại ở đây là bề mặt tối thiểu của một tab.
+    // `URL` và `URLSearchParams` không phải built-in của ECMAScript, nên một ngữ cảnh V8 mới
+    // không có chúng; `shared.js` và `notebooklm/rpc.js` thì dùng. Mọi thứ còn lại ở đây là bề
+    // mặt tối thiểu của một tab.
     URL,
+    URLSearchParams,
     console,
     // Đồng hồ chạy hết cỡ: mọi vòng thử lại trong repo đếm bằng `setTimeout`, và một test lái
     // listener qua nhánh hỏng sẽ phải chờ thật vài chục giây nếu để nhịp thật.

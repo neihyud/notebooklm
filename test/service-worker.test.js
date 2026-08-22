@@ -19,6 +19,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import '../src/common/shared.js';
 import '../src/common/messages.js';
+import '../src/notebooklm/rpc.js';
 // `chrome` giả có ghi sổ + service worker thật trong ngữ cảnh V8 sạch: `helpers/service-worker.js`.
 // Ticket 011 tách nó ra để `test/routing.test.js` lái đúng listener ấy thay vì dựng bản sao thứ hai.
 import {
@@ -26,6 +27,25 @@ import {
 } from './helpers/service-worker.js';
 
 const M = globalThis.NBLM_MESSAGES;
+const R = globalThis.NBLM_RPC;
+
+/**
+ * Trang tài liệu **quá lớn để đi đường RPC** — cách duy nhất còn lại để một lượt đẩy chạm tới
+ * tab NotebookLM sau ADR 0012.
+ *
+ * Từ ticket 015, đường chính là `batchexecute` từ chính service worker: nó không mở tab nào, nên
+ * một lượt import bình thường chỉ chạm **hai** tab. Vai thứ ba chỉ xuất hiện ở đường lui, và
+ * ràng buộc 4 của ADR 0012 là chỗ duy nhất bắt buộc rơi về đó — service worker của MV3 bị Chrome
+ * giết khi một `fetch()` mất hơn 30 giây, nên Nguồn quá lớn **không được thử gửi**.
+ */
+const hugeDoc = (layer, tab, message) => {
+  if (layer !== 'docs' || M.typeOf(message) !== M.TYPES.EXTRACT_DOC) return undefined;
+  const markdown = `## Một trang rất dài\n\n${'chữ '.repeat(R.MAX_BODY_CHARS / 2)}`;
+  return {
+    ok: true,
+    result: { url: message.url, title: 'Một trang rất dài', markdown, chars: markdown.length, via: 'fetch', escalated: false },
+  };
+};
 
 /**
  * Hai tập tab id của hai vai.
@@ -133,8 +153,9 @@ test('hết lượt chạy thì đóng tab ẩn — và KHÔNG đóng tab ngư�
 
 test('một lượt import chạm ba tab, và ba vai không lẫn vào nhau', async () => {
   // Vế đối chứng của test đầu: một lượt chạy thật chạm **nhiều** tab, nên "rời nhau" không
-  // phải là điều tự nhiên đúng vì chỉ có một tab trong cuộc.
-  const sw = bootServiceWorker();
+  // phải là điều tự nhiên đúng vì chỉ có một tab trong cuộc. Nguồn ở đây cố ý vượt trần của
+  // đường RPC để lượt đẩy rơi về đường lui — xem `hugeDoc`.
+  const sw = bootServiceWorker({ answer: hugeDoc });
   await sw.send({ type: M.TYPES.PICK_DOCS });
   await sw.send({
     type: M.TYPES.IMPORT_DOCS,
