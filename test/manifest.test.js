@@ -14,74 +14,19 @@
 // Mỗi assertion in ra chi tiết lệch chứ không chỉ true/false.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { createContext, runInContext } from 'node:vm';
+import { existsSync } from 'node:fs';
 // shared.js là classic script gắn API vào globalThis — import lấy side effect. Manifest và
 // service worker phải khai đúng tập host mà nó định nghĩa, nên đây là bên thứ hai của mọi
 // đối chiếu host dưới đây, thay cho một danh sách chép tay.
 import '../src/common/shared.js';
+// Chuỗi nạp và ngữ cảnh V8 sạch ở `helpers/extension.js`: `test/routing.test.js` lái chính
+// những chuỗi ấy, và hai bản sao của cùng một danh sách là hai bản sẽ lệch nhau.
+import {
+  url, read, MANIFEST, SW_PATH, SW_SOURCE,
+  sourceFiles, CHAINS, declaresListener, loadChainInFreshContext,
+} from './helpers/extension.js';
 
 const S = globalThis.NBLM_SHARED;
-
-const url = (name) => new URL(`../${name}`, import.meta.url);
-const read = (name) => readFileSync(url(name), 'utf8');
-
-const MANIFEST = JSON.parse(read('manifest.json'));
-const SW_PATH = MANIFEST.background.service_worker;
-const SW_SOURCE = read(SW_PATH);
-
-/** Mọi file JS của extension dưới `src/`, đường dẫn tính từ gốc repo. */
-function sourceFiles(dir = 'src') {
-  const out = [];
-  for (const entry of readdirSync(url(dir))) {
-    const path = `${dir}/${entry}`;
-    if (statSync(url(path)).isDirectory()) out.push(...sourceFiles(path));
-    else if (entry.endsWith('.js')) out.push(path);
-  }
-  return out.sort();
-}
-
-/** `importScripts('/a.js', '/b.js')` của service worker — chuỗi nạp thật của nó. */
-function importScriptsOf(source) {
-  const call = source.match(/importScripts\(([\s\S]*?)\);/);
-  if (!call) return [];
-  return [...call[1].matchAll(/'([^']+)'/g)].map((m) => m[1].replace(/^\//, ''));
-}
-
-/**
- * Mảng file mà service worker **tiêm** vào tab tài liệu (`chrome.scripting.executeScript`).
- *
- * Đây cũng là một chuỗi nạp, y hệt một mảng `js` của `content_scripts`: cùng thứ tự, cùng chuỗi
- * phụ thuộc, cùng cái chết nếu xếp sai. Khác đúng một chỗ — nó không nằm trong `manifest.json`,
- * nên đọc từ chính mã nguồn. Không đọc nó thì mọi file của lớp tài liệu thành JS mồ côi và mọi
- * ràng buộc thứ tự bên dưới bỏ qua chúng, im lặng.
- */
-function injectedScriptsOf(source) {
-  const call = source.match(/const DOCS_SCRIPTS = \[([\s\S]*?)\];/);
-  assert.ok(call, 'không đọc được mảng DOCS_SCRIPTS trong service worker');
-  const files = [...call[1].matchAll(/'([^']+)'/g)].map((m) => m[1].replace(/^\//, ''));
-  assert.ok(files.length > 0, 'DOCS_SCRIPTS rỗng — lớp tài liệu không được tiêm vào đâu cả');
-  return files;
-}
-
-const scriptsOf = (html) => [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
-
-/**
- * Mọi chuỗi nạp trong extension. Mỗi chuỗi là một danh sách file **theo thứ tự Chrome nạp**,
- * và mọi ràng buộc dưới đây kiểm trên từng chuỗi một — vì một file nạp đúng thứ tự ở chuỗi
- * này mà sai ở chuỗi kia là hỏng đúng trên một tab.
- */
-const CHAINS = [
-  ...MANIFEST.content_scripts.map((entry, index) => ({
-    name: `content_scripts[${index}] ${entry.matches.join(' ')}${entry.world ? ` world=${entry.world}` : ''}`,
-    files: entry.js,
-    tab: true,
-  })),
-  { name: 'service worker', files: [...importScriptsOf(SW_SOURCE), SW_PATH] },
-  { name: 'tiêm vào tab tài liệu (DOCS_SCRIPTS)', files: injectedScriptsOf(SW_SOURCE), tab: true },
-  { name: 'options.html', files: scriptsOf(read('options.html')) },
-  { name: 'popup.html', files: scriptsOf(read('popup.html')) },
-];
 
 /**
  * Phụ thuộc **tự khai** của một file: mỗi module ném `… cần <đường dẫn> nạp trước` khi thiếu.
@@ -130,60 +75,6 @@ test('manifest — mỗi chuỗi nạp tự khai được ít nhất một phụ
 
 // ------------------------------------------------------------------ chỗ nạp tự cài
 
-/**
- * Nạp cả một chuỗi vào một ngữ cảnh V8 **sạch**, đúng như Chrome nạp nó vào một tab: chạy từng
- * file theo thứ tự, trên một `globalThis` chung, không import gì cả.
- *
- * Đây là điểm khác biệt của test này với mọi test khác trong repo. Ở nơi khác, một content
- * script được `import` rồi test **gọi thẳng** `install(target)`; cách ấy kiểm được thân hàm
- * nhưng mù hoàn toàn với câu hỏi "trên tab thật thì ai gọi nó". Ngữ cảnh sạch bắt đúng câu ấy.
- */
-function loadChainInFreshContext(files) {
-  const listeners = [];
-  const stubElement = () => ({
-    setAttribute() {}, removeAttribute() {}, append() {}, appendChild() {}, remove() {},
-    addEventListener() {}, attachShadow: () => ({ append() {}, appendChild() {} }),
-    classList: { add() {}, remove() {} }, children: [], style: {},
-  });
-  const doc = {
-    body: null,
-    documentElement: null,
-    addEventListener() {}, removeEventListener() {},
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    getElementById: () => null,
-    createElement: stubElement,
-  };
-  const sandbox = {
-    // `URL` không phải built-in của ECMAScript, nên một ngữ cảnh V8 mới không có nó; `shared.js`
-    // thì dùng. Mọi thứ còn lại ở đây là bề mặt tối thiểu của một tab.
-    URL,
-    console,
-    setTimeout,
-    clearTimeout,
-    location: { href: 'https://docs.acme.dev/guide/cai-dat' },
-    innerWidth: 1280,
-    document: doc,
-    addEventListener() {}, removeEventListener() {}, postMessage() {},
-    DOMParser: class { parseFromString() { return { body: null }; } },
-    fetch: async () => { throw new Error('không có mạng trong test'); },
-    chrome: {
-      runtime: {
-        sendMessage: async () => ({ ok: true }),
-        onMessage: { addListener: (fn) => listeners.push(fn) },
-        getURL: (path) => `chrome-extension://test/${path}`,
-      },
-      storage: { sync: { get: async () => ({}) }, local: { get: async () => ({}) } },
-    },
-  };
-  const context = createContext(sandbox);
-  for (const path of files) runInContext(read(path), context, { filename: path });
-  return listeners;
-}
-
-/** Chuỗi nào có file tự khai một listener `onMessage` — đọc từ mã nguồn, không chép tay. */
-const declaresListener = (chain) => chain.files.some((path) => /onMessage\.addListener/.test(read(path)));
-
 test('manifest — content script nào có listener thì phải TỰ cài khi được nạp, không đợi ai gọi install()', () => {
   // Lỗ này đúng hai lần trong repo: ticket 009 để `install(window)` không có chỗ gọi, rồi ticket
   // 010 để `src/docs/content.js` thiếu hẳn dòng tự cài — cả hai lần suite vẫn xanh, vì mọi test
@@ -193,7 +84,7 @@ test('manifest — content script nào có listener thì phải TỰ cài khi đ
   for (const chain of CHAINS) {
     if (!chain.tab || !declaresListener(chain)) continue;
     checked.push(chain.name);
-    const listeners = loadChainInFreshContext(chain.files);
+    const { listeners } = loadChainInFreshContext(chain.files);
     assert.equal(listeners.length, 1, `${chain.name}: nạp xong có ${listeners.length} listener, cần đúng 1`);
   }
   assert.deepEqual(checked, [
@@ -243,7 +134,7 @@ test('manifest — chuỗi cầu MAIN world không đăng ký listener nào, n�
   const bridge = CHAINS.find((chain) => chain.name.includes('world=MAIN'));
   assert.ok(bridge, 'không còn chuỗi MAIN world nào để đối chứng');
   assert.equal(declaresListener(bridge), false);
-  assert.equal(loadChainInFreshContext(bridge.files).length, 0);
+  assert.equal(loadChainInFreshContext(bridge.files).listeners.length, 0);
 });
 
 // ------------------------------------------------------------------ cầu MAIN world
@@ -351,7 +242,22 @@ test('manifest — mỗi hàm tìm tab hỏi mẫu host của đúng parser mà 
 
 test('manifest — content script chỉ nạp trên đúng những host của spec, và trên tất cả', () => {
   const matches = MANIFEST.content_scripts.flatMap((entry) => entry.matches);
-  assert.deepEqual([...new Set(matches)].sort(), ['*://*.youtube.com/*', ...S.NOTEBOOK_MATCH_PATTERNS].sort());
+  // Bên thứ hai là `CONTENT_SCRIPT_MATCH_PATTERNS`, và cũng chính nó là thứ `hasOwnContentScript`
+  // đọc để chặn Bảng chọn. Một tập host cho hai câu hỏi: "Chrome nạp script ở đâu" và "chỗ nào
+  // Bảng chọn không được tiêm vào" — hai danh sách là hai câu trả lời sẽ lệch nhau.
+  assert.deepEqual([...new Set(matches)].sort(), [...S.CONTENT_SCRIPT_MATCH_PATTERNS].sort());
+});
+
+test('manifest — mỗi content_scripts khai `matches`; không khoá nào khác thay được nó', () => {
+  // `exclude_matches` trông như một khoá cùng họ và gõ nhầm chỗ này là im lặng hoàn toàn: Chrome
+  // bỏ qua một entry không có `matches`, content script không nạp trên tab nào cả, và không có
+  // lỗi nào ở đâu. Đây cũng là nửa còn lại của ranh giới ticket 011 nói tới — `exclude_matches`
+  // chỉ **thu hẹp** một `matches` đã có, nó không tự chặn được gì.
+  const missing = MANIFEST.content_scripts
+    .map((entry, index) => [index, entry])
+    .filter(([, entry]) => !Array.isArray(entry.matches) || entry.matches.length === 0)
+    .map(([index, entry]) => `content_scripts[${index}] khai ${Object.keys(entry).join(', ')} — không có "matches"`);
+  assert.deepEqual(missing, [], missing.join('\n'));
 });
 
 test('manifest — content script NotebookLM khai đủ mọi host, thiếu một là im lặng không nạp', () => {

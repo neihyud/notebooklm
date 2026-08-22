@@ -5,8 +5,9 @@
 // sai hẳn chỗ (spec 0001). Điều kiện để "im lặng với tin không phải của mình" kiểm được là
 // mỗi listener khai trước tập loại tin nó nhận — `ACCEPTS` là bản khai đó.
 //
-// Ticket 011 sẽ dựng test kỷ luật định tuyến trên chính bảng này; ở ticket 005 nó đã phải
-// đúng, vì nếu không thì đường đi demo được cũng không chạy.
+// `test/routing.test.js` (ticket 011) canh bảng này: mỗi loại tin thuộc về đúng một listener,
+// hai loại tin không dùng chung một chuỗi trên dây, và mỗi listener thật — nạp vào một ngữ cảnh
+// V8 sạch như Chrome nạp vào tab — im lặng với mọi tin không phải của mình.
 (function (root) {
   'use strict';
 
@@ -63,7 +64,9 @@
 
   /**
    * Ai nhận loại tin nào. Một loại tin nằm ở hai listener **trên cùng một tab** là lỗi định
-   * tuyến — đó là thứ ticket 011 dựng test.
+   * tuyến, và nó hỏng theo kiểu tệ nhất: Chrome lấy phản hồi đến trước, nên script nào trả lời
+   * đổi theo từng lượt. Tên khoá ở đây là tên lớp, và `helpers/service-worker.js` dựng tab giả
+   * theo đúng những tên ấy.
    */
   const ACCEPTS = Object.freeze({
     youtube: Object.freeze([TYPES.PING_YOUTUBE, TYPES.EXTRACT_TRANSCRIPT]),

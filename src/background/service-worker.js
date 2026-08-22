@@ -113,7 +113,7 @@ const DOCS_SCRIPTS = [
 
   /** Tab YouTube đang mở đúng video này, nếu có — trích ngay ở đó thì không phải mở thêm tab. */
   async function findVideoTab(videoId) {
-    const tabs = await tabsMatching(['*://*.youtube.com/*']);
+    const tabs = await tabsMatching(S.YOUTUBE_MATCH_PATTERNS);
     return tabs.find((tab) => S.parseVideoId(tab.url || '') === videoId) || null;
   }
 
@@ -365,10 +365,24 @@ const DOCS_SCRIPTS = [
    * URL của nó: tab ẩn của nấc 2 mở sẵn ở đúng trang đó, xem `ensureHiddenTab`.
    */
   async function openDocPicker(tab) {
-    if (!tab || !S.docPageId(tab.url || '')) {
+    const here = (tab && tab.url) || '';
+    if (!tab || !S.docPageId(here)) {
       return { ok: false, error: 'tab hiện tại không phải một trang tài liệu đọc được' };
     }
+    // Chốt chặn nằm ở **đường tiêm**, và không có chỗ nào khác đặt được nó: `exclude_matches`
+    // chỉ chi phối lúc Chrome tự nạp theo `content_scripts`, còn `chrome.scripting.executeScript`
+    // không nhận `matches` lẫn `excludeMatches` — nó tiêm vào đúng `tabId` được đưa, hết.
+    //
+    // Tiêm chồng lên một tab đã có content script của chính extension là đặt hai listener lên
+    // một kênh. Chrome lấy **phản hồi đến trước**, nên từ lúc đó mỗi lượt ping có thể rơi vào
+    // nhầm script, và trạng thái ấy sống tới khi tab được tải lại.
     try {
+      // Trong `try`: `matchesPattern` **ném** khi gặp một mẫu host gõ sai, và hai trong ba chỗ
+      // gọi `openDocPicker` (menu chuột phải, phím tắt) không chờ lời hứa nào — một lần ném ở
+      // đây thành unhandled rejection của service worker, tức không huy hiệu, không dấu vết.
+      if (S.hasOwnContentScript(here)) {
+        return { ok: false, error: 'trang này đã có content script khác của extension — Bảng chọn không chạy ở đây' };
+      }
       await ensureDocsTab(tab.id);
       const answer = await ask(tab.id, { type: M.TYPES.OPEN_DOC_PICKER });
       if (!answer.ok) return answer;

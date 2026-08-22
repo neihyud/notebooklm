@@ -152,6 +152,88 @@
    */
   const DOCS_MATCH_PATTERNS = Object.freeze(['http://*/*', 'https://*/*']);
 
+  /**
+   * Mẫu host của lớp YouTube. Cùng vai với `NOTEBOOK_MATCH_PATTERNS`: `content_scripts.matches`
+   * và `chrome.tabs.query` phải nhắc tới cùng một tập, nên nó ở đây chứ không viết thẳng vào
+   * từng chỗ gọi.
+   *
+   * `*.youtube.com` rộng hơn `YT_HOSTS` ở trên, và cố ý: `YT_HOSTS` là danh sách host mà một
+   * URL *video* được phép nằm trên, còn đây là những tab mà Chrome **nạp content script vào** —
+   * `studio.youtube.com` không mang video nào nhưng vẫn có content script sống trên đó.
+   */
+  const YOUTUBE_MATCH_PATTERNS = Object.freeze(['*://*.youtube.com/*']);
+
+  /**
+   * Mọi tab đã có content script của extension nạp sẵn theo `content_scripts` của manifest.
+   *
+   * Đây là bên thứ hai của hai đối chiếu: manifest phải khai đúng tập này (`manifest.test.js`),
+   * và Bảng chọn tài liệu phải **từ chối** tiêm vào tập này (`hasOwnContentScript`). Một danh
+   * sách viết tay thứ hai ở một trong hai chỗ ấy là chỗ chúng lệch nhau — mà lệch thì không có
+   * triệu chứng nào cho tới khi ba script gặp nhau trên một tab.
+   */
+  const CONTENT_SCRIPT_MATCH_PATTERNS = Object.freeze([
+    ...YOUTUBE_MATCH_PATTERNS,
+    ...NOTEBOOK_MATCH_PATTERNS,
+  ]);
+
+  const MATCH_PATTERN_RE = /^(\*|https?):\/\/([^/]+)(\/.*)$/;
+  const escapeRe = (value) => value.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  /** `*` trong match pattern là ký tự đại diện của Chrome, không phải regex — dịch từng đoạn. */
+  const globRe = (pattern) => new RegExp(`^${pattern.split('*').map(escapeRe).join('.*')}$`);
+
+  /**
+   * Một URL có khớp một match pattern của Chrome không.
+   *
+   * Cần đúng một chỗ dùng: quyết định "tab này đã có content script chưa". Vì vậy nó đọc **cùng
+   * những mẫu Chrome đọc** thay vì so hostname với một danh sách riêng — hai phép so trên hai
+   * danh sách là hai câu trả lời khác nhau cho cùng một tab, và câu sai không kêu.
+   *
+   * Mẫu không đọc được thì ném, không trả `false`: một mẫu gõ sai lặng lẽ khớp không gì cả sẽ
+   * mở lại đúng chỗ hở mà hàm này bịt.
+   */
+  function matchesPattern(pattern, input) {
+    const parts = MATCH_PATTERN_RE.exec(str(pattern));
+    if (!parts) throw new Error(`matchesPattern: mẫu không đọc được: ${String(pattern)}`);
+    const [, scheme, hostPattern, pathPattern] = parts;
+
+    let url;
+    try {
+      url = new URL(str(input).trim());
+    } catch {
+      return false;
+    }
+
+    const protocol = url.protocol.replace(/:$/, '').toLowerCase();
+    // `*` của scheme là **http hoặc https**, không phải mọi giao thức (`file:`, `chrome:`…).
+    if (scheme === '*' ? protocol !== 'http' && protocol !== 'https' : protocol !== scheme) return false;
+
+    const host = url.hostname.toLowerCase();
+    if (hostPattern !== '*') {
+      const bare = hostPattern.startsWith('*.') ? hostPattern.slice(2).toLowerCase() : '';
+      // `*.foo.com` khớp cả `foo.com` lẫn mọi tên miền con của nó — quy tắc của Chrome.
+      const ok = bare ? host === bare || host.endsWith(`.${bare}`) : host === hostPattern.toLowerCase();
+      if (!ok) return false;
+    }
+
+    return globRe(pathPattern).test(`${url.pathname}${url.search}`);
+  }
+
+  /**
+   * Tab này đã có một content script của extension sống sẵn chưa.
+   *
+   * Chỗ chặn Bảng chọn tài liệu, và nó phải nằm ở **đường tiêm**: `exclude_matches` chỉ chi phối
+   * lúc Chrome tự nạp theo `content_scripts`, còn `chrome.scripting.executeScript` không nhận
+   * `matches` lẫn `excludeMatches` — nó tiêm vào đúng `tabId` được đưa, hết. Nên khai
+   * `exclude_matches` trong manifest **không** chặn được gì ở đây.
+   *
+   * Vì sao phải chặn: Chrome lấy **phản hồi đến trước** trong nhiều listener cùng nhận một tin.
+   * Ba script trên một tab là ba listener trên cùng một kênh, và một lượt trả lời nhầm địa chỉ
+   * sống tới khi tab được tải lại.
+   */
+  function hasOwnContentScript(input) {
+    return CONTENT_SCRIPT_MATCH_PATTERNS.some((pattern) => matchesPattern(pattern, input));
+  }
+
   const NOTEBOOK_ID_RE = /^[A-Za-z0-9_-]{8,}$/;
 
   /** URL của một notebook, dùng khi phải mở tab mới. */
@@ -548,6 +630,10 @@
     NOTEBOOK_HOSTS,
     NOTEBOOK_MATCH_PATTERNS,
     DOCS_MATCH_PATTERNS,
+    YOUTUBE_MATCH_PATTERNS,
+    CONTENT_SCRIPT_MATCH_PATTERNS,
+    matchesPattern,
+    hasOwnContentScript,
     collapse,
     parseVideoId,
     parsePlaylistId,

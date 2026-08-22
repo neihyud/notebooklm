@@ -706,3 +706,53 @@ test('docSiteName — thứ không phải URL http(s) trả chuỗi rỗng, khô
     assert.equal(S.docSiteName(bad), '', String(bad));
   }
 });
+
+// -------------------------------------------- tab nào đã có content script của mình
+
+test('matchesPattern — `*` của scheme là http/https, không phải mọi giao thức', () => {
+  // Một mẫu `*://` khớp cả `file:` hay `chrome:` sẽ khoá Bảng chọn ở những trang chẳng liên quan,
+  // và khoá **im lặng**: người dùng chỉ thấy phím tắt không làm gì.
+  assert.equal(S.matchesPattern('*://*.youtube.com/*', 'http://www.youtube.com/watch'), true);
+  assert.equal(S.matchesPattern('*://*.youtube.com/*', 'https://www.youtube.com/watch'), true);
+  assert.equal(S.matchesPattern('*://*.youtube.com/*', 'ftp://www.youtube.com/watch'), false);
+  // Mẫu ghi rõ scheme thì không nhận scheme kia — `https://…` không khớp một trang http.
+  assert.equal(S.matchesPattern('https://notebooklm.google.com/*', 'http://notebooklm.google.com/x'), false);
+});
+
+test('matchesPattern — `*.foo` khớp cả `foo` lẫn mọi tên miền con, và KHÔNG khớp `foo.kẻ-khác`', () => {
+  for (const host of ['youtube.com', 'www.youtube.com', 'studio.youtube.com', 'm.youtube.com']) {
+    assert.equal(S.matchesPattern('*://*.youtube.com/*', `https://${host}/x`), true, host);
+  }
+  // Hậu tố, không phải "chứa": `youtube.com.kẻ-khác.dev` là tên miền của người khác, và nhận nó
+  // là mở đúng cánh cửa mà phép so này sinh ra để đóng.
+  assert.equal(S.matchesPattern('*://*.youtube.com/*', 'https://youtube.com.ke-khac.dev/x'), false);
+  assert.equal(S.matchesPattern('*://*.youtube.com/*', 'https://notyoutube.com/x'), false);
+});
+
+test('matchesPattern — mẫu gõ sai thì NÉM, không lặng lẽ khớp không gì cả', () => {
+  // Một mẫu hỏng trả `false` là một chốt chặn tự tắt mình đi mà không nói với ai.
+  assert.throws(() => S.matchesPattern('*.youtube.com', 'https://www.youtube.com/'), /không đọc được/);
+  // Còn một URL hỏng thì đúng là "không khớp": nó không phải một trang nào cả.
+  assert.equal(S.matchesPattern('*://*.youtube.com/*', 'khong-phai-url'), false);
+});
+
+test('hasOwnContentScript — đúng những tab mà manifest đã nạp sẵn một content script', () => {
+  // Hai vế của cùng một phép, và hoán vị chúng cho nhau vẫn cho một chốt chặn "chạy được": nó
+  // chỉ chặn nhầm mọi trang tài liệu và mở toang đúng hai tab phải chặn.
+  for (const blocked of [
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://studio.youtube.com/channel/x',
+    'https://notebooklm.google.com/notebook/abcd1234efgh',
+    'https://notebook.google.com/',
+  ]) {
+    assert.equal(S.hasOwnContentScript(blocked), true, blocked);
+  }
+  for (const allowed of [
+    'https://docs.acme.dev/guide/cai-dat',
+    'http://localhost:3000/guide',
+    'https://youtube.com.ke-khac.dev/guide',
+    'https://google.com/search',
+  ]) {
+    assert.equal(S.hasOwnContentScript(allowed), false, allowed);
+  }
+});
