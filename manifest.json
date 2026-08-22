@@ -8,12 +8,15 @@
     "storage",
     "downloads",
     "contextMenus",
-    "tabs"
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",
     "https://notebooklm.google.com/*",
-    "https://notebook.google.com/*"
+    "https://notebook.google.com/*",
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.js"
@@ -70,6 +73,12 @@
         "default": "Alt+Shift+Y"
       },
       "description": "Import video đang xem vào Notebook đích"
+    },
+    "open-doc-picker": {
+      "suggested_key": {
+        "default": "Alt+Shift+D"
+      },
+      "description": "Mở Bảng chọn Nhánh tài liệu trên trang đang đọc"
     }
   },
   "options_ui": {

@@ -20,9 +20,11 @@
   const S = root.NBLM_SHARED;
   const F = root.NBLM_TRANSCRIPT_FORMAT;
   const E = root.NBLM_ENGINE;
+  const Q = root.NBLM_DOCS_QUEUE;
   if (!S) throw new Error('background/importer: cần src/common/shared.js nạp trước');
   if (!F) throw new Error('background/importer: cần src/youtube/srt.js nạp trước');
   if (!E) throw new Error('background/importer: cần src/background/queue-engine.js nạp trước');
+  if (!Q) throw new Error('background/importer: cần src/background/docs-queue.js nạp trước');
 
   const messageOf = (error) => (error && error.message ? String(error.message) : String(error));
 
@@ -159,14 +161,20 @@
   /**
    * Chạy hàng đợi đầy đủ: trích, ghi Bản lưu, rồi đẩy vào Notebook đích.
    *
-   * Trả về đúng nhật ký của engine, thêm `saved` và `saveFailures` — nếu không, câu hỏi "ngắt
-   * mạng giữa chừng thì file còn không?" chỉ trả lời được bằng cách đi mở thư mục Tải về.
+   * **Một** lượt chạy cho cả hai hàng đợi, không phải hai lượt nối đuôi — đó là chỗ ADR 0007
+   * sống hay chết. Engine đã chạy hai hàng song song ở khâu trích, nhưng nó chỉ chạy song song
+   * những gì nằm trong **cùng một lời gọi**: gọi nó hai lần, hàng tài liệu là hàng thứ hai, thì
+   * 80 trang docs lại xếp sau những video mỗi cái 20 giây. Vì vậy chỗ rẽ theo loại nằm bên
+   * trong adapter trích, chứ không nằm ở chỗ gọi.
+   *
+   * Trả về đúng nhật ký của engine, thêm `saved`, `saveFailures` và `docNotes` — nếu không, câu
+   * hỏi "ngắt mạng giữa chừng thì file còn không?" chỉ trả lời được bằng cách đi mở thư mục Tải về.
    */
   async function runImport(config) {
     const cfg = config || {};
     const deps = cfg.deps || {};
     const settings = settingsOf(cfg.settings);
-    const collect = { saved: [], saveFailures: [] };
+    const collect = { saved: [], saveFailures: [], docNotes: [] };
 
     const log = await E.runQueue({
       notebookId: cfg.notebookId,
@@ -174,6 +182,9 @@
       state: cfg.state,
       options: { maxWords: settings.maxWordsPerSource, ...(cfg.options || {}) },
       extract: async (item) => {
+        // Mục tài liệu đi đường của nó: không có segment, không có Bản lưu transcript, và
+        // `buildTranscript` sẽ từ chối nó ngay ở dòng đầu.
+        if (item && item.kind === E.DOCS_QUEUE) return Q.extractPage(item, deps, collect);
         const built = await extractAndSave(item, settings, deps, collect);
         return { text: built.body, words: built.words };
       },
@@ -185,6 +196,7 @@
 
     log.saved = collect.saved;
     log.saveFailures = collect.saveFailures;
+    log.docNotes = collect.docNotes;
     return log;
   }
 

@@ -1,7 +1,7 @@
 // Popup: chọn Notebook đích, chạy một lượt import, hoặc chỉ tải Bản lưu về.
 //
-// Hai hàng đợi là hai hàng riêng chứ không phải một hàng lọc theo loại (ADR 0007). Hàng tài
-// liệu còn rỗng cho tới ticket 010; khung đã theo đúng hình dạng đó từ ticket 001.
+// Hai hàng đợi là hai hàng riêng chứ không phải một hàng lọc theo loại (ADR 0007); khung đã
+// theo đúng hình dạng đó từ ticket 001, và ticket 010 đổ nội dung vào hàng tài liệu.
 //
 // Popup không tự chạy gì: mọi việc đi qua service worker, vì popup đóng lại là mọi Promise
 // đang chờ trong nó chết theo — một lượt import 20 giây sẽ không bao giờ về tới đích.
@@ -77,6 +77,9 @@
     byId('nblm-import').disabled = !video || !state.notebookId || state.running;
     byId('nblm-save-only').disabled = (!video && pending.length === 0) || state.running;
     byId('nblm-use-notebook').disabled = !state.currentNotebook || state.currentNotebook === state.notebookId;
+    // Bảng chọn không cần Notebook đích để **mở** — người dùng tick trước, chọn notebook sau.
+    // Khoá nó theo `notebookId` là bắt họ đoán vì sao một cái nút không bấm được.
+    byId('nblm-pick-docs').disabled = state.running;
 
     if (state.running) say('Đang chạy một lượt import…');
   }
@@ -102,6 +105,7 @@
   wire('nblm-import', { type: M.TYPES.IMPORT_VIDEO }, 'Đang trích và đẩy…');
   wire('nblm-save-only', { type: M.TYPES.SAVE_ONLY }, 'Đang trích và ghi Bản lưu…');
   wire('nblm-use-notebook', { type: M.TYPES.USE_CURRENT_NOTEBOOK }, 'Đang đọc tab hiện tại…');
+  wire('nblm-pick-docs', { type: M.TYPES.PICK_DOCS }, 'Đang dò sidebar của tab hiện tại…');
 
   refresh();
 })();

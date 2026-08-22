@@ -290,9 +290,16 @@
      * Nguồn (bài học ticket 007).
      */
     function selection() {
+      const branches = B.branchesOf(state.nodes, (node) => state.selected.has(node.id));
       return B.flatten(state.nodes)
         .filter((node) => node.url && state.selected.has(node.id))
-        .map((node) => ({ url: node.url, title: node.label }));
+        .map((node) => ({
+          url: node.url,
+          title: node.label,
+          // Nhánh của trang, không phải tên trang: đây là thứ hàng đợi gộp Nguồn theo
+          // (ADR 0005). Cùng lý do "cây gốc, không phải cây đã lọc" như `toggle`.
+          branch: (branches.get(node.id) || node).label,
+        }));
     }
 
     function setQuery(value) {

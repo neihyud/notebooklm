@@ -438,3 +438,58 @@ test('kết quả — trang không có link điều hướng nào thì báo "kh�
   assert.equal(found.anchors, 0);
   assert.equal(found.container, null);
 });
+
+// ------------------------------------------------- Nhánh của một mục đã chọn (ticket 010)
+
+/** Cây ba cấp dựng thẳng, không qua DOM: ở đây chỉ có quan hệ cha–con là quan trọng. */
+const node = (id, label, children = []) => ({ id, label, url: `/${id}`, depth: 0, children });
+
+const TREE = [
+  node('n0', 'Giới thiệu'),
+  node('n1', 'Hướng dẫn', [
+    node('n2', 'Cài đặt'),
+    node('n3', 'Nâng cao', [node('n4', 'Tinh chỉnh')]),
+  ]),
+  node('n5', 'Tham chiếu API', [node('n6', 'CLI')]),
+];
+
+const branchNames = (ids) => {
+  const chosen = new Set(ids);
+  const found = B.branchesOf(TREE, (n) => chosen.has(n.id));
+  return [...found].map(([id, branch]) => `${id}:${branch.label}`);
+};
+
+test('nhánh — mọi trang trong một nhánh đã tick mang CÙNG một Nhánh: mục cao nhất được tick', () => {
+  // Đây là điều kiện để một nhánh 40 trang ra **một** Nguồn chứ không phải 40 (ADR 0005): engine
+  // gộp theo khoá `(site, Nhánh)`, nên nếu mỗi trang khai Nhánh của riêng nó thì mỗi trang một
+  // bó. Cả hai cách đều cho một lần import chạy trót lọt từ đầu tới cuối — chỉ khác 39 Nguồn.
+  assert.deepEqual(branchNames(['n1', 'n2', 'n3', 'n4']), [
+    'n1:Hướng dẫn', 'n2:Hướng dẫn', 'n3:Hướng dẫn', 'n4:Hướng dẫn',
+  ]);
+});
+
+test('nhánh — hai nhánh tick cùng lúc vẫn là hai Nhánh, không dính vào nhau', () => {
+  // Ranh giới Nhánh là chỗ ADR 0005 bảo cắt. Gộp hai nhánh làm một vì "cùng một lượt bấm" là
+  // cắt theo *lượt bấm* chứ không theo cấu trúc tài liệu.
+  assert.deepEqual(branchNames(['n1', 'n2', 'n5', 'n6']), [
+    'n1:Hướng dẫn', 'n2:Hướng dẫn', 'n5:Tham chiếu API', 'n6:Tham chiếu API',
+  ]);
+});
+
+test('nhánh — một trang lẻ được tick là Nhánh của chính nó, không mượn tên mục cha chưa tick', () => {
+  // Mượn tên mục cha là gộp một trang vào một Nguồn mang tên cả nhánh — và tên Nguồn thì vĩnh
+  // viễn (ADR 0010), còn ADR 0009 lại đọc tên để biết phần nào đã có.
+  assert.deepEqual(branchNames(['n3']), ['n3:Nâng cao']);
+  assert.deepEqual(branchNames(['n2', 'n6']), ['n2:Cài đặt', 'n6:CLI']);
+});
+
+test('nhánh — mục chưa tick nằm giữa không cắt nhánh của mục cha đã tick', () => {
+  // Bỏ tick một mục giữa nhánh (rồi tick lại mục con) không biến mục con thành một Nguồn riêng:
+  // Nhánh vẫn là mục **cao nhất** đang được tick, đúng như trên màn hình người dùng nhìn thấy.
+  assert.deepEqual(branchNames(['n1', 'n4']), ['n1:Hướng dẫn', 'n4:Hướng dẫn']);
+});
+
+test('nhánh — không tick gì thì không mục nào có Nhánh', () => {
+  assert.deepEqual(branchNames([]), []);
+  assert.deepEqual([...B.branchesOf([], () => true)], []);
+});

@@ -15,6 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { createContext, runInContext } from 'node:vm';
 // shared.js là classic script gắn API vào globalThis — import lấy side effect. Manifest và
 // service worker phải khai đúng tập host mà nó định nghĩa, nên đây là bên thứ hai của mọi
 // đối chiếu host dưới đây, thay cho một danh sách chép tay.
@@ -47,6 +48,22 @@ function importScriptsOf(source) {
   return [...call[1].matchAll(/'([^']+)'/g)].map((m) => m[1].replace(/^\//, ''));
 }
 
+/**
+ * Mảng file mà service worker **tiêm** vào tab tài liệu (`chrome.scripting.executeScript`).
+ *
+ * Đây cũng là một chuỗi nạp, y hệt một mảng `js` của `content_scripts`: cùng thứ tự, cùng chuỗi
+ * phụ thuộc, cùng cái chết nếu xếp sai. Khác đúng một chỗ — nó không nằm trong `manifest.json`,
+ * nên đọc từ chính mã nguồn. Không đọc nó thì mọi file của lớp tài liệu thành JS mồ côi và mọi
+ * ràng buộc thứ tự bên dưới bỏ qua chúng, im lặng.
+ */
+function injectedScriptsOf(source) {
+  const call = source.match(/const DOCS_SCRIPTS = \[([\s\S]*?)\];/);
+  assert.ok(call, 'không đọc được mảng DOCS_SCRIPTS trong service worker');
+  const files = [...call[1].matchAll(/'([^']+)'/g)].map((m) => m[1].replace(/^\//, ''));
+  assert.ok(files.length > 0, 'DOCS_SCRIPTS rỗng — lớp tài liệu không được tiêm vào đâu cả');
+  return files;
+}
+
 const scriptsOf = (html) => [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
 
 /**
@@ -58,8 +75,10 @@ const CHAINS = [
   ...MANIFEST.content_scripts.map((entry, index) => ({
     name: `content_scripts[${index}] ${entry.matches.join(' ')}${entry.world ? ` world=${entry.world}` : ''}`,
     files: entry.js,
+    tab: true,
   })),
   { name: 'service worker', files: [...importScriptsOf(SW_SOURCE), SW_PATH] },
+  { name: 'tiêm vào tab tài liệu (DOCS_SCRIPTS)', files: injectedScriptsOf(SW_SOURCE), tab: true },
   { name: 'options.html', files: scriptsOf(read('options.html')) },
   { name: 'popup.html', files: scriptsOf(read('popup.html')) },
 ];
@@ -107,6 +126,124 @@ test('manifest — mỗi chuỗi nạp tự khai được ít nhất một phụ
   const withDeps = CHAINS.filter((chain) => chain.files.some((path) => declaredDeps(path).length > 0));
   assert.equal(withDeps.length, CHAINS.length, `chuỗi không có phụ thuộc nào để kiểm: ${
     CHAINS.filter((c) => !withDeps.includes(c)).map((c) => c.name).join(', ')}`);
+});
+
+// ------------------------------------------------------------------ chỗ nạp tự cài
+
+/**
+ * Nạp cả một chuỗi vào một ngữ cảnh V8 **sạch**, đúng như Chrome nạp nó vào một tab: chạy từng
+ * file theo thứ tự, trên một `globalThis` chung, không import gì cả.
+ *
+ * Đây là điểm khác biệt của test này với mọi test khác trong repo. Ở nơi khác, một content
+ * script được `import` rồi test **gọi thẳng** `install(target)`; cách ấy kiểm được thân hàm
+ * nhưng mù hoàn toàn với câu hỏi "trên tab thật thì ai gọi nó". Ngữ cảnh sạch bắt đúng câu ấy.
+ */
+function loadChainInFreshContext(files) {
+  const listeners = [];
+  const stubElement = () => ({
+    setAttribute() {}, removeAttribute() {}, append() {}, appendChild() {}, remove() {},
+    addEventListener() {}, attachShadow: () => ({ append() {}, appendChild() {} }),
+    classList: { add() {}, remove() {} }, children: [], style: {},
+  });
+  const doc = {
+    body: null,
+    documentElement: null,
+    addEventListener() {}, removeEventListener() {},
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    getElementById: () => null,
+    createElement: stubElement,
+  };
+  const sandbox = {
+    // `URL` không phải built-in của ECMAScript, nên một ngữ cảnh V8 mới không có nó; `shared.js`
+    // thì dùng. Mọi thứ còn lại ở đây là bề mặt tối thiểu của một tab.
+    URL,
+    console,
+    setTimeout,
+    clearTimeout,
+    location: { href: 'https://docs.acme.dev/guide/cai-dat' },
+    innerWidth: 1280,
+    document: doc,
+    addEventListener() {}, removeEventListener() {}, postMessage() {},
+    DOMParser: class { parseFromString() { return { body: null }; } },
+    fetch: async () => { throw new Error('không có mạng trong test'); },
+    chrome: {
+      runtime: {
+        sendMessage: async () => ({ ok: true }),
+        onMessage: { addListener: (fn) => listeners.push(fn) },
+        getURL: (path) => `chrome-extension://test/${path}`,
+      },
+      storage: { sync: { get: async () => ({}) }, local: { get: async () => ({}) } },
+    },
+  };
+  const context = createContext(sandbox);
+  for (const path of files) runInContext(read(path), context, { filename: path });
+  return listeners;
+}
+
+/** Chuỗi nào có file tự khai một listener `onMessage` — đọc từ mã nguồn, không chép tay. */
+const declaresListener = (chain) => chain.files.some((path) => /onMessage\.addListener/.test(read(path)));
+
+test('manifest — content script nào có listener thì phải TỰ cài khi được nạp, không đợi ai gọi install()', () => {
+  // Lỗ này đúng hai lần trong repo: ticket 009 để `install(window)` không có chỗ gọi, rồi ticket
+  // 010 để `src/docs/content.js` thiếu hẳn dòng tự cài — cả hai lần suite vẫn xanh, vì mọi test
+  // của lớp ấy gọi thẳng `install(…)`. Trên tab thật thì không ai gọi: Chrome chỉ *nạp* file.
+  // Hậu quả không phải một ngoại lệ mà là im lặng — `waitForTab(PING_DOCS)` chờ hết 10 giây.
+  const checked = [];
+  for (const chain of CHAINS) {
+    if (!chain.tab || !declaresListener(chain)) continue;
+    checked.push(chain.name);
+    const listeners = loadChainInFreshContext(chain.files);
+    assert.equal(listeners.length, 1, `${chain.name}: nạp xong có ${listeners.length} listener, cần đúng 1`);
+  }
+  assert.deepEqual(checked, [
+    'content_scripts[0] *://*.youtube.com/*',
+    'content_scripts[2] https://notebooklm.google.com/* https://notebook.google.com/*',
+    'tiêm vào tab tài liệu (DOCS_SCRIPTS)',
+  ], 'ba chuỗi có listener phải được kiểm — thiếu chuỗi nào là chuỗi ấy không còn ai canh');
+});
+
+/** Mọi lời gọi `chrome.contextMenus.create({…})` trong service worker, đọc từ mã nguồn. */
+function contextMenusOf(source) {
+  return [...source.matchAll(/chrome\.contextMenus\.create\(\{([\s\S]*?)\n\s*\}\)/g)].map((match) => {
+    const body = match[1];
+    const id = (body.match(/id:\s*([A-Za-z_$][\w$]*)/) || [])[1] || '';
+    const contexts = [...(body.match(/contexts:\s*\[([^\]]*)\]/) || ['', ''])[1].matchAll(/'([^']+)'/g)]
+      .map((m) => m[1]);
+    return { id, contexts };
+  });
+}
+
+test('service worker — mục menu chuột phải của lớp tài liệu hiện được cả khi bấm vào một link', () => {
+  // Mục này nói về *trang đang mở*, không về thứ vừa bấm — nhưng Chrome chỉ hiện mục `page` khi
+  // menu bật trên vùng trống, và trên một trang docs thì vùng trống là thứ hiếm nhất: sidebar và
+  // thân bài dày đặc link. Bấm chuột phải vào đúng mục sidebar của nhánh mình muốn là cử chỉ tự
+  // nhiên nhất, và với `contexts: ['page']` thì đúng lúc ấy mục biến mất.
+  const menus = contextMenusOf(SW_SOURCE);
+  assert.ok(menus.length >= 2, `chỉ đọc được ${menus.length} mục menu — biểu thức quét hỏng`);
+
+  const docs = menus.find((menu) => menu.id === 'DOCS_MENU_ID');
+  assert.ok(docs, `không thấy mục menu tài liệu; đọc được: ${menus.map((m) => m.id).join(', ')}`);
+  assert.ok(
+    docs.contexts.includes('all') || docs.contexts.includes('link'),
+    `mục tài liệu khai contexts ${JSON.stringify(docs.contexts)} — không hiện khi bấm vào link`,
+  );
+
+  // Đối chứng: mục của YouTube đi theo **link vừa bấm** (`info.linkUrl`), nên nó đúng là một mục
+  // `link` và không được kéo theo. Hai mục cùng kiểu, hai vai khác nhau.
+  const video = menus.find((menu) => menu.id === 'CONTEXT_MENU_ID');
+  assert.ok(video, 'không còn mục menu video nào để đối chứng');
+  assert.deepEqual(video.contexts, ['link']);
+});
+
+test('manifest — chuỗi cầu MAIN world không đăng ký listener nào, nếu không test trên là rỗng tuếch', () => {
+  // Chuỗi này cố ý **không** có `onMessage`: cầu nói chuyện bằng `window.postMessage`. Nó là vế
+  // đối chứng — nếu `declaresListener` khớp cả những chuỗi không có listener thì test trên đang
+  // đo một thứ luôn đúng.
+  const bridge = CHAINS.find((chain) => chain.name.includes('world=MAIN'));
+  assert.ok(bridge, 'không còn chuỗi MAIN world nào để đối chứng');
+  assert.equal(declaresListener(bridge), false);
+  assert.equal(loadChainInFreshContext(bridge.files).length, 0);
 });
 
 // ------------------------------------------------------------------ cầu MAIN world
@@ -228,14 +365,31 @@ test('manifest — content script NotebookLM khai đủ mọi host, thiếu mộ
 
 // ------------------------------------------------------------------ phím tắt
 
-test('manifest — phím tắt Alt+Shift+Y gọi đúng lệnh mà service worker đang nghe', () => {
+test('manifest — mỗi phím tắt gọi đúng lệnh mà service worker đang nghe', () => {
   const commands = MANIFEST.commands || {};
   const names = Object.keys(commands);
-  assert.deepEqual(names, ['import-video']);
-  assert.equal(commands['import-video'].suggested_key.default, 'Alt+Shift+Y');
+  assert.deepEqual(names.sort(), ['import-video', 'open-doc-picker']);
   for (const name of names) {
     assert.ok(SW_SOURCE.includes(`'${name}'`), `manifest khai lệnh "${name}" mà không ai nghe nó`);
+    assert.ok(commands[name].suggested_key.default, `lệnh "${name}" không có phím tắt gợi ý`);
   }
+  // Hai chuỗi cùng kiểu nằm cạnh nhau: hoán vị chúng vẫn cho hai lệnh hợp lệ, hai listener chạy,
+  // và không gì đỏ ở tầng dưới — chỉ là Alt+Shift+Y mở Bảng chọn còn Alt+Shift+D import video.
+  assert.equal(commands['import-video'].suggested_key.default, 'Alt+Shift+Y');
+  assert.equal(commands['open-doc-picker'].suggested_key.default, 'Alt+Shift+D');
+});
+
+test('manifest — host_permissions phủ mọi trang tài liệu, vì trang docs là bất cứ site nào', () => {
+  // Lớp tài liệu không có danh sách host để khai (`DOCS_MATCH_PATTERNS`), và cả ba việc của nó
+  // đều cần quyền host: tiêm Bảng chọn, `fetch` nấc 1, và lái tab ẩn của nấc 2. Thiếu một mẫu là
+  // đúng nửa số trang docs (những trang chạy http) im lặng không làm gì.
+  const hosts = MANIFEST.host_permissions || [];
+  const missing = S.DOCS_MATCH_PATTERNS.filter((pattern) => !hosts.includes(pattern));
+  assert.deepEqual(missing, [], `host_permissions thiếu ${missing.join(', ')}`);
+  // Và menu chuột phải lọc theo đúng tập ấy, không theo một danh sách viết tay thứ hai.
+  const menu = SW_SOURCE.match(/documentUrlPatterns: \[([^\]]*)\]/);
+  assert.ok(menu, 'không đọc được documentUrlPatterns của menu chuột phải');
+  assert.match(menu[1], /S\.DOCS_MATCH_PATTERNS/, `menu chuột phải khai tay: ${menu[1]}`);
 });
 
 /** Phần code của một file, bỏ dòng chú thích — hằng số nằm trong prose không phải hard-code. */

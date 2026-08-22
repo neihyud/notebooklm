@@ -141,6 +141,17 @@
    */
   const NOTEBOOK_MATCH_PATTERNS = Object.freeze(NOTEBOOK_HOSTS.map((host) => `https://${host}/*`));
 
+  /**
+   * Mẫu host của **lớp tài liệu** — `host_permissions`, `chrome.scripting.executeScript` và
+   * `documentUrlPatterns` của menu chuột phải cùng đọc chỗ này.
+   *
+   * Không có danh sách host nào để liệt kê, và đó là bản chất chứ không phải sự lười: trang
+   * tài liệu là *bất cứ* site nào — Docusaurus trên GitHub Pages, GitBook trên tên miền riêng,
+   * hay một bộ docs nội bộ chạy `http://localhost:3000`. Đúng hai giao thức mà `docPageId`
+   * nhận, không hơn: một mẫu thừa là xin một quyền không ai dùng tới.
+   */
+  const DOCS_MATCH_PATTERNS = Object.freeze(['http://*/*', 'https://*/*']);
+
   const NOTEBOOK_ID_RE = /^[A-Za-z0-9_-]{8,}$/;
 
   /** URL của một notebook, dùng khi phải mở tab mới. */
@@ -467,6 +478,23 @@
   }
 
   /**
+   * Tên site của một bộ docs — vế `<Site>` trong tên Nguồn `<Site> — <Nhánh>` (ADR 0010).
+   *
+   * Thuộc tính của **site**, không của trang: mọi trang trong một Nhánh tài liệu phải cho cùng
+   * một chuỗi, nếu không cùng một nhánh lại ra hai Nguồn mang hai tên. Vì vậy nó chỉ đọc phần
+   * host, và tên Nguồn thì vĩnh viễn — `<title>` của trang trông cũng như một tên site hợp lệ
+   * nhưng đổi theo từng trang, nên nó không dùng được ở đây.
+   *
+   * `host` chứ không `hostname`: `localhost:3000` và `localhost:8080` là hai bộ docs khác nhau
+   * đang chạy cạnh nhau. `www.` thì bỏ — nó là tên máy chủ, không phải tên site.
+   */
+  function docSiteName(input) {
+    const id = docPageId(input);
+    if (!id) return '';
+    return new URL(id).host.replace(/^www\./, '');
+  }
+
+  /**
    * Chuẩn hoá một link trong trang tài liệu về định danh trang, hoặc `null` nếu không phải
    * link điều hướng: khác host, giao thức lạ, hoặc neo trỏ về chính trang đang mở (mục lục
    * "On this page" toàn loại này — import vào là nhân bản trùng lặp).
@@ -519,6 +547,7 @@
     DEFAULTS,
     NOTEBOOK_HOSTS,
     NOTEBOOK_MATCH_PATTERNS,
+    DOCS_MATCH_PATTERNS,
     collapse,
     parseVideoId,
     parsePlaylistId,
@@ -538,6 +567,7 @@
     ledgerKey,
     docPageId,
     sameDocPage,
+    docSiteName,
     normalizeDocUrl,
     mergeSelectorOverrides,
   });

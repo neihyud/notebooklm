@@ -666,3 +666,43 @@ test('notebookUrl — tab do extension tự mở đi vào host cũ, và chính n
   assert.equal(S.notebookUrl(id), `https://${S.NOTEBOOK_HOSTS[0]}/notebook/${id}`);
   assert.equal(S.parseNotebookId(S.notebookUrl(id)), id);
 });
+
+// ------------------------------------------------- lớp tài liệu (ticket 010)
+
+test('DOCS_MATCH_PATTERNS — trang tài liệu là bất cứ site nào, nên mẫu phủ cả http lẫn https', () => {
+  // Khác NotebookLM: ở đó danh sách host là hữu hạn và biết trước, ở đây không có host nào để
+  // liệt kê — một trang docs nội bộ chạy `http://localhost:3000` cũng là trang docs. Hằng số
+  // này là chỗ **duy nhất** khai điều đó; `manifest.json` và menu chuột phải đối chiếu với nó.
+  assert.deepEqual([...S.DOCS_MATCH_PATTERNS], ['http://*/*', 'https://*/*']);
+  // Đúng hai giao thức mà `docPageId` nhận — thừa một mẫu là xin một quyền không ai dùng,
+  // thiếu một mẫu là docs nội bộ chạy http không tiêm được Bảng chọn.
+  const schemes = S.DOCS_MATCH_PATTERNS.map((pattern) => pattern.split(':')[0]);
+  assert.equal(S.docPageId('http://localhost:3000/guide') !== '', schemes.includes('http'));
+  assert.equal(S.docPageId('https://docs.acme.dev/guide') !== '', schemes.includes('https'));
+  assert.equal(S.docPageId('ftp://docs.acme.dev/guide'), '', 'giao thức không có mẫu thì cũng không có định danh');
+});
+
+test('docSiteName — tên site của một Nguồn tài liệu, và nó KHÔNG đổi giữa các trang cùng site', () => {
+  // Đây là vế `<Site>` của tên Nguồn `<Site> — <Nhánh>` (ADR 0010), mà tên Nguồn là vĩnh viễn.
+  // Nó phải là thuộc tính của **site**, không phải của trang: hai trang khác nhau trong cùng
+  // một nhánh mà cho hai tên site là hai Nguồn trùng nội dung mang hai tên khác nhau.
+  assert.equal(S.docSiteName('https://docs.acme.dev/guide/cai-dat'), 'docs.acme.dev');
+  assert.equal(
+    S.docSiteName('https://docs.acme.dev/guide/cai-dat'),
+    S.docSiteName('https://docs.acme.dev/api/cli?x=1#/z'),
+  );
+});
+
+test('docSiteName — `www.` là tiền tố của máy chủ, không phải tên site', () => {
+  assert.equal(S.docSiteName('https://www.acme.dev/docs/'), 'acme.dev');
+  // Port thì giữ: `localhost:3000` và `localhost:8080` là hai bộ docs khác nhau đang chạy cạnh
+  // nhau, và gộp chúng vào một Nguồn là trộn nội dung của hai site.
+  assert.equal(S.docSiteName('http://localhost:3000/guide'), 'localhost:3000');
+  assert.notEqual(S.docSiteName('http://localhost:3000/g'), S.docSiteName('http://localhost:8080/g'));
+});
+
+test('docSiteName — thứ không phải URL http(s) trả chuỗi rỗng, không trả một tên trông hợp lệ', () => {
+  for (const bad of ['', null, 'khong-phai-url', 'mailto:ai@example.com']) {
+    assert.equal(S.docSiteName(bad), '', String(bad));
+  }
+});

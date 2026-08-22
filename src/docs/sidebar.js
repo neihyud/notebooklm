@@ -451,6 +451,33 @@
    */
   const branch = (node) => (node ? flatten([node]) : []);
 
+  /**
+   * Mỗi mục đã tick thuộc **Nhánh tài liệu** nào: tổ tiên **cao nhất** cũng đang được tick, hoặc
+   * chính nó nếu không tổ tiên nào được tick.
+   *
+   * Đây là chỗ ranh giới Nhánh của ADR 0005 sinh ra. Engine gộp Nguồn theo khoá `(site, Nhánh)`,
+   * nên nếu mỗi trang khai Nhánh của **riêng nó** thì một nhánh 40 trang ra 40 Nguồn thay vì
+   * một — mà lần import ấy vẫn chạy trót lọt từ đầu tới cuối, chỉ tiêu hết quota. Hai cách đọc
+   * "Nhánh" là hai thứ cùng kiểu (đều là một mục trong cây, đều có `label` dùng đặt tên được),
+   * nên hoán vị chúng không làm hỏng lần chạy nào.
+   *
+   * Nhánh đi xuôi xuống cả những mục con **chưa** tick nằm giữa: người dùng bỏ tick một mục
+   * giữa nhánh rồi tick lại mục con của nó không vì thế mà tách mục con thành một Nguồn riêng
+   * mang tên riêng — và tên Nguồn thì vĩnh viễn (ADR 0010).
+   */
+  function branchesOf(nodes, isSelected) {
+    const out = new Map();
+    const walk = (list, branch) => {
+      for (const node of list || []) {
+        const here = branch || (isSelected(node) ? node : null);
+        if (here && isSelected(node)) out.set(node.id, here);
+        walk(node.children, here);
+      }
+    };
+    walk(nodes, null);
+    return out;
+  }
+
   /** Số mục **import được** (có URL) trong một cây — mục nhóm không bấm được thì không tính. */
   const countPages = (nodes) => flatten(nodes).filter((node) => node.url).length;
 
@@ -527,6 +554,7 @@
     buildTree,
     flatten,
     branch,
+    branchesOf,
     countPages,
     filterNodes,
     readSidebar,

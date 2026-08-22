@@ -164,6 +164,49 @@ test('import — gửi đi theo THỨ TỰ CÂY, không phải thứ tự bấm 
     ['https://docs.acme.dev/gioi-thieu', 'https://docs.acme.dev/api']);
 });
 
+// -------------------------------------------------- Nhánh đi kèm mỗi trang (ticket 010)
+
+test('nhánh — mỗi trang gửi đi mang tên NHÁNH đã tick, không mang tên của chính nó', () => {
+  // Đây là thứ quyết định một nhánh 40 trang ra **một** Nguồn hay 40 (ADR 0005): engine gộp
+  // theo khoá `(site, Nhánh)`. Lấy nhãn của chính trang làm Nhánh vẫn cho một lần import chạy
+  // trót lọt — chỉ là mỗi trang một Nguồn, và quota 50 nguồn cạn ở trang thứ 50.
+  const controller = open(docsPage());
+  const guide = controller.state().nodes[1];
+  controller.toggle(guide.id);
+
+  const sent = controller.selection();
+  assert.deepEqual(sent.map((s) => s.title), ['Hướng dẫn', 'Cài đặt', 'Cấu hình', 'Nâng cao']);
+  assert.deepEqual(sent.map((s) => s.branch), ['Hướng dẫn', 'Hướng dẫn', 'Hướng dẫn', 'Hướng dẫn']);
+  assert.equal(new Set(sent.map((s) => s.branch)).size, 1, 'cả nhánh phải là MỘT Nhánh');
+});
+
+test('nhánh — hai nhánh tick cùng lượt vẫn là hai Nhánh, ranh giới không nhoè theo lượt bấm', () => {
+  const controller = open(docsPage());
+  const nodes = controller.state().nodes;
+  controller.toggle(nodes[1].id);
+  controller.toggle(nodes[0].id);
+
+  assert.deepEqual(controller.selection().map((s) => `${s.title}/${s.branch}`), [
+    'Giới thiệu/Giới thiệu',
+    'Hướng dẫn/Hướng dẫn',
+    'Cài đặt/Hướng dẫn',
+    'Cấu hình/Hướng dẫn',
+    'Nâng cao/Hướng dẫn',
+  ]);
+});
+
+test('nhánh — Nhánh tính trên cây GỐC, không đổi theo chữ đang gõ trong ô lọc', () => {
+  // Cùng bài học chỉ-số-sau-lọc của ticket 006: nếu Nhánh tính trên cây đã lọc thì cùng một tập
+  // trang cho hai tên Nguồn khác nhau tuỳ vào chữ còn trong ô lọc lúc bấm Import — mà tên Nguồn
+  // là vĩnh viễn (ADR 0010).
+  const controller = open(docsPage());
+  const guide = controller.state().nodes[1];
+  controller.toggle(guide.id);
+  controller.setQuery('cau');
+  assert.deepEqual(controller.selection().map((s) => s.branch),
+    ['Hướng dẫn', 'Hướng dẫn', 'Hướng dẫn', 'Hướng dẫn']);
+});
+
 // ------------------------------------------------------------------ ô lọc
 
 test('ô lọc — giữ lại cả đường đi tới mục khớp, gõ không dấu vẫn khớp', () => {

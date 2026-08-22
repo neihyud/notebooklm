@@ -31,6 +31,34 @@
     GET_STATE: 'nblm-get-state',
     /** Popup → service worker: lấy notebook ở tab hiện tại làm Notebook đích. */
     USE_CURRENT_NOTEBOOK: 'nblm-use-current-notebook',
+
+    // -------------------------------------------------------------- lớp tài liệu (ticket 010)
+
+    /** Service worker → tab tài liệu: Bảng chọn đã tiêm xong chưa. */
+    PING_DOCS: 'nblm-ping-docs',
+    /** Service worker → tab tài liệu: mở Bảng chọn Nhánh tài liệu. */
+    OPEN_DOC_PICKER: 'nblm-open-doc-picker',
+    /** Service worker → tab tài liệu: trích một trang tài liệu (hai nấc, ADR trong extract.js). */
+    EXTRACT_DOC: 'nblm-extract-doc',
+    /**
+     * Phím tắt / menu chuột phải / popup → service worker: gọi Bảng chọn trên tab đang mở.
+     *
+     * **Khác** `OPEN_DOC_PICKER` một cách có chủ ý, dù hai việc nghe như một: tin này đi *tới*
+     * service worker, tin kia đi *từ* nó ra tab tài liệu. Một loại tin dùng cho cả hai chiều là
+     * một loại tin mà hai listener cùng nhận — đúng thứ kỷ luật định tuyến cấm (spec 0001).
+     */
+    PICK_DOCS: 'nblm-pick-docs',
+    /** Bảng chọn → service worker: đưa những trang đã tick vào hàng đợi tài liệu. */
+    IMPORT_DOCS: 'nblm-import-docs',
+    /**
+     * Tab tài liệu → service worker: ảnh chụp của **tab ẩn** (nấc 2), và một lệnh điều hướng nó.
+     *
+     * Nấc 2 phải chạy ở tab tài liệu chứ không ở service worker: nó so **cây node** của hai lượt
+     * đọc, mà service worker của MV3 không có `DOMParser` để dựng lại cây từ HTML. Còn tab ẩn thì
+     * chỉ `chrome.tabs` mới lái được. Nên nấc 2 nằm hai bên và nói chuyện qua hai loại tin này.
+     */
+    DOC_TAB_READ: 'nblm-doc-tab-read',
+    DOC_TAB_GO: 'nblm-doc-tab-go',
   });
 
   /**
@@ -40,12 +68,17 @@
   const ACCEPTS = Object.freeze({
     youtube: Object.freeze([TYPES.PING_YOUTUBE, TYPES.EXTRACT_TRANSCRIPT]),
     notebooklm: Object.freeze([TYPES.PING_NOTEBOOKLM, TYPES.PUSH_SOURCE]),
+    docs: Object.freeze([TYPES.PING_DOCS, TYPES.OPEN_DOC_PICKER, TYPES.EXTRACT_DOC]),
     background: Object.freeze([
       TYPES.ACTIVATE_TAB,
       TYPES.IMPORT_VIDEO,
       TYPES.SAVE_ONLY,
       TYPES.GET_STATE,
       TYPES.USE_CURRENT_NOTEBOOK,
+      TYPES.PICK_DOCS,
+      TYPES.IMPORT_DOCS,
+      TYPES.DOC_TAB_READ,
+      TYPES.DOC_TAB_GO,
     ]),
   });
 

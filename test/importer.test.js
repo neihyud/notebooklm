@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import '../src/common/shared.js';
 import '../src/youtube/srt.js';
 import '../src/background/queue-engine.js';
+import '../src/background/docs-queue.js';
 import '../src/background/importer.js';
 
 const S = globalThis.NBLM_SHARED;
