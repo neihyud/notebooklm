@@ -397,8 +397,10 @@ test('addTextSource — Nguồn rỗng thì từ chối ngay, không mở hộp 
 
 test('addTextSource — nhãn ghi đè từ Cài đặt đủ để chạy trên một giao diện đổi hết chữ', async () => {
   const app = fakeNotebookLM();
-  app.nodes.addButton.childNodes = [];
-  app.nodes.addButton.append('Nạp tư liệu');
+  // Đổi hết chữ của nút = gán lại `textContent`, đúng một lời gọi DOM thật cho phép. Gán thẳng
+  // `childNodes = []` thì trên trang thật là một no-op im lặng (`childNodes` chỉ có getter), nên
+  // test sẽ chạy trên một nút vẫn còn nguyên chữ cũ mà không ai biết.
+  app.nodes.addButton.textContent = 'Nạp tư liệu';
   const sel = N.resolve({ labels: { addSource: ['nap tu lieu'] } });
   const result = await A.addTextSource(SOURCE, app.page, with_({ selectors: sel }));
   assert.equal(result.ok, true);
