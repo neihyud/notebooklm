@@ -176,3 +176,14 @@ thật đầu tiên là quyết định của owner.
 6. Nếu thấy `Nguồn ĐÃ được tạo (id …) nhưng trạng thái là N, không phải READY`: **đừng chạy lại
    ngay**, vào notebook kiểm trước — engine đã xếp mục ấy lại vào hàng đợi, chạy lại sẽ dựng Nguồn
    thứ hai.
+
+### Bổ sung 2026-08-22 — món nợ trên đã đi trả, và nó tệ hơn dự đoán
+
+Lead đối chiếu shape với nguồn công khai (chỉ đọc, không gửi request nào): **hai implementation
+reverse-engineer độc lập cùng mâu thuẫn với `buildParams`**, và cặp `[content, title]` của ta
+**đang đảo** — cả hai đặt title trước. Xem `docs/tickets/020-shape-params-rpc-da-troi.md`.
+
+Hệ quả cho runbook ở trên: **bước 4(b) không còn là một khả năng, nó là dự đoán có bằng chứng.**
+Nhiều khả năng lượt chạy thật đầu tiên rớt ở bước 5 (`INVALID_ARGUMENT` → rơi về đường DOM, an
+toàn) trước khi kịp tới 4(b). Nhưng nếu shape lại đi lọt, tên Nguồn sai là **vĩnh viễn**. Owner
+làm ticket 020 trước thì rẻ hơn nhiều — và nó chỉ cần một capture, không cần đẩy thật.
