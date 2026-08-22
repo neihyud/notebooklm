@@ -378,6 +378,33 @@ test('segmentStats — mốc lùi về sau giữa hai segment cũng là ngược
   assert.equal(segmentStats(backwards).ordered, false);
 });
 
+test('segmentStats — segment đường DOM không có `end`, và thiếu `end` không phải là ngược đầu', () => {
+  // `srt.js` điền `end` cho đường DOM ("đường DOM chỉ đọc được mốc bắt đầu"), nên đọc `end`
+  // vắng mặt thành 0 là biến một lượt quét lành lặn thành báo động ngược đầu ở mọi dòng.
+  const domLike = [{ start: 1, text: 'a' }, { start: 7, text: 'b' }, { start: 16, text: 'c' }];
+  assert.equal(segmentStats(domLike).ordered, true);
+});
+
+test('segmentStats — có `end` thì vẫn phải lớn hơn `start`, thiếu `end` không nới lỏng chuyện đó', () => {
+  assert.equal(segmentStats([{ start: 1, end: 0, text: 'a' }, { start: 7, text: 'b' }]).ordered, false);
+});
+
+test('segmentStats — 24 segment mà mọi mốc đều bằng nhau KHÔNG phải là "mốc tăng dần"', () => {
+  // Đúng hình đã xảy ra trên trang thật (ticket 017): selector mốc lệch tên lớp nên
+  // `parseClock('')` trả 0 cho mọi dòng. Transcript đủ dòng, đủ chữ, `ordered` vẫn true vì
+  // không-giảm — và cả hai video được báo là "chạy tốt" trong khi mọi mốc nằm ở giây 0.
+  const flat = Array.from({ length: 24 }, (_, i) => ({ start: 0, end: 0, text: `dòng ${i}` }));
+  const stats = segmentStats(flat);
+
+  assert.equal(stats.count, 24);
+  assert.equal(stats.distinctStarts, 1);
+  assert.equal(stats.ordered, false, 'mọi mốc bằng 0 vẫn được coi là mốc tăng dần');
+});
+
+test('segmentStats — một segment duy nhất thì mốc bằng nhau không nói lên điều gì', () => {
+  assert.equal(segmentStats([{ start: 0, end: 3, text: 'a' }]).ordered, true);
+});
+
 test('compareTranscripts — giữ đúng đường nào là đường nào', () => {
   // Hai đường trả về cùng kiểu dữ liệu, nên hoán vị hai đối số vẫn ra một báo cáo hợp lệ: cùng
   // `countsMatch`, cùng `overlap`. Chỉ chỗ gán tên đường mới phân biệt được — và tên đường

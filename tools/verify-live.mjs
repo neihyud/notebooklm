@@ -101,11 +101,15 @@ const domScript = (tries, stepMs) => `(async () => {
   for (const panel of document.querySelectorAll('ytd-engagement-panel-section-list-renderer')) {
     const rows = panel.querySelectorAll(rowCss).length;
     if (rows === 0 && !panel.matches(Y.DEFAULT.css('panel'))) continue;
+    // Hai cột, không một: từ ticket 017, danh tính transcript có thể nằm ở một khối bên trong
+    // panel (thuộc tính data-target-id) chứ không ở chính panel. Chỉ in cột thứ nhất là báo
+    // "selector không với tới" về đúng cái panel mà selector đang đọc được.
     out.panels.push({
       targetId: panel.getAttribute('target-id'),
       visibility: panel.getAttribute('visibility'),
       rows,
       matchesPanelSelector: panel.matches(Y.DEFAULT.css('panel')),
+      innerPanelMatch: !!panel.querySelector(Y.DEFAULT.css('panel')),
       width: Math.round(panel.getBoundingClientRect().width),
     });
   }
@@ -255,7 +259,8 @@ function printReport(report) {
   else console.log(`   đầu / cuối      : "${comparison.dom.firstText}" … "${comparison.dom.lastText}"`);
   for (const panel of dom.panels) {
     console.log(`     panel target-id=${json(panel.targetId)} visibility=${panel.visibility} `
-      + `dòng=${panel.rows} rộng=${panel.width}px khớp selector 'panel'=${panel.matchesPanelSelector}`);
+      + `dòng=${panel.rows} rộng=${panel.width}px `
+      + `selector 'panel' khớp: chính panel=${panel.matchesPanelSelector}, khối trong=${panel.innerPanelMatch}`);
   }
   console.log('');
 
@@ -371,6 +376,15 @@ async function main() {
       : `đường DOM không trích được segment nào (${report.dom.reason})`);
   }
   if (report.innertube.segments.length === 0) failures.push('đường InnerTube không trích được segment nào');
+  // Đếm segment một mình không nói gì về **mốc**: một lượt quét đủ 24 dòng đủ chữ mà mọi mốc
+  // bằng 0 vẫn đếm ra 24 (ticket 017 — selector mốc lệch tên lớp, và cả hai video được báo là
+  // "chạy tốt"). Nên `ordered` phải là một tiêu chí đỏ, không phải một dòng in ra rồi thôi.
+  for (const [name, stats] of [['DOM', report.comparison.dom], ['InnerTube', report.comparison.innertube]]) {
+    if (stats.count > 0 && !stats.ordered) {
+      failures.push(`đường ${name}: mốc thời gian không tăng dần `
+        + `(${stats.distinctStarts} mốc phân biệt trên ${stats.count} segment)`);
+    }
+  }
   if (report.params.verdict !== 'giống-hệt') failures.push(`params protobuf: ${report.params.verdict}`);
   if (!report.comparison.agree) failures.push('hai đường không khớp nhau');
 

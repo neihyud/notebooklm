@@ -288,22 +288,33 @@ function codeVerdict(rendered, fences) {
  * `ordered` là chỗ bắt cặp `start` ↔ `end` bị hoán vị — `WORKSPACE_PROTOCOL.md` liệt kê đúng cặp
  * này, và triệu chứng của nó là *không có triệu chứng*: file SRT vẫn parse được, vẫn mở lên xem
  * được, chỉ là mốc thời gian sai. Trên trang thật thì đây là phép kiểm duy nhất.
+ *
+ * "Không giảm" một mình **không đủ**, và ticket 017 trả giá cho chỗ đó: khi selector mốc lệch
+ * tên lớp thì `parseClock('')` trả 0 cho mọi dòng, một danh sách 24 mốc 0 vẫn không giảm, và cả
+ * hai video được báo "chạy tốt" trong khi mọi dòng nằm ở giây 0. Nên từ đây, nhiều segment mà
+ * chỉ có **một** mốc phân biệt là ngược đầu — với một segment thì điều đó không nói lên gì.
  */
 export function segmentStats(segments) {
   const list = Array.isArray(segments) ? segments : [];
   let ordered = list.length > 0;
   let previous = -Infinity;
+  const starts = new Set();
   for (const seg of list) {
     const start = num(seg && seg.start);
-    const end = num(seg && seg.end);
-    if (end < start || start < previous) ordered = false;
+    // `end` **vắng mặt** khác `end` bằng 0: đường DOM chỉ đọc được mốc bắt đầu và `srt.js` điền
+    // `end` sau, nên đọc chỗ vắng thành 0 là báo ngược đầu ở mọi dòng của một lượt quét lành lặn.
+    const end = seg && seg.end != null && Number.isFinite(Number(seg.end)) ? Number(seg.end) : null;
+    if ((end !== null && end < start) || start < previous) ordered = false;
+    starts.add(start);
     previous = start;
   }
+  if (list.length > 1 && starts.size === 1) ordered = false;
   const first = list[0] || {};
   const last = list[list.length - 1] || {};
   return {
     count: list.length,
     ordered,
+    distinctStarts: starts.size,
     firstStart: num(first.start),
     lastEnd: num(last.end),
     firstText: squash(first.text).slice(0, 80),

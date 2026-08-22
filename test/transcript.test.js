@@ -417,6 +417,186 @@ test('scanTranscriptPanel — panel mở nhưng chưa có segment nào là "chư
   assert.equal(result.reason, T.REASON.EMPTY);
 });
 
+/**
+ * Layout đo được trên trang thật của `jNQXAC9IVRw` (ticket 017, `tools/verify-live.mjs`).
+ *
+ * Panel **đang mở** không mang `target-id` nào; danh tính transcript nằm ở `data-target-id` của
+ * `yt-section-list-renderer` bên trong. Hai panel *có* `target-id*="transcript"` thì đều đang ẩn
+ * và rỗng — nên bắt panel bằng riêng `target-id` là nhìn thấy đúng những panel không có gì.
+ */
+const livePanelPage = (segments, innerTargetId = 'PAmodern_transcript_view') =>
+  el('div', { id: 'page' }, [
+    el('ytd-engagement-panel-section-list-renderer', {
+      'target-id': 'engagement-panel-searchable-transcript',
+      visibility: 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN',
+    }, []),
+    el('ytd-engagement-panel-section-list-renderer', {
+      visibility: 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED',
+    }, [
+      el('div', { id: 'content' }, [
+        el('yt-section-list-renderer', { 'data-target-id': innerTargetId }, [
+          el('div', { id: 'contents' }, segments),
+        ]),
+      ]),
+    ]),
+  ]);
+
+/** Trang chỉ có panel transcript đang ẩn, không một dòng segment nào — hình của cửa sổ hẹp thật. */
+const hiddenOnlyPage = () =>
+  el('div', { id: 'page' }, [
+    el('ytd-engagement-panel-section-list-renderer', {
+      'target-id': 'engagement-panel-searchable-transcript',
+      visibility: 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN',
+    }, []),
+  ]);
+
+/** Gán bề rộng đo được cho một node của cây giả — cây giả trả 0 cho mọi node chưa gắn vào trang. */
+const withWidth = (node, width) => {
+  node.getBoundingClientRect = () => ({ x: 0, y: 0, width, height: 40, top: 0, right: width, bottom: 40, left: 0 });
+  return node;
+};
+
+test('scanTranscriptPanel — panel đang mở KHÔNG có target-id vẫn đọc được (layout thật của jNQXAC9IVRw)', () => {
+  const result = T.scanTranscriptPanel(livePanelPage([
+    segmentNode('0:00', 'All right so here we are'),
+    segmentNode('0:05', 'in front of the elephants'),
+  ]), { opened: true });
+
+  assert.equal(result.ok, true, `đường DOM bỏ lỡ panel đang mở: ${result.reason} — ${result.message}`);
+  assert.deepEqual(result.segments, [
+    { start: 0, text: 'All right so here we are' },
+    { start: 5, text: 'in front of the elephants' },
+  ]);
+});
+
+/**
+ * Một dòng segment của layout hiện tại, chép nguyên tên lớp từ `outerHTML` đo trên trang thật
+ * (ticket 017, cả `jNQXAC9IVRw` lẫn `dQw4w9WgXcQ` cho cùng markup này).
+ *
+ * Ba chỗ đổi tên cùng lúc, và mỗi chỗ hỏng một kiểu khác nhau:
+ *   - mốc `.ytwTranscriptSegmentViewModelTimestamp` — không bắt được thì `parseClock('')` cho
+ *     **mọi** segment mốc 0, và file SRT ra đủ dòng nhưng mọi dòng nằm ở giây 0;
+ *   - chữ nằm ở `span.ytAttributedStringHost`, không còn `.segment-text`;
+ *   - nhãn trợ năng `…TimestampA11yLabel` **không** mang `aria-hidden`, nên đường dự phòng nuốt
+ *     nó vào đầu mỗi dòng transcript ("1 secondAll right, so here we are…").
+ */
+const liveSegmentNode = (timestamp, a11y, text) =>
+  el('transcript-segment-view-model', { class: 'ytwTranscriptSegmentViewModelHost' }, [
+    el('div', { class: 'ytwTranscriptSegmentViewModelTimestamp', 'aria-hidden': 'true' }, [timestamp]),
+    el('div', { class: 'ytwTranscriptSegmentViewModelTimestampA11yLabel' }, [a11y]),
+    el('span', { class: 'ytAttributedStringHost ytAttributedStringLinkInheritColor', role: 'text' }, [text]),
+  ]);
+
+test('readSegment — layout dòng segment hiện tại: mốc đọc ra giây thật, nhãn trợ năng không lọt vào chữ', () => {
+  const result = T.scanTranscriptPanel(panelPage([
+    liveSegmentNode('0:01', '1 second', 'All right, so here we are'),
+    liveSegmentNode('0:07', '7 seconds', 'really really long trunks'),
+    liveSegmentNode('1:02:03', '1 hour, 2 minutes, 3 seconds', 'phần cuối'),
+  ]), { opened: true });
+
+  assert.equal(result.ok, true, `${result.reason} — ${result.message}`);
+  assert.deepEqual(result.segments, [
+    { start: 1, text: 'All right, so here we are' },
+    { start: 7, text: 'really really long trunks' },
+    { start: 3723, text: 'phần cuối' },
+  ]);
+});
+
+test('readSegment — mốc của dòng này không bao giờ là mốc của dòng khác', () => {
+  // Mọi mốc ra 0 vẫn là một transcript "đọc trôi chảy": đủ dòng, đủ chữ, chỉ là mọi dòng nằm ở
+  // giây 0 — và `srt.js` vẫn dựng ra file mở lên xem được. Chốt từng cặp (mốc, chữ) một.
+  const result = T.scanTranscriptPanel(panelPage([
+    liveSegmentNode('0:05', '5 seconds', 'dòng A'),
+    liveSegmentNode('0:11', '11 seconds', 'dòng B'),
+  ]), { opened: true });
+
+  const byText = new Map(result.segments.map((s) => [s.text, s.start]));
+  assert.equal(byText.get('dòng A'), 5);
+  assert.equal(byText.get('dòng B'), 11);
+  assert.notEqual(byText.get('dòng A'), byText.get('dòng B'), 'hai dòng đang mang chung một mốc');
+});
+
+test('scanTranscriptPanel — panel lồng trong panel: mỗi dòng segment chỉ được đọc một lần', () => {
+  const rows = [segmentNode('0:00', 'một'), segmentNode('0:02', 'hai')];
+  const page = el('div', { id: 'page' }, [
+    el('ytd-engagement-panel-section-list-renderer', {
+      'target-id': 'engagement-panel-searchable-transcript',
+      visibility: 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED',
+    }, [
+      el('yt-section-list-renderer', { 'data-target-id': 'PAmodern_transcript_view' }, rows),
+    ]),
+  ]);
+
+  const result = T.scanTranscriptPanel(page, { opened: true });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.segments.map((s) => s.text), ['một', 'hai'], 'transcript bị nhân đôi');
+});
+
+test('scanTranscriptPanel — có dòng segment ngoài mọi panel nhận ra được: đó là panel mở mà không nhận ra', () => {
+  const result = T.scanTranscriptPanel(
+    livePanelPage([segmentNode('0:00', 'có chữ ở đây')], 'PAmodern_caption_view'),
+    { opened: true },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, T.REASON.UNRECOGNIZED);
+  assert.notEqual(result.reason, T.REASON.NARROW, 'panel mở mà không nhận ra bị gọi tên là cửa sổ hẹp');
+});
+
+test('scanTranscriptPanel — panel ẩn mà vẫn rộng 494px thì không phải cửa sổ hẹp', () => {
+  const page = hiddenOnlyPage();
+  withWidth(page.querySelector('ytd-engagement-panel-section-list-renderer'), 494);
+
+  const result = T.scanTranscriptPanel(page, { opened: true });
+  assert.equal(result.ok, false);
+  assert.notEqual(result.reason, T.REASON.NARROW, 'kết luận cửa sổ hẹp cho một panel rộng 494px');
+  assert.equal(result.reason, T.REASON.EMPTY);
+  assert.match(result.message, /494/, 'không nói ra bề rộng đã đo được');
+});
+
+test('scanTranscriptPanel — cửa sổ hẹp thật: panel ẩn, bề rộng 0, và không một dòng segment nào trên trang', () => {
+  const result = T.scanTranscriptPanel(hiddenOnlyPage(), { opened: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, T.REASON.NARROW);
+});
+
+test('scanTranscriptPanel — cửa sổ hẹp ở layout hiện tại: khối trong khớp selector nhưng panel bọc nó đang ẩn', () => {
+  // Khối trong (`data-target-id`) **không** mang thuộc tính `visibility`; nó thừa hưởng trạng
+  // thái ẩn từ panel bọc ngoài. Xét bằng `matches` thì nó thành "một panel đang mở" và cửa sổ
+  // hẹp lại bị gọi tên là "chưa dựng xong" — hai chục lượt chờ cho một chiều rộng không tự đổi.
+  const page = el('div', { id: 'page' }, [
+    el('ytd-engagement-panel-section-list-renderer', {
+      'target-id': 'engagement-panel-searchable-transcript',
+      visibility: 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN',
+    }, [
+      el('yt-section-list-renderer', { 'data-target-id': 'PAmodern_transcript_view' }, []),
+    ]),
+  ]);
+
+  const result = T.scanTranscriptPanel(page, { opened: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, T.REASON.NARROW, `${result.reason} — ${result.message}`);
+});
+
+test('scanTranscriptPanel — "ẩn vì cửa sổ hẹp" và "mở mà không nhận ra" không được hoán vị cho nhau', () => {
+  // Hai lý do đều hợp lệ và đều dừng lượt chạy, nên hoán vị chúng không làm hỏng lần chạy nào —
+  // chỉ đẩy người đọc lỗi đi sai hướng: một bên bảo kéo rộng cửa sổ, một bên bảo sửa selector.
+  const narrow = T.scanTranscriptPanel(hiddenOnlyPage(), { opened: true });
+  const unknown = T.scanTranscriptPanel(
+    livePanelPage([segmentNode('0:00', 'có chữ ở đây')], 'PAmodern_caption_view'),
+    { opened: true },
+  );
+
+  assert.equal(narrow.reason, T.REASON.NARROW);
+  assert.equal(unknown.reason, T.REASON.UNRECOGNIZED);
+  assert.notEqual(narrow.reason, unknown.reason);
+
+  assert.match(narrow.message, /hẹp/);
+  assert.doesNotMatch(narrow.message, /không nhận ra/);
+  assert.match(unknown.message, /không nhận ra/);
+  assert.doesNotMatch(unknown.message, /hẹp/);
+});
+
 test('scanTranscriptPanel — bỏ qua panel transcript giả nằm trong giao diện của extension', () => {
   const root = el('div', {}, [
     el('div', { id: 'nblm-panel' }, [
@@ -489,6 +669,20 @@ test('viaDom — cửa sổ quá hẹp thì báo ngay: kích hoạt tab không l
   assert.deepEqual(page.calls, [{ stage: 'scan', activated: false }]);
 });
 
+test('viaDom — "panel mở mà không nhận ra" vẫn được kích hoạt tab rồi quét lại, khác hẳn cửa sổ hẹp', async () => {
+  // Lối tắt của `viaDom` chỉ dành cho cửa sổ hẹp — chiều rộng không tự đổi vì mình chờ. Một lần
+  // dò hụt selector thì khác: nó không được biến thành một lần bỏ cuộc (ticket 017).
+  const page = fakePage([failScan(T.REASON.UNRECOGNIZED), okScan([{ start: 3, text: 'c' }])]);
+  const segments = await T.viaDom({ videoId: 'aaaaaaaaaaa' }, page);
+
+  assert.deepEqual(segments, [{ start: 3, text: 'c' }]);
+  assert.deepEqual(page.calls, [
+    { stage: 'scan', activated: false },
+    { stage: 'activate' },
+    { stage: 'scan', activated: true },
+  ]);
+});
+
 // ------------------------------------------------- kỷ luật: selector chỉ ở một chỗ
 
 test('transcript.js không chứa selector YouTube nào — mọi thứ dễ vỡ nằm ở selectors.js', () => {
@@ -502,7 +696,7 @@ test('transcript.js không chứa selector YouTube nào — mọi thứ dễ v�
     })
     .join('\n');
 
-  const SELECTOR_SHAPED = /ytd-[\w-]+|yt-[\w-]+|[\w-]+-view-model|\.segment-[\w-]+|\[(?:class|id|target-id|visibility|role|aria-[\w-]+)[\^*$~|]?=/g;
+  const SELECTOR_SHAPED = /ytd-[\w-]+|yt-[\w-]+|[\w-]+-view-model|\.segment-[\w-]+|\[(?:class|id|data-[\w-]+|target-id|visibility|role|aria-[\w-]+)[\^*$~|]?=/g;
   const found = code.match(SELECTOR_SHAPED) || [];
   assert.deepEqual(found, [], `selector lọt ra ngoài selectors.js: ${found.join(', ')}`);
 });

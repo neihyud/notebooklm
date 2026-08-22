@@ -23,24 +23,61 @@
     clickable: ['button', 'a', 'ytd-button-renderer', 'yt-button-shape', 'tp-yt-paper-button', '[role="button"]'],
     /** Phần tử thật sự nhận cú bấm. Wrapper **không** nằm trong danh sách này. */
     pressable: ['button', 'a', 'tp-yt-paper-button', '[role="button"]'],
-    /** Panel transcript của layout hiện tại; hai mục sau là layout cũ, giữ để không hỏng câm. */
+    /**
+     * Vùng chứa transcript. Bốn mục, và mục `data-target-id` **không** thừa: đo trên trang thật
+     * của `jNQXAC9IVRw` (ticket 017), panel đang mở là một
+     * `ytd-engagement-panel-section-list-renderer` **không mang `target-id` nào**, còn danh tính
+     * transcript nằm ở `data-target-id="PAmodern_transcript_view"` của `yt-section-list-renderer`
+     * bên trong nó. Ba panel *có* `target-id*="transcript"` trên cùng trang ấy thì đều đang ẩn và
+     * rỗng — nên bắt panel bằng riêng `target-id` là nhìn thấy đúng những panel không có gì, rồi
+     * kết luận sai rằng cửa sổ quá hẹp.
+     *
+     * Hệ quả: hai mục có thể khớp **lồng nhau** trên cùng một trang (panel ngoài và khối trong).
+     * `scanTranscriptPanel` phải khử trùng dòng segment, nếu không transcript ra gấp đôi.
+     * Hai mục cuối là layout cũ, giữ để không hỏng câm.
+     */
     panel: [
       'ytd-engagement-panel-section-list-renderer[target-id*="transcript"]',
       '[target-id*="transcript"]',
+      '[data-target-id*="transcript"]',
       'ytd-transcript-renderer',
     ],
-    /** Trạng thái YouTube giữ panel ở layout hẹp — không có gì để quét. */
+    /**
+     * Trạng thái YouTube giữ panel ở layout hẹp — không có gì để quét.
+     *
+     * Xét bằng `closest`, không bằng `matches`: khối trong (`data-target-id`) không mang thuộc
+     * tính này, nó thừa hưởng trạng thái ẩn từ panel ngoài. Xét bằng `matches` thì một panel
+     * đang ẩn có khối trong lại được coi là đang mở.
+     */
     panelHidden: ['[visibility="ENGAGEMENT_PANEL_VISIBILITY_HIDDEN"]'],
     segment: ['transcript-segment-view-model', 'ytd-transcript-segment-renderer'],
-    segmentTimestamp: ['.segment-timestamp', '.segment-start-offset'],
-    segmentText: ['.segment-text'],
+    /**
+     * Mốc thời gian trong một dòng. Mục đầu là layout hiện tại (đo trên trang thật, ticket 017),
+     * hai mục sau là layout cũ.
+     *
+     * Không bắt được mốc thì `parseClock('')` trả 0 — **mọi** segment mốc 0, và `srt.js` vẫn
+     * dựng ra file đủ dòng đủ chữ mở lên xem được, chỉ là mọi dòng nằm ở giây 0. Hỏng kiểu này
+     * không có triệu chứng nào ngoài việc bấm mốc thì nhảy sai chỗ.
+     */
+    segmentTimestamp: ['.ytwTranscriptSegmentViewModelTimestamp', '.segment-timestamp', '.segment-start-offset'],
+    /** Chữ của dòng. Layout hiện tại gói nó trong `span.ytAttributedStringHost[role="text"]`. */
+    segmentText: ['.ytAttributedStringHost', '.segment-text'],
     /**
      * Nhãn trợ năng lẫn trong dòng segment ("1 second"). Đường chính là `segmentText` nên nó
      * không bao giờ lọt vào khi selector chính còn khớp; danh sách này chỉ đỡ cho đường dự
      * phòng. Tên lớp ở đây là thứ dễ lệch nhất khi YouTube đổi layout — `tools/verify-live.mjs`
      * là chỗ phát hiện.
+     *
+     * Mục đầu là bài học của ticket 017: ở layout hiện tại nhãn ấy **không** mang `aria-hidden`
+     * (chính ô *mốc* mới mang), nên hai mục sau không đỡ được nó và đường dự phòng dán "1 second"
+     * vào đầu mỗi dòng transcript.
      */
-    segmentNoise: ['.segment-duration-label', '[class*="duration-label"]', '[aria-hidden="true"]'],
+    segmentNoise: [
+      '.ytwTranscriptSegmentViewModelTimestampA11yLabel',
+      '.segment-duration-label',
+      '[class*="duration-label"]',
+      '[aria-hidden="true"]',
+    ],
     /** Hàng nút Like/Share dưới player — chỗ nút của extension chen vào (ticket 005). */
     actionBar: [
       '#top-level-buttons-computed',

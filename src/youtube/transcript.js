@@ -27,8 +27,25 @@
   const API_ROUTE = Object.freeze(['innertube', 'timedtext', 'dom']);
   const PRIVATE_ROUTE = Object.freeze(['dom']);
 
+  /**
+   * Vì sao một lượt quét không ra transcript. Bốn lý do, và ranh giới giữa chúng là thứ người
+   * đọc lỗi dựa vào để biết phải làm gì:
+   *
+   *   - `NARROW` — panel bị layout hẹp giữ ẩn. Người dùng kéo rộng cửa sổ là xong; chờ thêm thì
+   *     vô ích, nên đây là lý do **duy nhất** cắt đường thử lại (`viaDom`, `watch.scanPanel`).
+   *   - `UNRECOGNIZED` — panel đang mở, chữ nằm ngay đó, nhưng không selector nào của
+   *     `selectors.js` với tới. Người dùng không làm gì được; phải sửa selector (hoặc ghi đè từ
+   *     trang Cài đặt). Ticket 017: đúng ca này từng bị gọi tên là `NARROW`, và vì `NARROW` cắt
+   *     đường lui nên một lần dò hụt thành một lần bỏ cuộc.
+   *   - `NO_PANEL` / `EMPTY` — chưa thấy gì / chưa dựng xong: chờ thêm là hết.
+   *
+   * `NARROW` và `UNRECOGNIZED` là một cặp hoán vị được: cả hai đều là lý do hợp lệ, cả hai đều
+   * dừng lượt chạy, nên đổi chỗ chúng không làm hỏng lần chạy nào — chỉ đẩy người đọc lỗi đi
+   * sai hướng (`WORKSPACE_PROTOCOL.md`). `test/transcript.test.js` canh quan hệ ấy.
+   */
   const REASON = Object.freeze({
     NARROW: 'narrow-window',
+    UNRECOGNIZED: 'panel-unrecognized',
     NO_PANEL: 'no-panel',
     EMPTY: 'empty',
   });
@@ -323,49 +340,102 @@
   }
 
   /**
+   * Bề rộng đo được của một node, hoặc `null` khi **không đo được**.
+   *
+   * `null` không phải 0: 0 là bằng chứng "panel không chiếm chỗ nào", còn `null` là "chưa có
+   * bằng chứng nào". Chỉ cái thứ nhất mới đủ để nói cửa sổ quá hẹp.
+   */
+  function measuredWidth(node) {
+    if (!node || typeof node.getBoundingClientRect !== 'function') return null;
+    const rect = node.getBoundingClientRect();
+    const width = rect ? Number(rect.width) : NaN;
+    return Number.isFinite(width) ? width : null;
+  }
+
+  /**
    * Quét panel transcript đang mở. Không ném lỗi — trả lý do, để người gọi quyết định thử lại
-   * hay dừng. Phân biệt "chưa dựng xong" với "cửa sổ quá hẹp" là cả điểm của hàm này: chỉ cái
-   * thứ nhất mới đáng thử lại.
+   * hay dừng. Phân biệt bốn lý do là cả điểm của hàm này (xem `REASON`): chỉ `NARROW` mới đáng
+   * dừng hẳn, và đúng vì thế nó là lý do phải có bằng chứng chắc nhất.
+   *
+   * Ba trạng thái dễ bị gộp thành một, và ticket 017 gộp thật:
+   *   1. *không có panel nào* — `panels` rỗng, trang cũng không có dòng segment nào;
+   *   2. *có panel nhưng đang ẩn vì layout hẹp* — panel nhận ra được, đều ẩn, đo ra 0px;
+   *   3. *có panel đang mở mà ta không nhận ra* — trên trang có dòng segment nằm ngoài mọi panel
+   *      nhận ra được. Chữ có sẵn ở đó; thiếu là selector, không phải bề rộng cửa sổ.
+   *
+   * Trạng thái 3 là **lỗi**, không phải một đường lui: bản trước quét cả cây node khi không panel
+   * nào khớp, và ca đó trả về segment như thường. Đổi lại có chủ đích — chữ chỉ được đọc từ một
+   * panel mình nhận ra. Quét mù cả trang là cách nhặt phải panel của video A còn treo trên trang
+   * video B (`WORKSPACE_PROTOCOL.md` v5), và nó giấu luôn việc selector đã hỏng: chỗ duy nhất
+   * chữa được ca này là `selectors.js` (hoặc ghi đè từ trang Cài đặt), nên nó phải nói ra.
    */
   function scanTranscriptPanel(root_, options) {
     const sel = selectorsOf(options);
     const opened = !!(options && options.opened);
     if (!root_) return { ok: false, reason: REASON.NO_PANEL, message: 'không có cây node để quét' };
 
-    const panels = Array.from(root_.querySelectorAll(sel.css('panel'))).filter((p) => !p.closest(sel.OWN_UI));
-    if (panels.length > 0 && panels.every((p) => p.matches(sel.css('panelHidden')))) {
-      // `ENGAGEMENT_PANEL_VISIBILITY_HIDDEN` là trạng thái của *mọi* panel đang đóng, không
-      // riêng panel bị layout hẹp giữ lại. Chỉ khi người gọi nói đã bấm mở rồi mà panel vẫn ẩn
-      // thì mới kết luận là cửa sổ hẹp — nếu không, một cửa sổ rộng bình thường sẽ nhận một
-      // lỗi môi trường sai sự thật, và `viaDom` cố ý không thử lại lý do đó.
-      return opened
-        ? {
-          ok: false,
-          reason: REASON.NARROW,
-          message: 'cửa sổ quá hẹp: đã bấm mở nhưng YouTube vẫn giữ panel transcript ở trạng thái ẩn',
-        }
-        : { ok: false, reason: REASON.EMPTY, message: 'panel transcript đang đóng — chưa bấm mở, hoặc cú bấm chưa ăn' };
+    const ours = (node) => !node.closest(sel.OWN_UI);
+    const panels = Array.from(root_.querySelectorAll(sel.css('panel'))).filter(ours);
+    // Ẩn xét bằng `closest`, không bằng `matches`: khối trong thừa hưởng trạng thái ẩn của panel
+    // ngoài mà không mang thuộc tính ấy (`selectors.js`, nhóm `panelHidden`).
+    const open = panels.filter((panel) => !panel.closest(sel.css('panelHidden')));
+
+    // `Set` chứ không phải mảng: hai selector của nhóm `panel` khớp **lồng nhau** trên layout
+    // hiện tại, nên cùng một dòng đến hai lần và transcript ra gấp đôi. Thứ tự Set là thứ tự
+    // gặp đầu tiên, tức thứ tự tài liệu của panel ngoài cùng.
+    const rows = new Set();
+    for (const panel of open) {
+      for (const row of panel.querySelectorAll(sel.css('segment'))) if (ours(row)) rows.add(row);
     }
 
-    const scope = panels.length > 0 ? panels : [root_];
-    const rows = [];
-    for (const panel of scope) {
-      for (const row of panel.querySelectorAll(sel.css('segment'))) {
-        if (!row.closest(sel.OWN_UI)) rows.push(row);
+    if (rows.size > 0) {
+      const segments = [...rows].map((row) => readSegment(row, sel)).filter(Boolean);
+      if (segments.length === 0) {
+        return { ok: false, reason: REASON.EMPTY, message: 'panel có segment nhưng không đọc được chữ nào' };
       }
+      return { ok: true, segments };
     }
 
-    if (rows.length === 0) {
-      return panels.length > 0
-        ? { ok: false, reason: REASON.EMPTY, message: 'panel đã mở nhưng chưa có segment nào' }
-        : { ok: false, reason: REASON.NO_PANEL, message: 'chưa thấy panel transcript trên trang' };
+    // Không đọc được dòng nào từ panel mình nhận ra — giờ mới đi chẩn đoán, và chẩn đoán bắt đầu
+    // bằng câu hỏi rẻ nhất: chữ có nằm sẵn trên trang không?
+    const strays = Array.from(root_.querySelectorAll(sel.css('segment')))
+      .filter((row) => ours(row) && !row.closest(sel.css('panel')));
+    if (strays.length > 0) {
+      return {
+        ok: false,
+        reason: REASON.UNRECOGNIZED,
+        message: `panel transcript đang mở mà selector không nhận ra: ${strays.length} dòng segment nằm ngoài mọi panel bắt được`,
+      };
+    }
+    if (panels.length === 0) {
+      return { ok: false, reason: REASON.NO_PANEL, message: 'chưa thấy panel transcript trên trang' };
+    }
+    if (open.length > 0) {
+      return { ok: false, reason: REASON.EMPTY, message: 'panel đã mở nhưng chưa có segment nào' };
+    }
+    // `…_HIDDEN` là trạng thái của *mọi* panel đang đóng, không riêng panel bị layout hẹp giữ
+    // lại. Chưa bấm mở thì nó chỉ có nghĩa là đang đóng.
+    if (!opened) {
+      return { ok: false, reason: REASON.EMPTY, message: 'panel transcript đang đóng — chưa bấm mở, hoặc cú bấm chưa ăn' };
     }
 
-    const segments = rows.map((row) => readSegment(row, sel)).filter(Boolean);
-    if (segments.length === 0) {
-      return { ok: false, reason: REASON.EMPTY, message: 'panel có segment nhưng không đọc được chữ nào' };
+    const widths = panels.map(measuredWidth);
+    if (widths.some((width) => width === null)) {
+      return { ok: false, reason: REASON.EMPTY, message: 'panel đang ẩn nhưng không đo được bề rộng nào — chưa đủ căn cứ nói cửa sổ hẹp' };
     }
-    return { ok: true, segments };
+    const widest = Math.max(...widths);
+    if (widest > 0) {
+      return {
+        ok: false,
+        reason: REASON.EMPTY,
+        message: `panel khai đang ẩn nhưng vẫn chiếm ${Math.round(widest)}px bề rộng — chưa đủ căn cứ nói cửa sổ hẹp`,
+      };
+    }
+    return {
+      ok: false,
+      reason: REASON.NARROW,
+      message: 'cửa sổ quá hẹp: đã bấm mở nhưng YouTube vẫn giữ panel transcript ẩn và không chiếm một pixel bề rộng nào',
+    };
   }
 
   function domError(request, result) {
