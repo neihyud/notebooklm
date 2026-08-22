@@ -59,6 +59,38 @@
     ? PUSH_VIA_LABEL[via]
     : (via ? `đường lạ (${via})` : 'đường không rõ'));
 
+  /**
+   * Nguồn vừa đẩy có mang **đúng tên ta đặt** không — rỗng nghĩa là có, ngược lại là câu nói ra
+   * chỗ lệch.
+   *
+   * Câu hỏi là một, còn bằng chứng thì mỗi đường một loại — nên chỗ hợp nhất nằm ở đây, không
+   * nằm trong một trong hai đường:
+   *
+   *   - đường DOM tự tay điền ô tiêu đề, nên thứ nó biết là **điền được hay không** (`named`),
+   *     kèm sẵn câu chữ cho người đọc (`warning` của `addTextSource`);
+   *   - đường RPC không có khái niệm "không đặt được tên" — nó gửi tiêu đề trong `params` — mà
+   *     có thứ mạnh hơn: **tên Nguồn trong phản hồi**, tức tên notebook thật sự đang giữ. Shape
+   *     `params` trôi theo cohort (ADR 0012) thì request vẫn thành công và tên vẫn khác, nên
+   *     "gửi đi rồi" không phải bằng chứng nào cả; tên đọc lại được thì là.
+   *
+   * Không xác nhận được thì nói ra, đừng im — cùng luật với `pushViaOf`: im lặng là hạng *chưa
+   * biết*, không phải hạng *ổn*. Tên Nguồn là vĩnh viễn (ADR 0010) và ADR 0009 đọc chính tên ấy
+   * để biết phần nào đã có, nên một lượt chạy mà Sổ đã import và notebook nói hai chuyện khác
+   * nhau không sửa lại được — và nó không có triệu chứng nào khác.
+   */
+  function nameWarningOf(intended, result) {
+    const wanted = String(intended || '').trim();
+    if (!wanted) return ''; // Nguồn không đặt tên thì không có cái tên nào để mất
+    const r = result && typeof result === 'object' ? result : {};
+    if (r.named === false) {
+      const said = typeof r.warning === 'string' ? r.warning.trim() : '';
+      return said || `không đặt được tên — NotebookLM sẽ tự đặt tên thay cho "${wanted}"`;
+    }
+    const got = typeof r.name === 'string' ? r.name.trim() : '';
+    if (!got) return `lượt đẩy không nói Nguồn mang tên gì — không xác nhận được "${wanted}"`;
+    return got === wanted ? '' : `notebook đang để tên "${got}", không phải "${wanted}"`;
+  }
+
   // ------------------------------------------------------------------ trạng thái
 
   /**
@@ -240,6 +272,11 @@
       // cửa cho việc gán `via` của Nguồn A cho Nguồn B, mà hai chuỗi ấy cùng kiểu và cùng tập
       // giá trị hợp lệ nên bảng tổng kết vẫn đọc trôi chảy.
       source.pushVia = pushViaOf(result);
+      // Cùng chỗ, cùng lý do: `source.name` là tên **ta đặt** cho đúng Nguồn này, và `result` là
+      // thứ đường đẩy nói về đúng Nguồn ấy. Ghép hai thứ lại sau bằng thứ tự hai danh sách là mở
+      // cửa cho cảnh báo của Nguồn A đứng dưới tên Nguồn B — hai chuỗi cùng kiểu, và bảng tổng
+      // kết vẫn đọc trôi chảy trong khi nó chỉ sai đúng cái tên người dùng cần.
+      source.nameWarning = nameWarningOf(source.name, result);
       log.sources.push(source);
       // Nguồn gộp vẫn ghi vào Sổ **từng mục một**, để một lần import lẻ sau đó biết là trùng
       // (ADR 0006).
@@ -396,9 +433,11 @@
     // khỏi phép đếm** — đúng hạng hỏng âm thầm mà cả bảng tổng kết này tồn tại để chặn
     // (ADR 0008). `Map` không có prototype để đụng vào; bản đổ ra vẫn là object thuần JSON.
     const viaCounts = new Map();
+    let unnamed = 0;
     for (const source of log.sources) {
       const via = source.pushVia || '';
       viaCounts.set(via, (viaCounts.get(via) || 0) + 1);
+      if (source.nameWarning) unnamed += 1;
       for (const id of source.itemIds) {
         imported.push(id);
         seen.set(id, (seen.get(id) || 0) + 1);
@@ -419,6 +458,7 @@
       deferred: (log.deferred || []).length,
       sources: log.sources.length,
       pushVia: Object.fromEntries(viaCounts),
+      unnamed,
       words: log.sources.reduce((sum, s) => sum + s.words, 0),
       stopped: log.stopped,
       leaked,
@@ -454,6 +494,16 @@
     for (const source of log.sources) {
       lines.push(`  + ${source.name}: ${source.itemIds.length} mục, ${source.words} từ`
         + `${source.overflow ? ' (vượt trần)' : ''} — ${pushViaLabel(source.pushVia)}`);
+    }
+    // Tên Nguồn đứng thành mục riêng chứ không nối vào dòng của chính nó: đây là câu duy nhất
+    // trong cả bảng mà người dùng **không sửa lại được** (ADR 0010 — extension không sửa, không
+    // xoá Nguồn), nên nó phải đọc được ở dạng một danh sách ngắn thay vì nằm cuối một dòng dài.
+    // Con số ở đầu mục lấy từ phép đếm của `summarize`, còn các dòng lấy từ `log.sources`: hai
+    // đường, nên một phép đếm lệch hiện ra thành đầu mục nói khác thân mục.
+    const unnamed = log.sources.filter((source) => source.nameWarning);
+    if (unnamed.length) {
+      lines.push(`Tên Nguồn KHÔNG theo ý ta — ${s.unnamed} Nguồn (NotebookLM tự đặt, và tên Nguồn là vĩnh viễn):`);
+      for (const source of unnamed) lines.push(`  ! ${source.name}: ${source.nameWarning}`);
     }
     if (log.skipped.length) {
       lines.push('Bỏ qua:');

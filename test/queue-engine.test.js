@@ -784,3 +784,139 @@ test('runQueue — `via` trùng tên thuộc tính kế thừa vẫn đếm đ�
     assert.doesNotMatch(table, /native code|\[object Object\]/, table);
   }
 });
+
+// ------------------------------------------- tên Nguồn lên bảng tổng kết (ticket 021)
+
+/**
+ * Adapter đẩy trả về **cả giá trị nói về tên Nguồn**, đúng hình dạng hai đường thật trả về:
+ * đường DOM `{ ok, name, named, warning }` (`automation.js`), đường RPC `{ ok, via, sourceId,
+ * name, status }` (`rpc.js`) — trong đó `name` của đường RPC là tên **notebook đọc lại cho ta**,
+ * không phải tên ta gửi đi.
+ *
+ * Bảng tra theo **tên Nguồn** chứ không theo thứ tự gọi, cùng lý do với `viaAdapters`: tra theo
+ * thứ tự thì đúng phép hoán vị cần bắt — gán cảnh báo của Nguồn A cho Nguồn B — không phân biệt
+ * được với một fixture đúng.
+ */
+function pushReplies(replyByName, opts = {}) {
+  const base = fakeAdapters(opts);
+  return {
+    ...base,
+    push: async (source) => {
+      await base.push(source);
+      const reply = replyByName[source.name];
+      assert.ok(reply !== undefined, `fixture thiếu phản hồi đẩy cho Nguồn "${source.name}"`);
+      return { ok: true, ...reply };
+    },
+  };
+}
+
+/** Câu chữ thật của `addTextSource` khi hộp thoại không có ô tiêu đề (`src/notebooklm/automation.js`). */
+const domWarning = (name) => `không thấy ô tiêu đề trong hộp thoại — NotebookLM sẽ tự đặt tên thay cho "${name}"`;
+
+/**
+ * **Bốn** Nguồn, Nguồn không đặt được tên đứng **thứ hai** — WORKSPACE_PROTOCOL v10.
+ *
+ * n=1 thì "Nguồn này không có tên" trùng khít "cả lượt không có tên" và mọi phép hoán vị đều
+ * xanh; đứng đầu thì `[0]` lọt, đứng cuối thì `at(-1)` lọt; ba Nguồn với Nguồn đặc biệt ở giữa
+ * thì dãy **bằng chính bản đảo ngược của nó**, nên phép đọc theo chỉ số đảo ngược cũng lọt.
+ */
+const FOUR = ['mo-dau', 'giua', 'ke', 'ket'];
+const fourVideos = () => FOUR.map((id) => video(id));
+const nameOf = (id) => `Video ${id}`;
+
+/** Phản hồi của một Nguồn đã mang đúng tên ta đặt: notebook đọc lại đúng cái tên ấy. */
+const namedOk = (id, via = 'rpc') => ({ via, name: nameOf(id) });
+
+test('runQueue — bảng tổng kết gọi tên Nguồn KHÔNG đặt được tên (đường DOM, ADR 0010)', async () => {
+  const a = pushReplies({
+    [nameOf('mo-dau')]: namedOk('mo-dau'),
+    [nameOf('giua')]: { via: 'dom', name: nameOf('giua'), named: false, warning: domWarning(nameOf('giua')) },
+    [nameOf('ke')]: namedOk('ke'),
+    [nameOf('ket')]: namedOk('ket'),
+  });
+  const log = await E.runQueue({
+    items: fourVideos(), notebookId: 'NB-1', extract: a.extract, push: a.push,
+  });
+
+  assert.deepEqual(
+    log.sources.map((s) => [s.name, s.nameWarning]),
+    [
+      [nameOf('mo-dau'), ''],
+      [nameOf('giua'), domWarning(nameOf('giua'))],
+      [nameOf('ke'), ''],
+      [nameOf('ket'), ''],
+    ],
+  );
+  assert.equal(log.summary.unnamed, 1);
+
+  // Cảnh báo phải đứng **trên cùng một dòng với tên Nguồn của chính nó**: một con số "1 Nguồn
+  // không đặt được tên" không phân biệt được lượt này với lượt đã gán cảnh báo cho Nguồn khác,
+  // mà cái người dùng cần là *Nguồn NÀO* — họ không sửa được tên, chỉ còn cách biết mà tránh.
+  const table = E.formatSummary(log);
+  assert.match(table, /^Tên Nguồn KHÔNG theo ý ta — 1 Nguồn/m, table);
+  assert.match(table, new RegExp(`^ {2}! ${nameOf('giua')}: không thấy ô tiêu đề`, 'm'), table);
+  for (const id of ['mo-dau', 'ke', 'ket']) {
+    assert.doesNotMatch(table, new RegExp(`! ${nameOf(id)}:`), `${id} mang tên đúng ý ta mà vẫn bị gọi tên`);
+  }
+});
+
+test('runQueue — đường RPC nói CÙNG một chuyện bằng tên nó nhận về, không im lặng', async () => {
+  // Đường RPC không có khái niệm "không đặt được tên" — nó gửi tiêu đề trong `params`. Nhưng nó
+  // nhận về **tên notebook thật sự đang giữ**, và đó là bằng chứng mạnh hơn: khi shape `params`
+  // trôi theo cohort (ADR 0012, và mẫu của ticket 020 chưa từng đối chiếu với capture thật),
+  // request vẫn thành công còn Nguồn mang một cái tên khác — vĩnh viễn.
+  const soi = 'Nội dung không tiêu đề';
+  const a = pushReplies({
+    [nameOf('mo-dau')]: namedOk('mo-dau'),
+    [nameOf('giua')]: { via: 'rpc', name: soi, status: 2 },
+    [nameOf('ke')]: namedOk('ke'),
+    [nameOf('ket')]: namedOk('ket'),
+  });
+  const log = await E.runQueue({
+    items: fourVideos(), notebookId: 'NB-1', extract: a.extract, push: a.push,
+  });
+
+  assert.equal(log.summary.unnamed, 1);
+  // **Chiều** của cặp: hai chuỗi cùng kiểu, hoán vị chúng vẫn ra một câu đọc trôi chảy nói
+  // ngược sự thật — "notebook đang để tên <tên ta đặt>" là đúng thứ không được phép in ra.
+  const table = E.formatSummary(log);
+  assert.match(
+    table,
+    new RegExp(`^ {2}! ${nameOf('giua')}: notebook đang để tên "${soi}", không phải "${nameOf('giua')}"$`, 'm'),
+    table,
+  );
+});
+
+test('runQueue — lượt đẩy không nói tên nào là "chưa xác nhận", KHÔNG phải "ổn"', async () => {
+  // Cùng luật với `pushVia`: im lặng là hạng chưa biết. Một adapter không nói Nguồn mang tên gì
+  // thì bảng tổng kết không được thay nó khẳng định — ADR 0009 đọc tên Nguồn trong notebook để
+  // biết phần nào đã có, nên "tưởng là đúng tên" là chỗ hỏng âm thầm đắt nhất của repo này.
+  const a = pushReplies({
+    [nameOf('mo-dau')]: namedOk('mo-dau'),
+    [nameOf('giua')]: { via: 'rpc' },
+    [nameOf('ke')]: namedOk('ke'),
+    [nameOf('ket')]: namedOk('ket'),
+  });
+  const log = await E.runQueue({
+    items: fourVideos(), notebookId: 'NB-1', extract: a.extract, push: a.push,
+  });
+
+  assert.equal(log.summary.unnamed, 1);
+  const table = E.formatSummary(log);
+  assert.match(table, new RegExp(`^ {2}! ${nameOf('giua')}: [^\\n]*không xác nhận được`, 'm'), table);
+});
+
+test('runQueue — mọi Nguồn mang đúng tên ta đặt thì bảng KHÔNG có dòng nào (đối chứng)', async () => {
+  // Đối chứng cho ba test trên: nếu mục này hiện cả ở lượt sạch thì nó là nhiễu, và một dòng
+  // cảnh báo lúc nào cũng có là một dòng không ai đọc nữa.
+  const a = pushReplies(Object.fromEntries(FOUR.map((id) => [nameOf(id), namedOk(id)])));
+  const log = await E.runQueue({
+    items: fourVideos(), notebookId: 'NB-1', extract: a.extract, push: a.push,
+  });
+
+  assert.equal(log.summary.unnamed, 0);
+  assert.deepEqual(log.sources.map((s) => s.nameWarning), ['', '', '', '']);
+  const table = E.formatSummary(log);
+  assert.doesNotMatch(table, /Tên Nguồn KHÔNG/, table);
+  assert.doesNotMatch(table, /^ {2}!/m, table);
+});

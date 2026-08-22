@@ -57,8 +57,54 @@ export const erFrame = (code = 14, message = 'lỗi phía server') => ['er', RPC
 export const SOURCE_ID = 'src-abc-123';
 export const SOURCE_TITLE = 'Tieu de Nguon';
 
-/** Payload của một lượt thêm nguồn: id + tiêu đề + trạng thái (`READY` là `[null, 2]`). */
-export const okPayload = (statusCode) => [[[[SOURCE_ID], SOURCE_TITLE, [null, statusCode]]]];
+/**
+ * Payload của một lượt thêm nguồn: id + **tiêu đề notebook đang giữ** + trạng thái (`READY` là
+ * `[null, 2]`).
+ *
+ * `title` là một tham số chứ không phải một hằng, vì đó là chỗ duy nhất phản hồi nói ra tên
+ * Nguồn thật sự — và tên Nguồn là vĩnh viễn (ADR 0010). Một fixture luôn trả `SOURCE_TITLE` cho
+ * mọi request nói rằng notebook đặt cùng một cái tên cho mọi Nguồn, tức nó **phát biểu một điều
+ * sai** ngay lúc người gọi bắt đầu đối chiếu tên gửi đi với tên nhận về (ticket 021).
+ */
+export const okPayload = (statusCode, title = SOURCE_TITLE) => [[[[SOURCE_ID], title, [null, statusCode]]]];
+
+/** Phản hồi của một lượt thành công, mang đúng tiêu đề mà notebook đang giữ. */
+export const successBody = (title = SOURCE_TITLE) => wrap(wrbFrame(okPayload(2, title)));
 
 /** Phản hồi của một lượt thành công — mặc định của `fetch` giả trong harness service worker. */
-export const SUCCESS_BODY = wrap(wrbFrame(okPayload(2)));
+export const SUCCESS_BODY = successBody();
+
+// ------------------------------------------------------- đọc lại một request đã gửi
+
+/**
+ * Đường đi tới một nút **trong mẫu**, và giá trị ở đúng đường ấy trong một cây khác.
+ *
+ * Cả hai chỗ đọc `params` — test dựng request và `fetch` giả của harness — đi qua đây, để không
+ * chỗ nào **chép lại** shape: ticket 015 xanh 766 với cặp `content`/`title` đảo đúng vì test của
+ * nó đối chiếu `buildParams` với một hằng số chép tay từ ticket. Khi capture về, chỗ phải sửa là
+ * `TEXT_PARAMS_SPECIMEN`; mọi chỗ đọc ở đây tự đi theo.
+ */
+export function pathTo(node, mark, trail = []) {
+  if (node === mark) return trail;
+  if (!Array.isArray(node)) return null;
+  for (let i = 0; i < node.length; i += 1) {
+    const found = pathTo(node[i], mark, [...trail, i]);
+    if (found) return found;
+  }
+  return null;
+}
+
+export const nodeAt = (root, path) => path.reduce((node, i) => node[i], root);
+
+/**
+ * Thân một request `batchexecute` đã gửi → `params` của lượt gọi bên trong.
+ *
+ * Lớp bọc `f.req` là hình dạng của **giao thức**, không phải của `izAoDd`, nên nó ở đây cùng
+ * chỗ với bộ dựng phản hồi giả — một bản sao thứ hai là một bản sẽ lệch.
+ */
+export function paramsOfBody(body) {
+  const envelope = JSON.parse(new URLSearchParams(String(body)).get('f.req'));
+  const call = envelope[0][0];
+  if (call[0] !== RPC_ID) throw new Error(`lớp ngoài f.req mang rpcid "${call[0]}", không phải ${RPC_ID}`);
+  return JSON.parse(call[1]);
+}

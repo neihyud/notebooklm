@@ -21,7 +21,8 @@ import '../src/notebooklm/rpc.js';
 // Phản hồi giả dựng theo hình dạng capture, dùng chung với harness service worker.
 import {
   AT, SID, HEAD, TAIL, SOURCE_ID, SOURCE_TITLE as TITLE,
-  batchResponse, wrap, wrbFrame, erFrame, okPayload, WIZ_HTML,
+  batchResponse, wrap, wrbFrame, erFrame, okPayload, successBody, WIZ_HTML,
+  paramsOfBody, pathTo, nodeAt,
 } from './helpers/batchexecute.js';
 // Service worker thật + `chrome` giả + `fetch` giả, cùng ghi vào một sổ.
 import '../src/common/messages.js';
@@ -215,13 +216,11 @@ test('WIZ — thiếu một trong hai khoá thì ném ngay, không trả token r
 
 // =========================================================== dựng request
 
-function paramsOf(req) {
-  const form = new URLSearchParams(req.body);
-  const envelope = JSON.parse(form.get('f.req'));
-  const call = envelope[0][0];
-  assert.equal(call[0], R.RPC_ID, 'lớp ngoài f.req phải mang đúng rpcid');
-  return JSON.parse(call[1]);
-}
+/**
+ * `params` của một request đã dựng. Lớp bọc `f.req` gỡ bằng đúng bộ mà `fetch` giả của harness
+ * dùng để đọc lại request — hai bản gỡ là hai bản sẽ lệch, và lệch thì cả hai bên vẫn xanh.
+ */
+const paramsOf = (req) => paramsOfBody(req.body);
 
 const build = (extra) => R.buildRequest({ notebookId: NB, source: SOURCE, tokens: TOKENS, lang: 'vi', ...extra });
 
@@ -289,24 +288,14 @@ test('request — endpoint dựng từ hằng số host của shared.js, không 
 const SPEC = R.TEXT_PARAMS;
 
 /**
- * Đường đi tới một chỗ giữ chỗ **trong mẫu**. Cả cụm test dưới đây đọc mẫu chứ không chép lại
- * shape: ticket 015 xanh 766 với một cặp `content`/`title` đảo đúng vì test của nó đối chiếu
- * `buildParams` với một hằng số chép tay từ ticket, nên phép hoán vị chỉ chứng minh code khớp
- * hằng số ấy. Khi capture về, chỗ phải sửa là `TEXT_PARAMS_SPECIMEN` — mọi test ở đây tự đi theo.
+ * Giá trị `buildParams` đặt vào đúng ô mà **mẫu** dành cho chỗ giữ chỗ `mark`.
+ *
+ * Cả cụm test dưới đây đọc mẫu chứ không chép lại shape (`pathTo` ở `helpers/batchexecute.js`,
+ * dùng chung với `fetch` giả của harness): ticket 015 xanh 766 với một cặp `content`/`title` đảo
+ * đúng vì test của nó đối chiếu `buildParams` với một hằng số chép tay từ ticket, nên phép hoán
+ * vị chỉ chứng minh code khớp hằng số ấy. Khi capture về, chỗ phải sửa là `TEXT_PARAMS_SPECIMEN`
+ * — mọi test ở đây tự đi theo.
  */
-function pathTo(node, mark, trail = []) {
-  if (node === mark) return trail;
-  if (!Array.isArray(node)) return null;
-  for (let i = 0; i < node.length; i += 1) {
-    const found = pathTo(node[i], mark, [...trail, i]);
-    if (found) return found;
-  }
-  return null;
-}
-
-const nodeAt = (root, path) => path.reduce((node, i) => node[i], root);
-
-/** Giá trị `buildParams` đặt vào đúng ô mà **mẫu** dành cho chỗ giữ chỗ `mark`. */
 function atMark(params, mark) {
   const path = pathTo(SPEC.specimen, mark);
   assert.ok(path, `mẫu shape không còn chỗ giữ chỗ \`${mark}\``);
@@ -796,4 +785,114 @@ test('service worker — Nguồn quá lớn không gửi request nào, và bản
   const { sw, answer } = await runDocsImport({ answer: hugeDoc });
   assert.equal(posts(sw).length, 0, 'đã gửi request cho một Nguồn lẽ ra không được gửi');
   assert.match(answer.result.summary, /Nguồn đã tạo: 2 \(2 đường lui \(DOM\)\)/, answer.result.summary);
+});
+
+// ======================================== tên Nguồn lên bảng tổng kết (ticket 021)
+
+/**
+ * Đổi phản hồi của **đúng lượt POST thứ `nth`**; các lượt khác rơi về mặc định của harness, tức
+ * echo lại đúng tiêu đề vừa gửi.
+ *
+ * Khác `postsInOrder` ở chỗ đó: ở đây ba lượt "bình thường" phải mang **ba tiêu đề khác nhau**,
+ * nên một danh sách phản hồi soạn sẵn không dựng nổi — soạn tay thì chính chúng cũng thành ba
+ * cái tên lệch, và test sẽ xanh vì lý do khác với lý do nó tưởng.
+ */
+function postNth(nth, reply) {
+  let sent = 0;
+  return async (_href, init) => {
+    if (((init && init.method) || 'GET') !== 'POST') return null;
+    sent += 1;
+    return sent === nth ? fakeResponse(reply.status, reply.text) : null;
+  };
+}
+
+/** Câu chữ thật của `addTextSource` khi hộp thoại không có ô tiêu đề. */
+const domWarning = (name) => `không thấy ô tiêu đề trong hộp thoại — NotebookLM sẽ tự đặt tên thay cho "${name}"`;
+
+/** Tab NotebookLM đẩy được nhưng **không** điền được ô tiêu đề — nhánh `named: false` của ticket 004. */
+const tabCannotName = (layer, _tab, message) => {
+  if (layer !== 'notebooklm' || M.typeOf(message) !== M.TYPES.PUSH_SOURCE) return undefined;
+  const name = String(message.source.name);
+  return { ok: true, result: { ok: true, name, named: false, warning: domWarning(name) } };
+};
+
+test('service worker — đường lui đẩy được mà không đặt được tên: bảng gọi ĐÚNG tên Nguồn ấy', async () => {
+  // Cùng fixture bốn Nhánh của ticket 019, Nhánh đặc biệt vẫn ở **vị trí hai**: một Nguồn thì
+  // "Nguồn này mất tên" trùng khít "cả lượt mất tên"; ba Nguồn với Nguồn đặc biệt ở giữa thì dãy
+  // bằng chính bản đảo ngược của nó (WORKSPACE_PROTOCOL v10).
+  const { sw, answer } = await runDocsImport({
+    fetch: postNth(2, { status: 200, text: DRIFT_BODY }),
+    answer: tabCannotName,
+  }, FOUR_BRANCHES);
+
+  assert.equal(answer.ok, true, answer.error);
+  assert.deepEqual([...sw.messaged(M.TYPES.PUSH_SOURCE)], [NOTEBOOK_TAB], 'đúng Nguồn thứ hai đi đường lui');
+
+  // Lượt đẩy **thành công**, nên không có dòng nào ở "Mục rớt" — trước ticket này cả chuyện
+  // NotebookLM tự đặt tên cho Nguồn ấy không để lại dấu vết nào cho người dùng, mà tên Nguồn thì
+  // extension không sửa và không xoá được (ADR 0010), còn ADR 0009 đọc chính tên ấy ở lần sau.
+  const table = answer.result.summary;
+  assert.doesNotMatch(table, /Mục rớt/, table);
+  assert.match(table, /^Tên Nguồn KHÔNG theo ý ta — 1 Nguồn/m, table);
+  assert.match(table, /^ {2}! docs\.acme\.dev — API: không thấy ô tiêu đề/m, table);
+  for (const nhanh of ['Hướng dẫn', 'Hỏi đáp', 'Nhật ký']) {
+    assert.doesNotMatch(table, new RegExp(`! docs\\.acme\\.dev — ${nhanh}:`), `${nhanh} đặt được tên mà vẫn bị gọi tên`);
+  }
+  // Và Nguồn ấy vẫn là Nguồn đi đường lui: hai câu nói về **cùng một** Nguồn, không lệch nhau.
+  assert.match(table, /^ {2}\+ docs\.acme\.dev — API: [^\n]* — đường lui \(DOM\)$/m, table);
+});
+
+test('service worker — đường RPC nói CÙNG một chuyện: tên notebook đọc lại khác tên ta gửi', async () => {
+  // Đường RPC không có khái niệm "không đặt được tên" — nó gửi tiêu đề trong `params` và không
+  // bao giờ thấy một ô tiêu đề nào. Nhưng nó nhận về **tên notebook thật sự đang giữ**, nên câu
+  // hỏi của ticket 021 vẫn trả lời được ở đúng chỗ nối, và trả lời bằng bằng chứng mạnh hơn.
+  //
+  // Đây không phải một ca giả định: mẫu `params` của ticket 020 dựng từ hai bộ reverse-engineer
+  // và **chưa từng đối chiếu với một capture thật**. Ô tiêu đề sai chỗ thì request vẫn thành
+  // công, chỉ là Nguồn mang một cái tên khác — vĩnh viễn.
+  const tuDat = 'Than Nguon: mot dong transcript';
+  const { sw, answer } = await runDocsImport({
+    fetch: postNth(2, { status: 200, text: successBody(tuDat) }),
+  }, FOUR_BRANCHES);
+
+  assert.equal(answer.ok, true, answer.error);
+  assert.equal(posts(sw).length, 4, 'bốn Nguồn phải là bốn lượt gửi — không lượt nào rơi về đường lui');
+  assert.deepEqual([...sw.messaged(M.TYPES.PUSH_SOURCE)], [], 'tên lệch KHÔNG phải lý do để đẩy lần nữa');
+
+  // **Chiều** của cặp: hai chuỗi cùng kiểu ở hai vai ngược nhau. Hoán vị chúng vẫn cho một câu
+  // đọc trôi chảy — và nó nói ngược sự thật về cái tên duy nhất người dùng không sửa lại được.
+  const table = answer.result.summary;
+  assert.match(table, /^Tên Nguồn KHÔNG theo ý ta — 1 Nguồn/m, table);
+  assert.match(
+    table,
+    new RegExp(`^ {2}! docs\\.acme\\.dev — API: notebook đang để tên "${tuDat}", không phải "docs\\.acme\\.dev — API"$`, 'm'),
+    table,
+  );
+  for (const nhanh of ['Hướng dẫn', 'Hỏi đáp', 'Nhật ký']) {
+    assert.doesNotMatch(table, new RegExp(`! docs\\.acme\\.dev — ${nhanh}:`), `${nhanh} mang đúng tên mà vẫn bị gọi tên`);
+  }
+});
+
+test('service worker — lượt mà mọi Nguồn mang đúng tên ta đặt KHÔNG có mục nào (đối chứng)', async () => {
+  // Đối chứng cho hai test trên, và nó chỉ có nghĩa vì phản hồi mặc định của harness **echo lại
+  // đúng tiêu đề vừa gửi**: một fixture trả cùng một tiêu đề cho mọi request phát biểu rằng
+  // notebook đặt lại tên cho mọi Nguồn, và khi ấy mục này hiện ở cả lượt sạch.
+  const { answer } = await runDocsImport({}, FOUR_BRANCHES);
+  assert.equal(answer.result.summary.includes('Tên Nguồn KHÔNG'), false, answer.result.summary);
+  assert.doesNotMatch(answer.result.summary, /^ {2}!/m, answer.result.summary);
+});
+
+test('service worker — đường lui ĐẶT ĐƯỢC tên thì bảng không có mục nào (đối chứng cho stub tab)', async () => {
+  // Đối chứng cho test đường lui ở trên, và nó canh chính **stub tab**: một stub trả về thứ
+  // `addTextSource` không bao giờ trả (`{ sourceId }`, không `name`, không `named`) làm mọi Nguồn
+  // đi đường lui rơi vào hạng "chưa xác nhận được tên" ở mọi test khác của file này — im lặng,
+  // vì không test nào hỏi tới. Ở đây thì có hỏi.
+  const { sw, answer } = await runDocsImport({
+    fetch: postNth(2, { status: 200, text: DRIFT_BODY }),
+  }, FOUR_BRANCHES);
+
+  assert.deepEqual([...sw.messaged(M.TYPES.PUSH_SOURCE)], [NOTEBOOK_TAB], 'fixture phải có một Nguồn đi đường lui');
+  const table = answer.result.summary;
+  assert.match(table, /^ {2}\+ docs\.acme\.dev — API: [^\n]* — đường lui \(DOM\)$/m, table);
+  assert.equal(table.includes('Tên Nguồn KHÔNG'), false, table);
 });

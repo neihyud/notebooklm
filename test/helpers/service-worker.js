@@ -9,14 +9,18 @@ import assert from 'node:assert/strict';
 import { createContext, runInContext } from 'node:vm';
 import { read, SW_PATH, SW_SOURCE, importScriptsOf } from './extension.js';
 // Phản hồi `batchexecute` giả — dựng theo hình dạng capture, không lấy từ một request thật nào.
-import { WIZ_HTML, SUCCESS_BODY } from './batchexecute.js';
+import { WIZ_HTML, successBody, paramsOfBody, pathTo, nodeAt } from './batchexecute.js';
 // Classic script gắn API vào globalThis — nhập ở đây chứ không dựa vào thứ tự nhập của file
 // test: `layerAnswer` đọc `M.TYPES` ngay lúc module này chạy.
 import '../../src/common/shared.js';
 import '../../src/common/messages.js';
+// Mẫu shape của `params` — `fetch` giả **đọc** nó để biết tiêu đề nằm ô nào, chứ không chép lại
+// đường đi ấy vào đây; xem `titleSent`.
+import '../../src/notebooklm/rpc.js';
 
 const S = globalThis.NBLM_SHARED;
 const M = globalThis.NBLM_MESSAGES;
+const R = globalThis.NBLM_RPC;
 
 export const SITE = 'https://docs.acme.dev';
 export const DOCS_PAGE = `${SITE}/guide/cai-dat`;
@@ -71,7 +75,14 @@ function layerAnswer(layer, tab, message) {
   }
   if (layer === 'notebooklm') {
     if (type === M.TYPES.PING_NOTEBOOKLM) return { ok: true, result: { notebookId: NOTEBOOK_ID } };
-    if (type === M.TYPES.PUSH_SOURCE) return { ok: true, result: { sourceId: 'src-1' } };
+    // Đúng hình dạng `addTextSource` trả về (`src/notebooklm/automation.js`): đường lui **có**
+    // khái niệm "không đặt được tên", và người gọi đọc `named`/`name` để biết Nguồn có mang tên
+    // ta đặt không (ticket 021). Một stub trả `{ sourceId }` — thứ `addTextSource` không bao giờ
+    // trả — làm cả nhánh ấy vắng mặt khỏi mọi test đi qua harness này.
+    if (type === M.TYPES.PUSH_SOURCE) {
+      const name = String((message.source && message.source.name) || '');
+      return { ok: true, result: { ok: true, name, named: true } };
+    }
   }
   if (layer === 'youtube') {
     if (type === M.TYPES.PING_YOUTUBE) return { ok: true, result: { ready: true } };
@@ -203,13 +214,33 @@ export function fakeChrome(given = {}) {
    */
   const fetchStub = async (href, init) => {
     const method = (init && init.method) || 'GET';
-    note('fetch', null, { url: String(href), method, body: (init && init.body) || '' });
+    const body = (init && init.body) || '';
+    note('fetch', null, { url: String(href), method, body });
     const override = given.fetch && await given.fetch(String(href), init);
     if (override) return override;
-    return fakeResponse(200, method === 'GET' ? WIZ_HTML : SUCCESS_BODY);
+    return fakeResponse(200, method === 'GET' ? WIZ_HTML : successBody(titleSent(body)));
   };
 
   return { api, log, tabs, fetchStub };
+}
+
+/**
+ * Tiêu đề mà lượt gửi vừa rồi **thật sự mang theo** — thứ một server thật đọc rồi đặt làm tên
+ * Nguồn, và đọc lại cho ta trong phản hồi.
+ *
+ * Fixture mặc định phải echo đúng nó, không phải một hằng số: người gọi đối chiếu tên gửi đi với
+ * tên nhận về để biết Nguồn có mang tên ta đặt không (ticket 021), nên một phản hồi luôn trả
+ * cùng một tiêu đề **phát biểu rằng notebook đặt lại tên cho mọi Nguồn**.
+ *
+ * Ô nào là ô tiêu đề thì hỏi **mẫu** `TEXT_PARAMS_SPECIMEN`, không chép đường đi vào đây. Đổi
+ * lại, phép echo này cố ý **không** kiểm chọn ô: nó trả về đúng thứ `buildParams` đặt vào ô mà
+ * mẫu gọi là tiêu đề. Việc canh ô ấy là ô đúng thuộc về cụm test đọc mẫu trong
+ * `notebooklm-rpc.test.js` (ticket 020) — chỗ duy nhất có thể canh nó khi capture về.
+ */
+function titleSent(body) {
+  const path = pathTo(R.TEXT_PARAMS.specimen, R.TEXT_PARAMS.marks.title);
+  if (!path) throw new Error('mẫu shape không còn chỗ giữ chỗ tiêu đề');
+  return nodeAt(paramsOfBody(body), path);
 }
 
 /** Đúng bề mặt `Response` mà đường RPC dùng tới: `status`, `ok`, `text()`. */
