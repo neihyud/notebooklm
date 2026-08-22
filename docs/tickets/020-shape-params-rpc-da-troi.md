@@ -90,7 +90,36 @@ URL (ràng buộc 3 của ADR 0012), nên **chưa kết luận được** đư�
 - `ozz5Z`: **không** thêm đường lui sang id thứ hai trong ticket này. Ghi nhận và để lại — thêm một
   id chưa đo được vào đường ghi là mở một biến mới ở đúng chỗ ADR 0012 dựng lên để đóng.
 
-## Việc owner phải làm trước khi agent sửa được
+## Sửa đề bài — 2026-08-22, Lead
+
+Bản đầu của ticket này bắt **capture trước, sửa sau**. Owner quyết ngược lại, và Lead thấy quyết
+định ấy đúng hơn: không ai trong phòng đăng nhập được NotebookLM, nên "chờ capture" trên thực tế
+là *không sửa gì cả*, trong khi code hiện tại **chắc chắn** lệch với mọi bằng chứng đang có.
+
+Cân lại bằng hậu quả, không bằng độ chắc chắn:
+
+| | giữ nguyên `[content, title]` | đổi theo hai nguồn |
+|---|---|---|
+| nếu hai nguồn **đúng** | Nguồn mang tên bằng nguyên transcript, **vĩnh viễn** (ADR 0010) | đúng |
+| nếu hai nguồn **sai** | sai | `INVALID_ARGUMENT` → rơi về đường DOM, **hỏng đóng, không mất gì** |
+
+Ô duy nhất mất dữ liệu nằm ở cột "giữ nguyên". Nên **đổi**.
+
+**Ràng buộc đi kèm, vi phạm cái nào thì lập luận trên sụp:**
+
+1. **Bộ đọc phải giữ nguyên tính hỏng đóng.** Cả biện hộ của việc sửa mù nằm ở chỗ shape sai thì
+   ra `INVALID_ARGUMENT` rồi rơi về đường DOM. `canFallBackToDom` đang trả `true` cho
+   `INVALID_ARGUMENT` — **đừng đụng vào**, và viết một test nói thẳng rằng đây là chỗ dựa của
+   ticket này chứ không phải một chi tiết.
+2. **Shape phải là một hằng số có tên, kèm xuất xứ ngay tại chỗ**, ghi rõ nó đến từ hai
+   implementation công khai chứ không từ một capture. Người sau đọc `buildParams` phải thấy ngay
+   mức độ tin cậy của từng phần tử.
+3. **Chỗ hai nguồn bất đồng thì nói ra, đừng chọn thầm.** `notebooklm-py` viết phần tử thứ ba là
+   `build_template_block()`; `notebooklm-mcp-cli` viết `[2], settings` (bốn phần tử top-level).
+   Chọn một, và viết ngay cạnh rằng nguồn kia nói khác.
+4. **Không thêm `ozz5Z`.** Xem mục Scope.
+
+## Việc owner làm SAU, để xác minh (không còn là điều kiện tiên quyết)
 
 Không ai trong phòng này đăng nhập được NotebookLM. Một capture thật là **đầu vào bắt buộc**:
 
@@ -104,7 +133,11 @@ Không cần che gì nếu dùng đúng hai chuỗi giả trên — đó là lý
 
 ## Acceptance
 
-- Dán `f.req` thật vào ticket. Test đối chiếu `buildParams` với **capture ấy**, không với ticket.
+- Test đối chiếu `buildParams` với hằng số shape có xuất xứ, và hằng số ấy **không được chép rời**
+  ở hai chỗ — đúng cái bẫy đã cho ticket 015 đi lọt (`WORKSPACE_PROTOCOL.md`, và ghi chép của Lead
+  về "test ghim hằng số chép tay"). Khi có capture thì chỉ phải sửa **một** chỗ.
+- Trả lời được: test nào chết nếu `canFallBackToDom(INVALID_ARGUMENT)` đổi thành `false`? Đó là
+  chỗ dựa của cả ticket này.
 - Trả lời được: test nào chết nếu `title` và `content` hoán vị? Câu này đã có một lần trả lời sai
   trong repo — lần này nó phải chết vì **đối chiếu với capture**, không vì một hằng số chép tay.
 - Trả lời được: test nào chết nếu chỉ dấu loại `2` ở chỉ số 3 thành `null`?
