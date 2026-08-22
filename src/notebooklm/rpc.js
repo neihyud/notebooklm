@@ -245,7 +245,8 @@
    *   `rejected`  — `er` frame, `google.rpc.Status`, hoặc `UserDisplayableError` nhúng
    *   `csrf`      — HTTP 400, token hết hạn
    *   `transport` — HTTP 429/5xx (thử lại được) hoặc mã khác (không)
-   *   `malformed` — không đọc ra được gì: HTML đăng nhập, shape đã trôi, frame vắng mặt
+   *   `malformed` — không đọc ra được gì chắc chắn: HTML đăng nhập, shape đã trôi, frame
+   *                 vắng mặt, hoặc `er` và `wrb.fr` cùng có mặt cho rpcid của mình
    */
   function readResponse(response) {
     const res = response || {};
@@ -263,9 +264,34 @@
     }
 
     const er = frameFor(frames, 'er');
-    if (er) return { outcome: 'rejected', reason: 'er', code: er[2], message: str(er[5]) || `er ${er[2]}` };
-
     const wrb = frameFor(frames, 'wrb.fr');
+
+    // Cả `er` LẪN `wrb.fr` cùng mang rpcid của mình trong một phản hồi: không đọc theo frame nào
+    // cả. Đây không phải chuyện chọn frame nào **đứng trước** — thứ tự trong danh sách không mang
+    // nghĩa gì, và hai cách đọc nói hai điều trái ngược nhau về đúng câu hỏi duy nhất mà bộ đọc
+    // này tồn tại để trả lời: **đã ghi hay chưa ghi**.
+    //
+    //   đọc theo `er`   → `rejected`/`er` → được phép rơi về đường DOM. Nếu `wrb.fr` là thật thì
+    //                     Nguồn ĐÃ có, và đường lui dựng cái thứ hai — không xoá được (ADR 0010),
+    //                     ăn quota 50/notebook.
+    //   đọc theo `wrb.fr` → `ok` → mục vào **Sổ đã import**. Nếu `er` là thật thì Nguồn chưa hề
+    //                     tồn tại, mà ADR 0006/0009 đọc Sổ ấy nên mục KHÔNG BAO GIỜ được thử lại.
+    //                     Đúng hạng "mất dữ liệu âm thầm".
+    //
+    // Cả hai đều là khẳng định một điều mình không biết. `malformed` là hạng nói đúng thứ mình
+    // biết — "không rõ đã ghi hay chưa" — và nó hỏng đóng: không rơi về đường lui, mục KHÔNG vào
+    // Sổ, lượt chạy báo hỏng kèm lý do, lần sau thử lại. Ta trả giá bằng một mục hỏng nhìn thấy
+    // được, thay vì bằng một Nguồn thừa vĩnh viễn hoặc một mục mất im lặng.
+    //
+    // Và tổ hợp này bất khả theo chính cách ta gửi: một `rpcids`, một entry trong envelope (ràng
+    // buộc "một request một nguồn"). Gặp nó nghĩa là giả định về server đã sai — chỗ để dừng,
+    // không phải chỗ để đoán. Chưa đo được trên phản hồi thật: không ai được gửi request thật ở
+    // ticket này, nên đây là quy tắc chọn theo hậu quả, không phải theo quan sát.
+    if (er && wrb) {
+      return { outcome: 'malformed', detail: `phản hồi mang CẢ \`er\` lẫn \`wrb.fr\` cho ${RPC_ID} — không rõ nguồn đã được ghi hay chưa` };
+    }
+
+    if (er) return { outcome: 'rejected', reason: 'er', code: er[2], message: str(er[5]) || `er ${er[2]}` };
     if (!wrb) return { outcome: 'malformed', detail: `không có frame nào của ${RPC_ID} trong ${frames.length} frame` };
 
     const failure = readErrorSlot(wrb[5]);

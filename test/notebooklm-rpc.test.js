@@ -21,7 +21,7 @@ import '../src/notebooklm/rpc.js';
 // Phản hồi giả dựng theo hình dạng capture, dùng chung với harness service worker.
 import {
   AT, SID, HEAD, TAIL, SOURCE_ID, SOURCE_TITLE as TITLE,
-  batchResponse, wrap, wrbFrame, okPayload, WIZ_HTML,
+  batchResponse, wrap, wrbFrame, erFrame, okPayload, WIZ_HTML,
 } from './helpers/batchexecute.js';
 // Service worker thật + `chrome` giả + `fetch` giả, cùng ghi vào một sổ.
 import '../src/common/messages.js';
@@ -62,6 +62,36 @@ test('reader — HTTP 200 mang `er` frame là THẤT BẠI, không phải thành
   assert.equal(read.outcome, 'rejected');
   assert.equal(read.reason, 'er');
   assert.equal(read.code, 14);
+});
+
+test('reader — `er` và `wrb.fr` cùng có mặt: KHÔNG đọc theo frame nào, và KHÔNG phụ thuộc thứ tự', () => {
+  // Ranh giới ở đây là **"chắc chắn đã ghi hay chắc chắn chưa"**, không phải "frame nào đứng
+  // trước". Hai cách đọc nói hai điều trái ngược nhau và cả hai đều tốn thật:
+  //
+  //   theo `er`     → được rơi về đường DOM → nếu `wrb.fr` thật thì có Nguồn THỨ HAI, không xoá
+  //                   được (ADR 0010), ăn quota 50/notebook;
+  //   theo `wrb.fr` → mục vào Sổ đã import → nếu `er` thật thì Nguồn chưa hề tồn tại và ADR
+  //                   0006/0009 khiến mục KHÔNG BAO GIỜ được thử lại. Mất dữ liệu âm thầm.
+  //
+  // Nên hạng đúng là `malformed`: hỏng đóng, không rơi về đường lui, không vào Sổ, thử lại lần
+  // sau. Kiểm CẢ HAI thứ tự — một thứ tự thôi thì "đọc theo frame đứng trước" vẫn xanh.
+  for (const order of [[erFrame(), wrbFrame(okPayload(2))], [wrbFrame(okPayload(2)), erFrame()]]) {
+    // Bốn frame, hai frame quyết định nằm GIỮA: `[0]` và `at(-1)` đều không tình cờ đúng.
+    const read = R.readResponse(ok200(batchResponse([HEAD, ...order, TAIL])));
+    assert.equal(read.outcome, 'malformed', `thứ tự ${order.map((f) => f[0]).join(' → ')}: ${JSON.stringify(read)}`);
+    // Không được mang theo dấu vết của một lượt thành công: `sourceId` ở đây là thứ sẽ đi vào Sổ.
+    assert.equal(read.sourceId, undefined);
+    assert.equal(R.canFallBackToDom(read), false);
+  }
+});
+
+test('reader — một mình `wrb.fr` vẫn đọc ra ok, và một mình `er` vẫn là rejected (chứng cho test trên)', () => {
+  // Chứng đối: `malformed` ở trên đến từ việc HAI frame cùng có mặt, không phải từ việc fixture
+  // bốn frame làm hỏng bộ đọc.
+  const okRead = R.readResponse(ok200(batchResponse([HEAD, wrbFrame(okPayload(2)), TAIL])));
+  assert.equal(okRead.outcome, 'ok', JSON.stringify(okRead));
+  const erRead = R.readResponse(ok200(batchResponse([HEAD, erFrame(), TAIL])));
+  assert.equal(erRead.outcome, 'rejected', JSON.stringify(erRead));
 });
 
 test('reader — HTTP 200 mang `wrb.fr` payload null + google.rpc.Status ở index 5 là THẤT BẠI', () => {

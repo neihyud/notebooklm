@@ -51,6 +51,9 @@ export const wrbFrame = (payload, slot5) => [
   'generic',
 ];
 
+/** Frame `er` — server từ chối cả lượt dispatch, và nó đến kèm HTTP 200. */
+export const erFrame = (code = 14, message = 'lỗi phía server') => ['er', RPC_ID, code, null, null, message];
+
 export const SOURCE_ID = 'src-abc-123';
 export const SOURCE_TITLE = 'Tieu de Nguon';
 
