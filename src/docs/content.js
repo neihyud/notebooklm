@@ -107,7 +107,10 @@
           const state = controller.state();
           return { ok: true, result: { pages: state.tree.total, outcome: state.outcome } };
         }
-        return { ok: true, result: await deps.extractDoc(message.url) };
+        if (type === M.TYPES.EXTRACT_DOC) {
+          return { ok: true, result: await deps.extractDoc(message.url) };
+        }
+        throw M.unrouted('docs', message);
       } catch (error) {
         return { ok: false, error: messageOf(error) };
       }

@@ -219,6 +219,11 @@
 
     return (async () => {
       try {
+        // Chọn nhánh **trước** khi soi tải trọng. Ngược lại thì một loại tin khai mà quên nhánh,
+        // nếu mang theo `videoId`, sẽ chết bằng câu "tab này đang mở video khác" — một lỗi trỏ
+        // sai hẳn chỗ, đúng thứ kỷ luật định tuyến sinh ra để không có.
+        if (M.typeOf(message) !== M.TYPES.EXTRACT_TRANSCRIPT) throw M.unrouted('youtube', message);
+
         const wanted = message.videoId || '';
         const here = typeof deps.currentVideoId === 'function' ? deps.currentVideoId() : '';
         if (wanted && wanted !== here) {

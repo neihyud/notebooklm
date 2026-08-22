@@ -190,6 +190,62 @@ test('định tuyến — ping của mỗi lớp trả ok:true kèm danh tính c
   }
 });
 
+// ------------------------------------------ bảng khai ↔ tập nhánh thật của router
+
+/**
+ * Mọi router trong repo, cùng một cách lái: một tin vào, một câu trả lời ra.
+ *
+ * Service worker nằm chung danh sách với ba content script chứ không đứng riêng, và đó là cả
+ * điểm của test dưới đây: nó là listener **thứ tư**, nó cũng có bản khai `ACCEPTS`, và trước
+ * ticket này nó là listener duy nhất không ai đối chiếu với bản khai của chính nó.
+ */
+const ROUTERS = [
+  ...LAYERS.map((layer) => ({
+    script: layer.script,
+    ask: (type) => respond(listenerOf(layer), { type }),
+  })),
+  {
+    script: 'background',
+    // Một lượt khởi động cho mỗi loại tin: `IMPORT_DOCS` và `PICK_DOCS` ghi vào trạng thái sống
+    // của service worker (`docsTabId`, `running`), nên dùng chung một lượt là để loại tin hỏi
+    // sau chạy trên trạng thái mà loại tin hỏi trước để lại.
+    ask: (type) => bootServiceWorker().send({ type }),
+  },
+];
+
+test('định tuyến — loại tin đã KHAI NHẬN mà router không có nhánh nào cho nó là một lỗi, không phải một câu trả lời', async () => {
+  // Phép phá bắt được: thêm một loại tin, khai đủ vào `ACCEPTS` (đúng một listener, không trùng
+  // chuỗi), rồi **quên viết nhánh**. Mọi test hình dạng vẫn xanh — bảng khai hoàn toàn hợp lệ.
+  // Thứ hỏng là **quan hệ** giữa bảng khai và tập nhánh thật, và nó hỏng im lặng: `isFor` trả
+  // true, tin rơi xuống nhánh cuối của router, và nhánh cuối luôn là việc thật của loại tin
+  // khác. Người gọi nhận `ok: true` cho một việc chưa bao giờ chạy.
+  //
+  // `ACCEPTS.background` ↔ tập nhánh của service worker đã hở đúng như vậy: `GET_STATE` từng là
+  // nhánh "còn lại", nên mọi loại tin quên nhánh đều trả về trạng thái popup kèm `ok: true`.
+  const problems = [];
+  let checked = 0;
+  for (const router of ROUTERS) {
+    for (const type of M.ACCEPTS[router.script]) {
+      checked += 1;
+      const answer = await router.ask(type);
+      // Nhánh chạy rồi hỏng vẫn là có nhánh — chỉ mốc `UNROUTED` mới là "không ai xử lý".
+      if (String((answer && answer.error) || '').includes(M.UNROUTED)) {
+        problems.push(`${router.script}: ${type} → ${answer.error}`);
+      }
+    }
+  }
+  assert.equal(checked, ALL_TYPES.length, 'mỗi loại tin phải được lái qua đúng router đã khai nhận nó');
+  assert.deepEqual(problems, [], problems.join('\n'));
+});
+
+test('định tuyến — mốc UNROUTED mà test trên dò đúng là mốc các router ném ra', () => {
+  // Vế đối chứng. Nếu `UNROUTED` và câu mà `unrouted()` dựng lệch nhau thì test trên không bao
+  // giờ đỏ được — nó sẽ dò một chuỗi không xuất hiện ở đâu cả, và im lặng đúng như thứ nó canh.
+  assert.ok(M.UNROUTED.length > 0);
+  assert.match(M.unrouted('background', { type: M.TYPES.GET_STATE }).message, new RegExp(M.UNROUTED));
+  assert.match(M.unrouted('background', { type: M.TYPES.GET_STATE }).message, /background/);
+});
+
 // ------------------------------------------------------------------ service worker
 
 test('định tuyến — service worker im lặng với mọi tin của tab, và nhận mọi tin của mình', async () => {

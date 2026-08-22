@@ -47,6 +47,11 @@
 
     return (async () => {
       try {
+        // Chọn nhánh trước, soi tải trọng sau — cùng lý do với `src/youtube/watch.js`: một loại
+        // tin khai mà quên nhánh, nếu mang theo `source.notebookId`, sẽ chết bằng câu "tab này
+        // đang mở notebook khác" thay vì nói ra rằng không ai xử lý nó.
+        if (M.typeOf(message) !== M.TYPES.PUSH_SOURCE) throw M.unrouted('notebooklm', message);
+
         const source = message.source || {};
         const here = deps.currentNotebookId();
         // `here` rỗng cũng là lệch: NotebookLM đá về danh sách notebook khi Notebook đích đã bị

@@ -496,21 +496,27 @@ const DOCS_SCRIPTS = [
         await writeLocal(NOTEBOOK_KEY, notebookId);
         return { ok: true, result: { notebookId } };
       }
-      // Còn lại đúng một loại: đọc trạng thái để popup vẽ.
-      const state = await readLocal(STATE_KEY, E.emptyState());
-      const tab = await activeTab();
-      return {
-        ok: true,
-        result: {
-          notebookId: await readLocal(NOTEBOOK_KEY, ''),
-          pending: state.pending || [],
-          imported: (state.ledger || []).length,
-          currentVideo: I.itemFromTab(tab),
-          currentNotebook: S.parseNotebookId((tab && tab.url) || '') || '',
-          running,
-          downloadDir: (await readSettings()).downloadDir,
-        },
-      };
+      if (type === M.TYPES.GET_STATE) {
+        // Nhánh riêng, đúng như tám loại trên. Trước đây đây là nhánh "còn lại" của router, và
+        // một bất biến viết bằng chữ: mọi loại tin khai trong `ACCEPTS.background` mà quên viết
+        // nhánh đều rơi vào đây và nhận `{ok:true}` kèm trạng thái popup — người gọi tin việc đã
+        // xong trong khi không có gì chạy.
+        const state = await readLocal(STATE_KEY, E.emptyState());
+        const tab = await activeTab();
+        return {
+          ok: true,
+          result: {
+            notebookId: await readLocal(NOTEBOOK_KEY, ''),
+            pending: state.pending || [],
+            imported: (state.ledger || []).length,
+            currentVideo: I.itemFromTab(tab),
+            currentNotebook: S.parseNotebookId((tab && tab.url) || '') || '',
+            running,
+            downloadDir: (await readSettings()).downloadDir,
+          },
+        };
+      }
+      throw M.unrouted('background', message);
     })().then(sendResponse, (error) => sendResponse({ ok: false, error: messageOf(error) }));
 
     return true; // giữ kênh mở cho câu trả lời async

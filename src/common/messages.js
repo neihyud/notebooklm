@@ -87,6 +87,30 @@
 
   const typeOf = (message) => (message && typeof message === 'object' ? String(message.type || '') : '');
 
+  /**
+   * Mốc của lỗi "khai nhận rồi mà không xử lý" — chuỗi này là thứ test đối chiếu, nên nó nằm ở
+   * đây chứ không viết lại trong từng router.
+   */
+  const UNROUTED = 'không có nhánh nào xử lý loại tin';
+
+  /**
+   * Tin **đã khai nhận** mà không nhánh nào trong router xử lý.
+   *
+   * `ACCEPTS` và tập nhánh thật của một router là hai danh sách cùng kiểu, và chúng lệch nhau
+   * theo hai chiều khác hẳn nhau. Chiều "có nhánh mà quên khai" thì `isFor` chặn lại — tin bay
+   * đi không ai nhận, người gửi chờ hết giờ, ồn ào. Chiều ngược lại thì **im lặng**: `isFor` trả
+   * true, không nhánh nào khớp, và tin rơi xuống nhánh cuối của router. Nhánh cuối ấy luôn là
+   * việc thật của một loại tin khác, nên người gọi nhận `ok: true` cho một việc chưa bao giờ
+   * chạy — đúng thứ mà luật "chỉ tin `ok: true`" dựa vào để không xảy ra.
+   *
+   * Vì vậy mọi router trong repo kết bằng lời gọi này thay vì bằng một nhánh bắt-tất-cả, và
+   * `test/routing.test.js` lái từng router qua **mọi** loại tin nó khai để bắt đúng chiều im
+   * lặng ấy. Ném chứ không trả `{ok:false}`: đây là lỗi lập trình, không phải một lượt chạy hỏng.
+   */
+  function unrouted(script, message) {
+    return new Error(`${script}: ${UNROUTED} "${typeOf(message)}"`);
+  }
+
   /** `true` chỉ khi tin **thuộc về** listener này. Mọi trường hợp khác: im lặng, không trả lời. */
   function isFor(script, message) {
     const list = ACCEPTS[script];
@@ -94,5 +118,5 @@
     return list.includes(typeOf(message));
   }
 
-  root.NBLM_MESSAGES = Object.freeze({ TYPES, ACCEPTS, typeOf, isFor });
+  root.NBLM_MESSAGES = Object.freeze({ TYPES, ACCEPTS, UNROUTED, typeOf, isFor, unrouted });
 })(typeof globalThis !== 'undefined' ? globalThis : self);
