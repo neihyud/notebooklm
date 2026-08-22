@@ -332,28 +332,31 @@ const textSet = (segments) => new Set(
  * Hai đường trích transcript có nói về cùng một video không.
  *
  * Hai đối số cùng kiểu và hoán vị được: `countsMatch` và `overlap` đối xứng, nên một báo cáo
- * gọi nhầm tên đường vẫn hoàn toàn hợp lý — mà tên đường chính là thứ handback phải dán, và là
- * thứ nói `params` protobuf của `get_transcript` đúng hay sai.
+ * gọi nhầm tên đường vẫn hoàn toàn hợp lý — mà tên đường chính là thứ handback phải dán.
+ *
+ * Vế thứ hai tên là `api`, không phải `innertube`: từ ticket 013 đường API của sản phẩm là
+ * `get_panel`, còn `get_transcript` tụt xuống hàng hai. Giữ tên cũ là để báo cáo gọi kết quả của
+ * endpoint này bằng tên endpoint kia.
  *
  * `agree` cố ý **không** chỉ nhìn số lượng: hai đường cùng trả về 240 segment vẫn có thể là
  * transcript của hai video khác nhau, và trên một SPA như YouTube thì đó không phải giả thuyết
  * xa vời (`WORKSPACE_PROTOCOL.md` v5).
  */
-export function compareTranscripts(dom, innertube) {
+export function compareTranscripts(dom, api) {
   const a = segmentStats(dom);
-  const b = segmentStats(innertube);
+  const b = segmentStats(api);
   const countsMatch = a.count > 0 && b.count > 0
     && Math.abs(a.count - b.count) <= Math.max(a.count, b.count) * COUNT_TOLERANCE;
 
   const left = textSet(dom);
-  const right = textSet(innertube);
+  const right = textSet(api);
   let shared = 0;
   for (const value of left) if (right.has(value)) shared += 1;
   const overlap = Math.max(left.size, right.size) > 0 ? shared / Math.max(left.size, right.size) : 0;
 
   return {
     dom: a,
-    innertube: b,
+    api: b,
     countsMatch,
     overlap,
     agree: countsMatch && overlap >= OVERLAP_MIN && a.ordered && b.ordered,

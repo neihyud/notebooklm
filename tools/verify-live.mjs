@@ -3,7 +3,14 @@
 // Ticket 012 — chạy **chính mã nguồn** của lớp YouTube trên một trang watch thật, cả hai đường:
 //
 //   • đường DOM       — bấm nút Transcript, quét panel bằng `scanTranscriptPanel()`
+//   • đường get_panel — gọi `/youtubei/v1/get_panel` thật bằng `viaPanel()` (ADR 0013)
 //   • đường InnerTube — gọi `get_transcript` thật bằng `viaInnertube()`
+//   • đường timedtext — lấy `captionBaseUrl` từ `ytInitialPlayerResponse` rồi tải json3
+//
+// Ba đường mạng đo **trong cùng một phiên, trên cùng một trang**: đó là điều kiện để so chúng
+// với nhau. Ticket 013 chọn `get_panel` bằng đúng bảng số ấy chứ không bằng lập luận, và hai
+// đường kia ở lại trong báo cáo để lần đo sau còn đối chứng — một endpoint chết có thể sống lại,
+// và cách duy nhất biết được là vẫn hỏi nó.
 //
 // Vì sao phải chạy thật, bằng số đo chứ không phải lo xa: hai lỗi "chỉ lộ ra ở Chrome" đã lọt
 // qua suite xanh của repo này. Ticket 009 gọi `.filter` thẳng lên `node.children` — DOM thật trả
@@ -162,6 +169,89 @@ const innertubeScript = (videoId) => `(async () => {
 })()`;
 
 /**
+ * Hai ứng viên cho **đường trích thứ hai** (ticket 013), đo cạnh nhau trên cùng một trang.
+ *
+ * `timedtext` đi qua `captionBaseUrl` trong `ytInitialPlayerResponse` — script này đọc thẳng biến
+ * toàn cục ấy, khác hẳn sản phẩm: `playerResponseSnapshot()` cố ý **không** mang `baseUrl` ra
+ * khỏi trang (URL đã ký). Chỗ này là phép đo, không phải sản phẩm, nên nó được đọc thứ mà sản
+ * phẩm từ chối đọc — và đó chính là thứ cần đo để biết từ chối ấy có đúng không.
+ *
+ * `get_panel` chạy **chính `viaPanel()` của sản phẩm** và chụp lại request nó gửi đi, đúng khuôn
+ * `innertubeScript`: một phép kiểm gửi request khác request của sản phẩm thì đo một thứ không ai
+ * chạy.
+ */
+const candidateScript = (videoId) => `(async () => {
+  const T = window.NBLM_TRANSCRIPT;
+  const B = window.NBLM_PAGE_BRIDGE;
+  const out = { timedtext: null, panel: null, player: null };
+
+  const pr = window.ytInitialPlayerResponse;
+  const list = pr && pr.captions && pr.captions.playerCaptionsTracklistRenderer;
+  const tracks = (list && list.captionTracks) || [];
+  const snapshot = B ? B.playerResponseSnapshot(pr) : { videoId: '', captionTracks: [] };
+  out.player = {
+    prVideoId: snapshot.videoId,
+    aboutThisVideo: snapshot.videoId === ${json(videoId)},
+    tracks: snapshot.captionTracks.map((t) => t.languageCode + (t.kind ? '/' + t.kind : '')),
+    snapshotCarriesBaseUrl: JSON.stringify(snapshot).includes('timedtext'),
+  };
+
+  // ---------------------------------------------------------------- ứng viên 1: timedtext
+  if (!tracks.length) {
+    out.timedtext = { status: 0, bytes: 0, segments: 0, note: 'video không khai caption track nào' };
+  } else {
+    // \`new URL\` nằm **trong** try, cùng lý do với \`oracleScript\` ở dưới: một caption track
+    // thiếu \`baseUrl\` là một kết quả, không phải một lượt chạy hỏng. Để nó ném ra ngoài
+    // \`page.evaluate\` là vứt luôn cả phép đo đường DOM và phép đo get_panel vừa xong.
+    try {
+      const url = new URL(tracks[0].baseUrl);
+      url.searchParams.set('fmt', 'json3');
+      const response = await fetch(url.toString(), { credentials: 'include' });
+      const text = await response.text();
+      let segments = 0;
+      try { segments = T.parseTimedText(JSON.parse(text)).length; } catch (e) { segments = -1; }
+      out.timedtext = {
+        status: response.status, bytes: text.length, segments,
+        exp: url.searchParams.get('exp') || '',
+        head: text.slice(0, 90).replace(/\\s+/g, ' '),
+      };
+    } catch (error) {
+      out.timedtext = { status: -1, bytes: 0, segments: -1, note: 'không đo được', head: String((error && error.message) || error) };
+    }
+  }
+
+  // ---------------------------------------------------------------- ứng viên 2: get_panel
+  if (!B) {
+    out.panel = { error: 'MAIN world không có NBLM_PAGE_BRIDGE', segments: [], sent: null };
+  } else {
+    const cfg = B.ytcfgSnapshot(window.ytcfg);
+    const panel = { sent: null, bytes: 0, segments: [], error: '', code: '' };
+    const net = {
+      post: async (request) => {
+        panel.sent = { url: request.url.replace(/key=[^&]*/, 'key=…'), panelId: request.body.panelId, params: request.body.params };
+        const response = await fetch(request.url, {
+          method: 'POST', credentials: 'include', headers: request.headers, body: JSON.stringify(request.body),
+        });
+        panel.sent.status = response.status;
+        const text = await response.text();
+        panel.bytes = text.length;
+        panel.hasContent = text.includes('"content"');
+        if (!response.ok) throw new Error('get_panel trả HTTP ' + response.status);
+        return JSON.parse(text);
+      },
+    };
+    try {
+      panel.segments = await T.viaPanel({ videoId: ${json(videoId)}, ytcfg: cfg, player: snapshot }, net, {});
+    } catch (error) {
+      panel.error = String((error && error.message) || error);
+      panel.code = String((error && error.reason) || '');
+    }
+    out.panel = panel;
+  }
+  return out;
+})()`;
+
+/**
  * Chuỗi `params` **thật** cho video này, hỏi thẳng YouTube.
  *
  * `/youtubei/v1/next` trả về `getTranscriptEndpoint.params` — đúng chuỗi mà giao diện YouTube
@@ -234,7 +324,7 @@ const oracleScript = (videoId, productParams) => `(async () => {
 // ------------------------------------------------------------------ báo cáo
 
 function printReport(report) {
-  const { video, url, chrome, workers, dom, innertube, oracle, params, calls, comparison } = report;
+  const { video, url, chrome, workers, dom, candidates, innertube, oracle, params, calls, comparison } = report;
 
   console.log('# Kiểm chứng lớp YouTube trên trang thật (ticket 012)');
   console.log(`# Chromium  : ${chrome.version}`);
@@ -262,6 +352,22 @@ function printReport(report) {
       + `dòng=${panel.rows} rộng=${panel.width}px `
       + `selector 'panel' khớp: chính panel=${panel.matchesPanelSelector}, khối trong=${panel.innerPanelMatch}`);
   }
+  console.log('');
+
+  console.log('## Hai ứng viên đường trích thứ hai — cùng phiên, cùng trang (ticket 013)');
+  const player = candidates.player || {};
+  console.log(`   ytInitialPlayerResponse nói về : ${json(player.prVideoId)} `
+    + `(đúng video đang mở: ${player.aboutThisVideo})`);
+  console.log(`   caption track trang khai        : ${(player.tracks || []).join(', ') || '(không có)'}`);
+  console.log(`   ảnh chụp có mang baseUrl ra không : ${player.snapshotCarriesBaseUrl}  (phải là false — URL đã ký)`);
+  const tt = candidates.timedtext || {};
+  console.log(`   • timedtext  HTTP ${tt.status}, ${tt.bytes} byte, ${tt.segments} segment`
+    + `${tt.exp ? `, exp=${tt.exp}` : ''}${tt.note ? ` — ${tt.note}` : ''}`);
+  const gp = candidates.panel || {};
+  console.log(`   • get_panel  HTTP ${(gp.sent && gp.sent.status) || '-'}, ${gp.bytes} byte, `
+    + `${(gp.segments || []).length} segment, khối content: ${gp.hasContent}`);
+  if (gp.sent) console.log(`     panelId=${json(gp.sent.panelId)} params=${json(gp.sent.params)}`);
+  if (gp.error) console.log(`     lỗi: ${gp.error}  [mã: ${gp.code || '(không có)'}]`);
   console.log('');
 
   console.log('## Đường InnerTube');
@@ -293,10 +399,10 @@ function printReport(report) {
   console.log(`   ${calls.length ? [...new Set(calls)].join(', ') : '(không ghi được lời gọi nào)'}`);
   console.log('');
 
-  console.log('## Hai đường có khớp nhau không');
+  console.log('## Hai đường của sản phẩm có khớp nhau không (DOM ↔ get_panel)');
   const line = (mark, label, detail) => console.log(`  ${mark}  ${label.padEnd(26)} ${detail}`);
   line(comparison.dom.count > 0 ? '✓' : '✗', 'DOM', `${comparison.dom.count} segment, mốc tăng dần: ${comparison.dom.ordered}`);
-  line(comparison.innertube.count > 0 ? '✓' : '✗', 'InnerTube', `${comparison.innertube.count} segment, mốc tăng dần: ${comparison.innertube.ordered}`);
+  line(comparison.api.count > 0 ? '✓' : '✗', 'get_panel', `${comparison.api.count} segment, mốc tăng dần: ${comparison.api.ordered}`);
   line(comparison.countsMatch ? '✓' : '✗', 'số segment', comparison.countsMatch ? 'khớp' : 'lệch');
   line(comparison.overlap >= 0.8 ? '✓' : '✗', 'chữ trùng nhau', `${(comparison.overlap * 100).toFixed(1)}%`);
   line(comparison.agree ? '✓' : '✗', 'kết luận', comparison.agree ? 'hai đường nói về cùng một video' : 'KHÔNG khớp');
@@ -346,6 +452,7 @@ async function main() {
 
     const dom = await page.evaluate(domScript(24, 500));
     const calls = await page.evaluate('window.__nblmCalls.slice()', { awaitPromise: false });
+    const candidates = await page.evaluate(candidateScript(args.video));
     const innertube = await page.evaluate(innertubeScript(args.video));
     const oracle = await page.evaluate(oracleScript(args.video, (innertube.sent && innertube.sent.params) || ''));
 
@@ -355,11 +462,12 @@ async function main() {
       chrome: { path: ctx.chromePath, version: ctx.version },
       workers: { all, own },
       dom,
+      candidates,
       innertube,
       oracle,
       params: compareParams(oracle.productParams, oracle.mintedParams),
       calls,
-      comparison: compareTranscripts(dom.segments, innertube.segments),
+      comparison: compareTranscripts(dom.segments, candidates.panel.segments),
     };
   });
 
@@ -375,24 +483,51 @@ async function main() {
       ? `đường DOM không trích được segment nào, dù trên trang có ${report.dom.rowsOnPage} dòng segment (${report.dom.reason})`
       : `đường DOM không trích được segment nào (${report.dom.reason})`);
   }
-  if (report.innertube.segments.length === 0) failures.push('đường InnerTube không trích được segment nào');
+  if (report.candidates.panel.segments.length === 0) {
+    failures.push(`đường get_panel không trích được segment nào (${report.candidates.panel.code || report.candidates.panel.error})`);
+  }
+  if (report.candidates.player.snapshotCarriesBaseUrl) {
+    failures.push('playerResponseSnapshot mang URL timedtext đã ký ra khỏi trang — danh sách trắng thủng');
+  }
   // Đếm segment một mình không nói gì về **mốc**: một lượt quét đủ 24 dòng đủ chữ mà mọi mốc
   // bằng 0 vẫn đếm ra 24 (ticket 017 — selector mốc lệch tên lớp, và cả hai video được báo là
   // "chạy tốt"). Nên `ordered` phải là một tiêu chí đỏ, không phải một dòng in ra rồi thôi.
-  for (const [name, stats] of [['DOM', report.comparison.dom], ['InnerTube', report.comparison.innertube]]) {
+  for (const [name, stats] of [['DOM', report.comparison.dom], ['get_panel', report.comparison.api]]) {
     if (stats.count > 0 && !stats.ordered) {
       failures.push(`đường ${name}: mốc thời gian không tăng dần `
         + `(${stats.distinctStarts} mốc phân biệt trên ${stats.count} segment)`);
     }
   }
-  if (report.params.verdict !== 'giống-hệt') failures.push(`params protobuf: ${report.params.verdict}`);
   if (!report.comparison.agree) failures.push('hai đường không khớp nhau');
+
+  // Hai phát hiện của ticket 012 **không còn là tiêu chí đỏ**, và đó là một quyết định chứ không
+  // phải một lần bỏ sót: ADR 0013 đã chốt rằng `get_transcript` chết và `timedtext` bị PoToken
+  // khoá, nên để chúng làm cổng là biến cổng thành một dòng đỏ vĩnh viễn không ai đọc nữa. Chúng
+  // xuống mục "ghi nhận": vẫn đo mỗi lượt, vẫn in ra, nhưng không quyết định xanh/đỏ.
+  const noted = [];
+  if (report.innertube.segments.length === 0) noted.push(`get_transcript vẫn chết: ${report.innertube.error || 'không trích được segment nào'}`);
+  if (report.params.verdict !== 'giống-hệt') noted.push(`params protobuf của get_transcript: ${report.params.verdict}`);
+  // `note` có mặt nghĩa là **không có phép đo nào** (video không khai caption track, hoặc lượt đo
+  // ném). Gộp nó vào câu "timedtext vẫn bị khoá" là khẳng định một số đo chưa từng lấy — đúng cái
+  // gộp "không có phụ đề" với "hỏng" mà ticket này tách ra ở tầng dữ liệu.
+  if (report.candidates.timedtext.note) {
+    noted.push(`timedtext không đo được ở video này: ${report.candidates.timedtext.note}`);
+  } else if (report.candidates.timedtext.segments <= 0) {
+    noted.push(`timedtext vẫn bị khoá: HTTP ${report.candidates.timedtext.status}, ${report.candidates.timedtext.bytes} byte`);
+  } else {
+    failures.push('timedtext bỗng trả về segment — ADR 0013 chọn get_panel dựa trên việc nó KHÔNG trả về gì, hãy đo lại');
+  }
 
   if (!args.json) {
     console.log('');
     console.log('-'.repeat(72));
-    console.log(failures.length === 0 ? 'XANH — cả hai đường chạy được và khớp nhau.' : `ĐỎ (${failures.length}):`);
+    console.log(failures.length === 0 ? 'XANH — cả hai đường của sản phẩm chạy được và khớp nhau.' : `ĐỎ (${failures.length}):`);
     for (const failure of failures) console.log(`  • ${failure}`);
+    if (noted.length) {
+      console.log('');
+      console.log(`GHI NHẬN (${noted.length}) — đã biết, ADR 0013 đã chốt, không tính là đỏ:`);
+      for (const note of noted) console.log(`  • ${note}`);
+    }
   }
   process.exit(failures.length === 0 ? 0 : 1);
 }

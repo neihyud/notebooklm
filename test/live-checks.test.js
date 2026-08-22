@@ -414,11 +414,11 @@ test('compareTranscripts — giữ đúng đường nào là đường nào', ()
 
   const a = compareTranscripts(dom, inner);
   assert.equal(a.dom.count, 2);
-  assert.equal(a.innertube.count, 1);
+  assert.equal(a.api.count, 1);
 
   const b = compareTranscripts(inner, dom);
   assert.equal(b.dom.count, 1);
-  assert.equal(b.innertube.count, 2);
+  assert.equal(b.api.count, 2);
   assert.equal(a.countsMatch, b.countsMatch, 'phép so số lượng thì đối xứng…');
   assert.notDeepEqual(a.dom, b.dom, '…nhưng nhãn đường thì không được đối xứng');
 });
@@ -444,7 +444,7 @@ test('compareTranscripts — cùng số segment mà chữ khác hẳn thì KHÔN
 
 test('compareTranscripts — một đường không chạy được thì nói rõ, đừng gọi là khớp', () => {
   const r = compareTranscripts([{ start: 0, end: 1, text: 'a' }], null);
-  assert.equal(r.innertube.count, 0);
+  assert.equal(r.api.count, 0);
   assert.equal(r.agree, false);
 });
 

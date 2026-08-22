@@ -23,8 +23,21 @@
 
   const PRIVATE = 'private';
 
-  /** Chuỗi phương án cho video *không* private. Thứ tự này là ADR 0003, không phải tuỳ chọn. */
-  const API_ROUTE = Object.freeze(['innertube', 'timedtext', 'dom']);
+  /**
+   * Chuỗi phương án cho video *không* private. Thứ tự này là ADR 0003 + ADR 0013, không phải
+   * tuỳ chọn — và nó được xếp theo **số đo trên trang thật**, không theo suy đoán (ticket 013):
+   *
+   *   - `panel` (`/youtubei/v1/get_panel`) đứng đầu vì nó là endpoint mà **chính giao diện
+   *     YouTube** gọi khi người ta bấm nút Transcript, và nó chạy: 3/3 video có phụ đề trả
+   *     HTTP 200 kèm đủ segment, kể cả một video mà đường DOM trích được 0 dòng.
+   *   - `innertube` (`get_transcript`) tụt xuống hàng hai vì nó **đã chết**: HTTP 400
+   *     FAILED_PRECONDITION với cả chuỗi `params` do chính YouTube đúc. Giữ lại chứ không xoá
+   *     (xoá code là quyết định của owner), nhưng nó chỉ chạy sau khi `panel` đã hỏng.
+   *   - `timedtext` **không còn trong tuyến**: `exp=xpe` trả HTTP 200 body 0 byte ở 3/3 video và
+   *     ở cả năm biến thể URL đã thử. Một mục tuyến không bao giờ thắng chỉ tổ thêm một dòng lý
+   *     do sai vào bảng tổng kết (`viaTimedText` vẫn còn trong file, xem ADR 0013).
+   */
+  const API_ROUTE = Object.freeze(['panel', 'innertube', 'dom']);
   const PRIVATE_ROUTE = Object.freeze(['dom']);
 
   /**
@@ -48,6 +61,10 @@
     UNRECOGNIZED: 'panel-unrecognized',
     NO_PANEL: 'no-panel',
     EMPTY: 'empty',
+    // Hai mã dưới đây là của đường mạng, và chúng tồn tại **vì chúng phải khác nhau**
+    // (ticket 013). Chúng là hai câu trả lời khác hẳn nhau cho cùng một triệu chứng "0 segment":
+    NO_CAPTIONS: 'no-captions',
+    BLANK: 'blank-response',
   });
 
   /** Một cú bấm thật. `el.click()` một mình không mở được panel của YouTube. */
@@ -60,6 +77,15 @@
 
   const collapse = (value) => S.collapse(value);
   const messageOf = (error) => (error && error.message ? String(error.message) : String(error));
+  /** Mã máy đọc được của một lỗi trích, hoặc chuỗi rỗng khi lỗi không tự khai mã nào. */
+  const codeOf = (error) => (error && error.reason ? String(error.reason) : '');
+
+  /** Gắn mã vào một lỗi rồi ném — dạng viết gọn của cặp `reason` + `message` dùng khắp file. */
+  function reasoned(code, message) {
+    const error = new Error(message);
+    error.reason = code;
+    return error;
+  }
   const selectorsOf = (options) => (options && options.selectors ? Y.resolve(options.selectors) : Y.DEFAULT);
 
   /** Mili-giây của InnerTube/timedtext sang giây. Chuỗi `"1000"` cũng là dạng hợp lệ ở đó. */
@@ -88,18 +114,22 @@
     for (const name of route) {
       const path = paths && paths[name];
       if (typeof path !== 'function') {
-        attempts.push({ path: name, ok: false, reason: 'không có adapter cho đường này' });
+        attempts.push({ path: name, ok: false, reason: 'không có adapter cho đường này', code: '' });
         continue;
       }
       try {
         const segments = await path(req, options);
         if (Array.isArray(segments) && segments.length > 0) {
-          attempts.push({ path: name, ok: true, segments: segments.length });
+          attempts.push({ path: name, ok: true, segments: segments.length, code: '' });
           return { segments, via: name, attempts };
         }
-        attempts.push({ path: name, ok: false, reason: 'trả về rỗng' });
+        attempts.push({ path: name, ok: false, reason: 'trả về rỗng', code: REASON.EMPTY });
       } catch (error) {
-        attempts.push({ path: name, ok: false, reason: messageOf(error) });
+        // `reason` là câu chữ cho người đọc; `code` là **dữ liệu** cho máy đọc. Hai ca "video
+        // không có phụ đề" và "gọi được mà không ra dòng nào" phải tách nhau ở đây chứ không ở
+        // câu chữ, vì câu chữ đổi được mà quyết định "có ghi vào Sổ đã import không" thì không
+        // được đổi theo (ticket 013, ADR 0009).
+        attempts.push({ path: name, ok: false, reason: messageOf(error), code: codeOf(error) });
       }
     }
 
@@ -198,7 +228,171 @@
     return b64.replace(/\+/g, '-').replace(/\//g, '_');
   }
 
-  // ------------------------------------------------------- đường 2: timedtext
+  // ------------------------------------------------------- đường 2: get_panel
+
+  const PANEL_ENDPOINT = 'https://www.youtube.com/youtubei/v1/get_panel';
+
+  /**
+   * Danh tính của bảng transcript trong InnerTube. Chuỗi này đo được, không đoán: nó là
+   * `panelId` mà chính trang gửi đi khi bấm nút Transcript, và cũng là `target-id` của panel
+   * transcript trên DOM (`tools/verify-live.mjs` in ra cả hai).
+   */
+  const PANEL_ID = 'PAmodern_transcript_view';
+
+  /**
+   * `params` của `get_panel`: protobuf `{149: {1: videoId, 3: 1}}` rồi base64url.
+   *
+   * Khác `transcriptParams()` của `get_transcript` ở chỗ nó **đã được đối chiếu byte với byte**
+   * với chuỗi trang thật gửi đi (`qgkPCgtqTlFYQUM5SVZSdxgB` cho `jNQXAC9IVRw`), chứ không viết
+   * theo hiểu biết. Đó là khác biệt mà ticket 012 trả giá để học.
+   */
+  function panelParams(videoId) {
+    const id = String(videoId || '');
+    if (!id) return '';
+    const inner = [0x0a, id.length, ...Array.from(id, (c) => c.charCodeAt(0)), 0x18, 0x01];
+    const bytes = [0xaa, 0x09, inner.length, ...inner];
+    const raw = String.fromCharCode(...bytes);
+    const b64 = typeof root.btoa === 'function' ? root.btoa(raw) : Buffer.from(raw, 'binary').toString('base64');
+    return b64.replace(/\+/g, '-').replace(/\//g, '_');
+  }
+
+  /** Chữ của một `transcriptSegmentViewModel`: `simpleText`, hoặc `runs` khi YouTube tách đoạn. */
+  const viewModelText = (model) => {
+    if (!model) return '';
+    if (Array.isArray(model.runs)) return collapse(model.runs.map((r) => (r && r.text) || '').join(''));
+    return collapse(model.simpleText);
+  };
+
+  /** `transcriptSegmentViewModel` đầu tiên nằm trong một mục dòng thời gian, hoặc `null`. */
+  function segmentViewModel(item) {
+    const timeline = item && item.item && item.item.timelineItemViewModel;
+    const contents = timeline && Array.isArray(timeline.contentItems) ? timeline.contentItems : [];
+    for (const content of contents) {
+      if (content && content.transcriptSegmentViewModel) return content.transcriptSegmentViewModel;
+    }
+    return null;
+  }
+
+  /**
+   * Mốc bắt đầu của một mục: **số giây của `watchEndpoint`**, không phải chuỗi mốc hiển thị.
+   *
+   * Hai giá trị này cùng đơn vị và trên trang thật luôn bằng nhau (`"0:01"` ↔ `1`), nên hoán vị
+   * chúng không làm hỏng lần chạy nào — đúng hình "hai nguồn cùng đơn vị, một cái đo được một
+   * cái là hình chiếu" của `WORKSPACE_PROTOCOL.md`. Chọn số đo được vì chuỗi hiển thị phụ thuộc
+   * ngôn ngữ giao diện và mất nghĩa ở video dài; chuỗi chỉ là đường lui khi YouTube không gửi số.
+   */
+  function segmentStart(item, model) {
+    const endpoint = item && item.onTap && item.onTap.innertubeCommand && item.onTap.innertubeCommand.watchEndpoint;
+    // `== null` chứ không phải `Number(...)` trần: `Number(null)` là **0**, một con số hoàn toàn
+    // hợp lệ và lọt qua mọi phép kiểm `isFinite`. Một `watchEndpoint: null` (hay
+    // `startTimeSeconds: null`) vì thế sẽ thành "dòng này bắt đầu ở giây 0" thay vì rơi về chuỗi
+    // mốc — và một dòng mốc 0 chen giữa transcript vẫn dựng ra file SRT mở lên xem được.
+    const raw = endpoint == null ? undefined : endpoint.startTimeSeconds;
+    const measured = raw == null ? NaN : Number(raw);
+    if (Number.isFinite(measured) && measured >= 0) return measured;
+    return parseClock(model && model.timestamp);
+  }
+
+  /**
+   * `get_panel` → `{ start, text }[]`.
+   *
+   * Mốc và chữ đọc **từ cùng một mục**, không phải từ hai lượt gom rồi ghép theo chỉ số. Trong
+   * cùng danh sách ấy có những mục **không phải segment** — tiêu đề chương
+   * (`timelineChapterViewModel`) mang `watchEndpoint` đầy đủ nhưng không có dòng chữ nào — nên
+   * hai lượt gom song song sẽ lệch nhau đúng một nấc kể từ chương đầu tiên, và kết quả vẫn là
+   * một transcript trông hoàn toàn hợp lệ với mọi mốc sai chỗ.
+   */
+  function parsePanelTranscript(payload) {
+    const out = [];
+    for (const item of collectByKey(payload, 'macroMarkersPanelItemViewModel')) {
+      const model = segmentViewModel(item);
+      if (!model) continue; // tiêu đề chương và mọi thứ không phải một dòng transcript
+      const text = viewModelText(model);
+      if (!text) continue;
+      out.push({ start: segmentStart(item, model), text });
+    }
+    return out;
+  }
+
+  /**
+   * Đường `get_panel` — endpoint mà **chính giao diện YouTube** gọi khi người ta bấm nút
+   * Transcript (đo ở ticket 012, chọn ở ADR 0013).
+   *
+   * Hàm này phải trả lời được hai câu hỏi khác hẳn nhau mà triệu chứng giống hệt nhau —
+   * "0 segment" — và phải trả lời **bằng dữ liệu**, vì một lượt trích "thành công" mà rỗng sẽ
+   * ghi vào Sổ đã import một video chưa hề trích được gì (ADR 0009):
+   *
+   *   - `NO_CAPTIONS` — video này không có phụ đề. Bằng chứng: `captionTracks` rỗng *của đúng
+   *     video này*, hoặc câu trả lời không có khối `content` nào (đo được: một video không phụ
+   *     đề trả HTTP 200 dài 960 byte, chỉ có `responseContext` và `trackingParams`).
+   *   - `BLANK` — có khối `content` mà không đọc ra dòng nào. Đây là **hỏng**, không phải
+   *     "không có phụ đề", và nó là ca mà `timedtext` rơi vào ở mọi video (HTTP 200, 0 byte).
+   *
+   * Ảnh chụp `playerResponse` chỉ được dùng khi nó **nói về đúng video này**. Đo trên trang
+   * thật: sau một lần điều hướng SPA, `location.href` đã sang video B mà
+   * `ytInitialPlayerResponse.videoDetails.videoId` vẫn là video A, kèm nguyên danh sách caption
+   * track của A. Tin nó lúc ấy là tuyên bố "video B không có phụ đề" dựa trên video A — đúng
+   * hình lặp lại "một thứ của video A còn sống trên trang video B" (`WORKSPACE_PROTOCOL.md`).
+   * Ảnh chụp lệch id vì thế bị **bỏ qua**, không bị coi là lỗi: nó không phải bằng chứng chống
+   * lại video này, nó chỉ không phải bằng chứng về video này. Câu trả lời của `get_panel` mới
+   * là chỗ phân biệt cuối cùng.
+   */
+  async function viaPanel(request, net) {
+    const req = request || {};
+    const cfg = req.ytcfg || {};
+    const videoId = String(req.videoId || '');
+    if (!net || typeof net.post !== 'function') throw new Error('get_panel: thiếu adapter mạng');
+    if (!cfg.apiKey) throw new Error('get_panel: chưa đọc được ytcfg của tab YouTube');
+    if (!videoId) throw new Error('get_panel: không biết đang trích video nào');
+
+    const player = req.player || null;
+    const aboutThisVideo = !!(player && player.videoId && player.videoId === videoId);
+    if (aboutThisVideo && Array.isArray(player.captionTracks) && player.captionTracks.length === 0) {
+      throw reasoned(
+        REASON.NO_CAPTIONS,
+        `get_panel: trang khai video ${videoId} không có caption track nào — không có phụ đề để trích`,
+      );
+    }
+
+    // Không `Authorization` ở đây, và sẽ không bao giờ có (ADR 0003, WORKSPACE_PROTOCOL).
+    const payload = await net.post({
+      url: `${PANEL_ENDPOINT}?key=${encodeURIComponent(cfg.apiKey)}&prettyPrint=false`,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Youtube-Client-Name': String(cfg.clientName || '1'),
+        'X-Youtube-Client-Version': String(cfg.clientVersion || ''),
+      },
+      body: {
+        context: {
+          client: {
+            clientName: cfg.clientName === '1' || !cfg.clientName ? 'WEB' : String(cfg.clientName),
+            clientVersion: String(cfg.clientVersion || ''),
+            hl: String(cfg.hl || 'vi'),
+            gl: String(cfg.gl || 'VN'),
+          },
+        },
+        panelId: PANEL_ID,
+        params: panelParams(videoId),
+      },
+    });
+
+    if (!payload || !payload.content) {
+      throw reasoned(
+        REASON.NO_CAPTIONS,
+        `get_panel: câu trả lời không có khối content — YouTube nói video ${videoId} không có bảng transcript`,
+      );
+    }
+    const segments = parsePanelTranscript(payload);
+    if (segments.length === 0) {
+      throw reasoned(
+        REASON.BLANK,
+        `get_panel: có khối content nhưng không đọc ra dòng nào của video ${videoId} — HTTP 200 rỗng là HỎNG, không phải "video không có phụ đề"`,
+      );
+    }
+    return segments;
+  }
+
+  // ------------------------------------------------------- đường 3: timedtext
 
   /**
    * `tStartMs` và `dDurationMs` cũng là một cặp cùng kiểu hoán vị được: đổi chỗ vẫn ra segment
@@ -243,7 +437,7 @@
     return segments;
   }
 
-  // ------------------------------------------------------------ đường 3: DOM
+  // ------------------------------------------------------------ đường 4: DOM
 
   function matchesAnyLabel(node, labels) {
     const aria = S.foldLabel(node.getAttribute('aria-label') || '');
@@ -468,11 +662,15 @@
   root.NBLM_TRANSCRIPT = Object.freeze({
     REASON,
     PRESS_SEQUENCE,
+    PANEL_ID,
     routeFor,
     fetchTranscript,
     parseClock,
     parseInnertubeTranscript,
     viaInnertube,
+    panelParams,
+    parsePanelTranscript,
+    viaPanel,
     parseTimedText,
     viaTimedText,
     findTranscriptButton,

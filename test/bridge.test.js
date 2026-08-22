@@ -18,21 +18,31 @@ const TOKEN = 'SAPISIDHASH 1755000000_bimatcuaowner';
 
 // ------------------------------------------------------------------ phạm vi của cầu
 
-test('cầu MAIN world phục vụ đúng hai việc — thêm việc thứ ba là quyết định của owner', () => {
-  assert.deepEqual([...P.OPS].sort(), ['listPlaylist', 'ytcfg']);
+test('cầu MAIN world phục vụ đúng ba việc — thêm việc thứ tư là quyết định của Lead', () => {
+  assert.deepEqual([...P.OPS].sort(), ['listPlaylist', 'playerResponse', 'ytcfg']);
 });
 
-test('chỉ liệt kê playlist mới được mượn header Authorization', () => {
+/**
+ * Ranh giới của `WORKSPACE_PROTOCOL.md` v4 là **auth, không phải số op**, nên test canh *quan hệ*
+ * chứ không đếm: mọi op cầu phục vụ, trừ đúng `listPlaylist`, đều không được mượn header. Viết
+ * theo `P.OPS` thay vì theo một danh sách chép tay là để op thứ tư thêm vào ngày mai cũng bị
+ * cùng phép kiểm này chặn nếu ai đó nhét nó vào `AUTH_OPS`.
+ */
+test('chỉ liệt kê playlist mới được mượn header Authorization — kể cả khi cầu có thêm op mới', () => {
   assert.deepEqual(P.AUTH_OPS, ['listPlaylist']);
   assert.equal(P.allowsAuth('listPlaylist'), true);
-  for (const op of ['ytcfg', 'transcript', 'getTranscript', '', null]) {
+
+  const borrowed = P.OPS.filter((op) => P.allowsAuth(op));
+  assert.deepEqual(borrowed, ['listPlaylist'], `op được mượn header oan: ${borrowed.join(', ')}`);
+
+  for (const op of ['ytcfg', 'playerResponse', 'transcript', 'getTranscript', '', null]) {
     assert.equal(P.allowsAuth(op), false, `op được mượn header oan: ${String(op)}`);
   }
 });
 
 test('authHeadersFor — op không phải liệt kê playlist thì không nhận header, dù token có sẵn', () => {
   assert.deepEqual(B.authHeadersFor('listPlaylist', TOKEN), { Authorization: TOKEN });
-  for (const op of ['ytcfg', 'transcript', 'get_transcript']) {
+  for (const op of P.OPS.filter((op) => op !== 'listPlaylist').concat(['transcript', 'get_transcript'])) {
     assert.deepEqual(B.authHeadersFor(op, TOKEN), {}, `lộ header ở op ${op}`);
   }
   assert.deepEqual(B.authHeadersFor('listPlaylist', ''), {}, 'chưa mượn được thì không bịa ra');
@@ -80,6 +90,90 @@ test('ytcfgSnapshot — ytcfg dạng object thuần cũng đọc được, thi�
   assert.deepEqual(B.ytcfgSnapshot(null), { apiKey: '', clientName: '', clientVersion: '', hl: '', gl: '' });
 });
 
+// ------------------------------------------------- đọc ytInitialPlayerResponse (ticket 013)
+
+/**
+ * `ytInitialPlayerResponse` thật — rút gọn, nhưng giữ đủ những thứ **không được rời khỏi trang**:
+ * URL phát đã ký, `visitorData`, và cấu hình player.
+ *
+ * Ba caption track chứ không một: `playerResponseSnapshot` rút một danh sách thành một danh sách
+ * khác, và ở n=1 thì `map`, `[0]`, `filter` cho cùng kết quả. Track "đặc biệt" (`kind: 'asr'`,
+ * tên dạng `runs` thay vì `simpleText`) nằm ở **giữa** — ở đầu thì `[0]` lọt, ở cuối thì `at(-1)`
+ * lọt.
+ */
+const fakePlayerResponse = () => ({
+  videoDetails: { videoId: 'aaaaaaaaaaa', title: 'Tiêu đề', author: 'Kênh' },
+  captions: {
+    playerCaptionsTracklistRenderer: {
+      captionTracks: [
+        { languageCode: 'en', name: { simpleText: 'English' }, baseUrl: 'https://youtube.com/api/timedtext?signature=CHUKY_BIMAT' },
+        { languageCode: 'vi', kind: 'asr', name: { runs: [{ text: 'Tiếng Việt ' }, { text: '(tự động)' }] }, baseUrl: 'https://youtube.com/api/timedtext?signature=CHUKY_BIMAT' },
+        { languageCode: 'de', name: { simpleText: 'Deutsch' }, baseUrl: 'https://youtube.com/api/timedtext?signature=CHUKY_BIMAT' },
+      ],
+    },
+  },
+  streamingData: { formats: [{ url: 'https://rr1.googlevideo.com/videoplayback?sig=CHUKY_BIMAT' }] },
+  responseContext: { visitorData: 'VISITOR_BIMAT' },
+  playerConfig: { audioConfig: { loudnessDb: 1 } },
+});
+
+test('playerResponseSnapshot — mang ra đúng danh tính video và danh sách caption track', () => {
+  assert.deepEqual(B.playerResponseSnapshot(fakePlayerResponse()), {
+    videoId: 'aaaaaaaaaaa',
+    captionTracks: [
+      { languageCode: 'en', kind: '', name: 'English' },
+      { languageCode: 'vi', kind: 'asr', name: 'Tiếng Việt (tự động)' },
+      { languageCode: 'de', kind: '', name: 'Deutsch' },
+    ],
+  });
+});
+
+test('playerResponseSnapshot — danh sách trắng: URL đã ký và visitorData không rời khỏi trang', () => {
+  const dumped = JSON.stringify(B.playerResponseSnapshot(fakePlayerResponse()));
+  for (const secret of ['CHUKY_BIMAT', 'VISITOR_BIMAT', 'googlevideo', 'timedtext']) {
+    assert.ok(!dumped.includes(secret), `playerResponseSnapshot mang theo ${secret}`);
+  }
+});
+
+test('playerResponseSnapshot — video không có phụ đề ra danh sách rỗng, không ra undefined', () => {
+  assert.deepEqual(B.playerResponseSnapshot({ videoDetails: { videoId: 'bbbbbbbbbbb' } }), {
+    videoId: 'bbbbbbbbbbb',
+    captionTracks: [],
+  });
+  assert.deepEqual(B.playerResponseSnapshot(null), { videoId: '', captionTracks: [] });
+});
+
+test('handleRequest — playerResponse trả ảnh chụp, và KHÔNG chạm mạng lần nào', async () => {
+  const deps = fakeDeps();
+  const response = await B.handleRequest({ op: 'playerResponse', params: {} }, deps);
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.videoId, 'aaaaaaaaaaa');
+  assert.equal(response.result.captionTracks.length, 3);
+  assert.deepEqual(deps.calls, [], 'op chỉ đọc biến của trang mà lại gửi request đi');
+});
+
+/**
+ * Nhánh cuối của `handleRequest` khai tên `listPlaylist` chứ không phải "còn lại thì...".
+ *
+ * Test này canh đúng cái sai mà câu chữ ấy chặn: một op **mới thêm vào `OPS` mà quên nhánh xử
+ * lý** sẽ rơi xuống nhánh cuối, và nếu nhánh cuối là mặc định thì nó lặng lẽ thành một request
+ * `browse` mang theo header `Authorization` mượn được. Vì thế phép kiểm chạy theo `P.OPS` chứ
+ * không theo danh sách chép tay: op thứ tư thêm vào ngày mai cũng phải đi qua đây.
+ */
+test('handleRequest — chỉ listPlaylist được gửi request; op nào khác chạm mạng là hở', async () => {
+  for (const op of P.OPS) {
+    const deps = fakeDeps();
+    const response = await B.handleRequest({ op, params: {} }, deps);
+    if (op === 'listPlaylist') {
+      assert.equal(deps.calls.length, 1, 'liệt kê playlist vẫn phải gọi mạng');
+      continue;
+    }
+    assert.deepEqual(deps.calls, [], `op "${op}" chạm mạng — nhánh cuối đang nuốt op không có người xử lý`);
+    assert.equal(response.ok, true, `op "${op}" khai trong OPS mà không ai trả lời`);
+  }
+});
+
 // ------------------------------------------------------------------ mượn header
 
 test('captureAuth — chỉ nhặt header của chính request InnerTube, không nhặt của mọi nơi', () => {
@@ -99,6 +193,7 @@ function fakeDeps(overrides = {}) {
   return {
     calls,
     ytcfg: fakeYtcfg(),
+    playerResponse: fakePlayerResponse(),
     borrowedAuth: TOKEN,
     async fetchJson(req) {
       calls.push(req);

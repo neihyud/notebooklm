@@ -27,7 +27,8 @@ const fakeDoc = (root_) => ({
   querySelectorAll: (selector) => root_.querySelectorAll(selector),
 });
 
-const WATCH_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+const VIDEO_ID = 'dQw4w9WgXcQ';
+const WATCH_URL = `https://www.youtube.com/watch?v=${VIDEO_ID}`;
 
 /** Trang watch tối giản: hàng nút Like/Share, tiêu đề, tên kênh, huy hiệu, thanh player. */
 function watchPage(options = {}) {
@@ -203,24 +204,43 @@ test('video private KHÔNG gọi đường API nào — ADR 0003, kiểm ở ch�
   assert.equal(result.meta.channel, 'Kênh Lập Trình');
 });
 
-test('video public thử InnerTube trước, và chỉ khi đó mới hỏi ytcfg qua cầu MAIN world', async () => {
+/** Câu trả lời `get_panel` rút gọn — đủ để `parsePanelTranscript` đọc ra đúng một dòng. */
+const panelReply = (start, text) => ({
+  content: {
+    engagementPanelSectionListRenderer: {
+      content: {
+        sectionListRenderer: {
+          contents: [{
+            itemSectionRenderer: {
+              contents: [{
+                macroMarkersPanelItemViewModel: {
+                  item: { timelineItemViewModel: { contentItems: [{ transcriptSegmentViewModel: { simpleText: text } }] } },
+                  onTap: { innertubeCommand: { watchEndpoint: { startTimeSeconds: start } } },
+                },
+              }],
+            },
+          }],
+        },
+      },
+    },
+  },
+});
+
+test('video public thử get_panel trước, và hỏi playerResponse rồi ytcfg qua cầu MAIN world', async () => {
   const page = watchPage();
   const calls = [];
   const result = await W.extractHere(page, {
     url: WATCH_URL,
     net: {
-      post: async () => {
-        calls.push('innertube');
-        return {
-          actions: [{
-            transcriptSegmentRenderer: { startMs: '1000', endMs: '2000', snippet: { simpleText: 'từ API' } },
-          }],
-        };
+      post: async (req) => {
+        calls.push(/get_panel/.test(req.url) ? 'panel' : 'innertube');
+        return panelReply(1, 'từ get_panel');
       },
     },
     bridge: {
       request: async (op) => {
         calls.push(`bridge:${op}`);
+        if (op === 'playerResponse') return { videoId: VIDEO_ID, captionTracks: [{ languageCode: 'vi', kind: '', name: 'Tiếng Việt' }] };
         return { apiKey: 'k', clientName: '1', clientVersion: '2' };
       },
     },
@@ -232,12 +252,32 @@ test('video public thử InnerTube trước, và chỉ khi đó mới hỏi ytcf
     },
   });
 
-  assert.deepEqual(calls, ['bridge:ytcfg', 'innertube']);
-  assert.equal(result.via, 'innertube');
-  assert.deepEqual(result.segments, [{ start: 1, end: 2, text: 'từ API' }]);
+  assert.deepEqual(calls, ['bridge:playerResponse', 'bridge:ytcfg', 'panel']);
+  assert.equal(result.via, 'panel');
+  assert.deepEqual(result.segments, [{ start: 1, text: 'từ get_panel' }]);
 });
 
-test('InnerTube hỏng thì rơi về DOM, và lý do của từng đường được giữ lại', async () => {
+test('trang khai không có caption track thì get_panel hỏng ngay, không tốn một lượt gọi mạng', async () => {
+  const page = watchPage();
+  const calls = [];
+  const result = await W.extractHere(page, {
+    url: WATCH_URL,
+    net: { post: async () => { calls.push('net'); return {}; } },
+    bridge: {
+      request: async (op) => (op === 'playerResponse'
+        ? { videoId: VIDEO_ID, captionTracks: [] }
+        : { apiKey: 'k' }),
+    },
+    page: { scan: async () => ({ ok: true, segments: [{ start: 0, text: 'từ DOM' }] }) },
+  });
+
+  assert.equal(result.via, 'dom');
+  const panel = result.attempts.find((a) => a.path === 'panel');
+  assert.equal(panel.code, 'no-captions', JSON.stringify(result.attempts));
+  assert.deepEqual(calls, ['net'], 'chỉ còn đúng lượt gọi của InnerTube; get_panel không được gọi');
+});
+
+test('hai đường API hỏng thì rơi về DOM, và lý do của từng đường được giữ lại', async () => {
   const page = watchPage();
   const result = await W.extractHere(page, {
     url: WATCH_URL,
@@ -248,8 +288,36 @@ test('InnerTube hỏng thì rơi về DOM, và lý do của từng đường đ�
 
   assert.equal(result.via, 'dom');
   const failed = result.attempts.filter((a) => !a.ok).map((a) => a.path);
-  assert.ok(failed.includes('innertube'), JSON.stringify(result.attempts));
-  assert.ok(failed.includes('timedtext'), 'thiếu adapter cũng phải hiện ra thành một dòng lý do');
+  assert.deepEqual(failed, ['panel', 'innertube'], JSON.stringify(result.attempts));
+});
+
+/**
+ * Cặp hoán vị được của ticket 013: `panel` và `dom` là **hai hàm cùng kiểu, cùng trả mảng
+ * segment**, nên đổi chỗ chúng trong bảng chọn vẫn cho một lượt import "thành công".
+ *
+ * Hai test dưới đây là hai nửa của cùng một phép kiểm, và cần cả hai:
+ *   - với video **private**, hoán vị đẩy đúng video mà ADR 0003 bảo vệ ra đường mạng;
+ *   - với video **public**, hoán vị không làm hỏng gì cả — chỉ khiến `via` gọi tên sai đường,
+ *     và `via` là thứ đi vào bảng tổng kết. Nên chữ của segment phải chốt theo đường, không chỉ
+ *     chốt "có segment".
+ */
+test('hoán vị panel ↔ dom: video public phải trả về chữ của ĐÚNG đường mà via gọi tên', async () => {
+  const page = watchPage();
+  const result = await W.extractHere(page, {
+    url: WATCH_URL,
+    net: { post: async () => panelReply(7, 'chữ của get_panel') },
+    bridge: {
+      request: async (op) => (op === 'playerResponse'
+        ? { videoId: VIDEO_ID, captionTracks: [{ languageCode: 'vi', kind: '', name: 'Tiếng Việt' }] }
+        : { apiKey: 'k', clientName: '1', clientVersion: '2' }),
+    },
+    // Đường DOM cũng trả về được, và trả về chữ KHÁC. Không thế thì hoán vị hai adapter cho ra
+    // đúng một kết quả và không test nào phân biệt được.
+    page: { scan: async () => ({ ok: true, segments: [{ start: 99, text: 'chữ của DOM' }] }) },
+  });
+
+  assert.equal(result.via, 'panel');
+  assert.deepEqual(result.segments, [{ start: 7, text: 'chữ của get_panel' }]);
 });
 
 // ------------------------------------------------------------ kỷ luật tin nhắn

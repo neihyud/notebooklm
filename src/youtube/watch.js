@@ -175,16 +175,25 @@
   /**
    * Trích transcript của video đang mở, định tuyến theo Mức riêng tư đọc từ trang.
    *
-   * Không có adapter `timedtext`: `captionBaseUrl` nằm trong `ytInitialPlayerResponse` của
-   * MAIN world, mà mở rộng phạm vi cầu MAIN world là quyết định của owner
-   * (`WORKSPACE_PROTOCOL.md`, ADR 0003). Thiếu adapter **không** bị giấu đi: `fetchTranscript`
-   * ghi nó thành một dòng trong `attempts`, nên bảng tổng kết vẫn nói ra được vì sao.
+   * Ba adapter, và **tên khoá là hợp đồng**: `fetchTranscript` tra `paths[tên]` theo tuyến mà
+   * `routeFor` trả về, nên đổi chỗ hai adapter cho nhau vẫn cho một lượt chạy "thành công" —
+   * cùng kiểu hàm, cùng trả về mảng segment. Với video private, tuyến chỉ có `dom`; hoán vị
+   * `panel` ↔ `dom` là đẩy đúng video private ra đường mạng, thứ ADR 0003 cấm. `via` trong kết
+   * quả vì thế phải là tên đường **thật sự trả về được**, không phải một nhãn tự do:
+   * `test/watch.test.js` chốt cả tên lẫn chữ của segment để một lần hoán vị không lọt.
    */
   async function extractHere(root_, deps) {
     const options = deps && deps.options ? deps.options : {};
     const meta = readVideoMeta(root_, { ...options, url: deps && deps.url });
 
     const paths = {
+      // Hỏi `playerResponse` **trước** `ytcfg`: nó là thứ duy nhất nói được "video này không có
+      // phụ đề" mà không tốn một lượt gọi mạng nào (`viaPanel`).
+      panel: async (request, opts) => {
+        const player = await deps.bridge.request('playerResponse');
+        const ytcfg = await deps.bridge.request('ytcfg');
+        return T.viaPanel({ ...request, player, ytcfg }, deps.net, opts);
+      },
       innertube: async (request, opts) => {
         const ytcfg = await deps.bridge.request('ytcfg');
         return T.viaInnertube({ ...request, ytcfg }, deps.net, opts);

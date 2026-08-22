@@ -23,7 +23,13 @@ function fakePaths(opts = {}) {
     if (opts[name]) return opts[name];
     throw new Error(`${name}: không có gì`);
   };
-  return { calls, innertube: make('innertube'), timedtext: make('timedtext'), dom: make('dom') };
+  return {
+    calls,
+    panel: make('panel'),
+    innertube: make('innertube'),
+    timedtext: make('timedtext'),
+    dom: make('dom'),
+  };
 }
 
 const seg = (start, end, text) => ({ start, end, text });
@@ -34,13 +40,24 @@ test('routeFor — private đi thẳng đường DOM, không có đường API n
   assert.deepEqual(T.routeFor('private'), ['dom']);
 });
 
-test('routeFor — unlisted/public thử InnerTube trước, rồi timedtext, cuối cùng mới DOM', () => {
-  assert.deepEqual(T.routeFor('unlisted'), ['innertube', 'timedtext', 'dom']);
-  assert.deepEqual(T.routeFor('public'), ['innertube', 'timedtext', 'dom']);
+/**
+ * Thứ tự này là số đo, không phải sở thích (ticket 013, ADR 0013): `get_panel` là endpoint mà
+ * chính giao diện YouTube gọi và là đường duy nhất còn trả về segment trên trang thật, còn
+ * `get_transcript` trả HTTP 400 với mọi loại `params`. `timedtext` không còn trong tuyến.
+ */
+test('routeFor — unlisted/public thử get_panel trước, rồi InnerTube, cuối cùng mới DOM', () => {
+  assert.deepEqual(T.routeFor('unlisted'), ['panel', 'innertube', 'dom']);
+  assert.deepEqual(T.routeFor('public'), ['panel', 'innertube', 'dom']);
 });
 
-test('fetchTranscript — video private KHÔNG BAO GIỜ gọi hai adapter API (ADR 0003)', async () => {
-  const paths = fakePaths({ innertube: [seg(0, 1, 'API')], dom: [seg(0, 1, 'DOM')] });
+test('routeFor — timedtext đã ra khỏi tuyến: đo được HTTP 200 body rỗng ở mọi video', () => {
+  for (const privacy of ['public', 'unlisted', 'private', undefined]) {
+    assert.ok(!T.routeFor(privacy).includes('timedtext'), `timedtext còn trong tuyến của ${String(privacy)}`);
+  }
+});
+
+test('fetchTranscript — video private KHÔNG BAO GIỜ gọi adapter API nào (ADR 0003)', async () => {
+  const paths = fakePaths({ panel: [seg(0, 1, 'PANEL')], innertube: [seg(0, 1, 'API')], dom: [seg(0, 1, 'DOM')] });
   const out = await T.fetchTranscript({ videoId: 'aaaaaaaaaaa', privacy: 'private' }, paths);
 
   assert.deepEqual(paths.calls, ['dom']);
@@ -48,39 +65,58 @@ test('fetchTranscript — video private KHÔNG BAO GIỜ gọi hai adapter API (
   assert.deepEqual(out.segments, [seg(0, 1, 'DOM')]);
 });
 
-test('fetchTranscript — unlisted dừng ở InnerTube khi InnerTube trả về được', async () => {
-  const paths = fakePaths({ innertube: [seg(0, 1, 'API')], timedtext: [seg(0, 1, 'TT')] });
+test('fetchTranscript — unlisted dừng ở get_panel khi get_panel trả về được', async () => {
+  const paths = fakePaths({ panel: [seg(0, 1, 'PANEL')], innertube: [seg(0, 1, 'API')] });
   const out = await T.fetchTranscript({ videoId: 'aaaaaaaaaaa', privacy: 'unlisted' }, paths);
 
-  assert.deepEqual(paths.calls, ['innertube']);
-  assert.equal(out.via, 'innertube');
+  assert.deepEqual(paths.calls, ['panel']);
+  assert.equal(out.via, 'panel');
+  assert.deepEqual(out.segments, [seg(0, 1, 'PANEL')]);
 });
 
-test('fetchTranscript — InnerTube hỏng thì rơi sang timedtext, không rơi thẳng xuống DOM', async () => {
-  const paths = fakePaths({ timedtext: [seg(0, 1, 'TT')], dom: [seg(0, 1, 'DOM')] });
+test('fetchTranscript — get_panel hỏng thì rơi sang InnerTube, không rơi thẳng xuống DOM', async () => {
+  const paths = fakePaths({ innertube: [seg(0, 1, 'API')], dom: [seg(0, 1, 'DOM')] });
   const out = await T.fetchTranscript({ videoId: 'aaaaaaaaaaa', privacy: 'public' }, paths);
 
-  assert.deepEqual(paths.calls, ['innertube', 'timedtext']);
-  assert.equal(out.via, 'timedtext');
-  assert.deepEqual(out.segments, [seg(0, 1, 'TT')]);
+  assert.deepEqual(paths.calls, ['panel', 'innertube']);
+  assert.equal(out.via, 'innertube');
+  assert.deepEqual(out.segments, [seg(0, 1, 'API')]);
 });
 
 test('fetchTranscript — hai đường API hỏng thì mới tới DOM, và nhật ký kể đủ ba lần thử', async () => {
   const paths = fakePaths({ dom: [seg(0, 1, 'DOM')] });
   const out = await T.fetchTranscript({ videoId: 'aaaaaaaaaaa', privacy: 'public' }, paths);
 
-  assert.deepEqual(paths.calls, ['innertube', 'timedtext', 'dom']);
+  assert.deepEqual(paths.calls, ['panel', 'innertube', 'dom']);
   assert.equal(out.via, 'dom');
   assert.deepEqual(out.attempts.map((a) => [a.path, a.ok]), [
-    ['innertube', false], ['timedtext', false], ['dom', true],
+    ['panel', false], ['innertube', false], ['dom', true],
   ]);
 });
 
 test('fetchTranscript — đường trả về mảng rỗng bị coi là hỏng, đi tiếp đường sau', async () => {
-  const paths = fakePaths({ innertube: [], timedtext: [seg(0, 1, 'TT')] });
+  const paths = fakePaths({ panel: [], innertube: [seg(0, 1, 'API')] });
   const out = await T.fetchTranscript({ videoId: 'aaaaaaaaaaa', privacy: 'public' }, paths);
 
-  assert.equal(out.via, 'timedtext');
+  assert.equal(out.via, 'innertube');
+});
+
+/**
+ * `reason` là câu chữ cho người đọc; `code` là dữ liệu cho máy đọc. Ticket 013 đòi phân biệt
+ * "video không có phụ đề" với "gọi được mà không ra dòng nào" **ở tầng dữ liệu**, và `attempts`
+ * là chỗ duy nhất hai thứ ấy đi ra khỏi lớp trích.
+ */
+test('fetchTranscript — nhật ký mang theo mã máy đọc được của từng lỗi, không chỉ câu chữ', async () => {
+  const noCaptions = new Error('không có phụ đề');
+  noCaptions.reason = T.REASON.NO_CAPTIONS;
+  const blank = new Error('rỗng');
+  blank.reason = T.REASON.BLANK;
+
+  const paths = fakePaths({ panel: noCaptions, innertube: blank, dom: [seg(0, 1, 'DOM')] });
+  const out = await T.fetchTranscript({ videoId: 'aaaaaaaaaaa', privacy: 'public' }, paths);
+
+  assert.deepEqual(out.attempts.map((a) => a.code), [T.REASON.NO_CAPTIONS, T.REASON.BLANK, '']);
+  assert.notEqual(T.REASON.NO_CAPTIONS, T.REASON.BLANK, 'hai ca này gộp mã là mất hẳn phép phân biệt');
 });
 
 test('fetchTranscript — hỏng hết thì ném lỗi kể tên từng đường và lý do', async () => {
@@ -100,7 +136,7 @@ test('fetchTranscript — hỏng hết thì ném lỗi kể tên từng đườn
 test('fetchTranscript — Mức riêng tư không rõ vẫn thử đủ ba đường', async () => {
   const paths = fakePaths({ dom: [seg(0, 1, 'DOM')] });
   await T.fetchTranscript({ videoId: 'aaaaaaaaaaa' }, paths);
-  assert.deepEqual(paths.calls, ['innertube', 'timedtext', 'dom']);
+  assert.deepEqual(paths.calls, ['panel', 'innertube', 'dom']);
 });
 
 // ------------------------------------------------------- đọc mốc thời gian hiển thị
@@ -207,6 +243,234 @@ test('viaInnertube — trả về rỗng thì ném lỗi nói rõ đường nào
     () => T.viaInnertube({ videoId: 'aaaaaaaaaaa', ytcfg: { apiKey: 'k' } }, net),
     /InnerTube/,
   );
+});
+
+// --------------------------------------------------------- get_panel (ticket 013)
+
+/**
+ * Một mục dòng thời gian mang chữ transcript, đúng hình dạng `/youtubei/v1/get_panel` trả về
+ * (chép từ lượt đo trang thật ở ticket 013).
+ */
+const panelSegment = ({ start, timestamp, text, endpoint = true }) => ({
+  macroMarkersPanelItemViewModel: {
+    item: {
+      timelineItemViewModel: {
+        timestamp,
+        contentItems: [{ transcriptSegmentViewModel: { simpleText: text, timestamp, style: 'TIMELINE_VIEW_STYLE_MODERN_INLINE_TIMESTAMPS' } }],
+      },
+    },
+    ...(endpoint ? { onTap: { innertubeCommand: { watchEndpoint: { videoId: 'aaaaaaaaaaa', startTimeSeconds: start } } } } : {}),
+  },
+});
+
+/**
+ * Tiêu đề chương: **cùng kiểu mục, cùng có `watchEndpoint`, chỉ không có dòng chữ nào**. Đây là
+ * phần tử "đặc biệt" của fixture và nó nằm ở **giữa** — ở đầu thì một hiện thực đọc `[0]` vẫn
+ * lọt, ở cuối thì `at(-1)` vẫn lọt.
+ */
+const panelChapter = ({ start, title }) => ({
+  macroMarkersPanelItemViewModel: {
+    item: { timelineChapterViewModel: { title, style: 'TIMELINE_VIEW_STYLE_MODERN' } },
+    onTap: { innertubeCommand: { watchEndpoint: { videoId: 'aaaaaaaaaaa', startTimeSeconds: start } } },
+  },
+});
+
+const panelPayload = (items) => ({
+  responseContext: { visitorData: 'v' },
+  content: {
+    engagementPanelSectionListRenderer: {
+      content: { sectionListRenderer: { contents: [{ itemSectionRenderer: { contents: items } }] } },
+    },
+  },
+});
+
+/** Ba dòng chữ và một tiêu đề chương xen giữa — mốc và chữ đều khác nhau đôi một. */
+const FULL_PANEL = panelPayload([
+  panelSegment({ start: 1, timestamp: '0:01', text: 'dòng đầu' }),
+  panelChapter({ start: 30, title: 'Chương 1: Mở đầu' }),
+  panelSegment({ start: 45, timestamp: '0:45', text: 'dòng giữa' }),
+  panelSegment({ start: 70, timestamp: '1:10', text: 'dòng cuối' }),
+]);
+
+test('panelParams — đúng từng byte chuỗi mà chính trang YouTube gửi đi', () => {
+  // Đo được trên trang thật (ticket 013): giao diện YouTube gửi đúng chuỗi này cho `jNQXAC9IVRw`.
+  assert.equal(T.panelParams('jNQXAC9IVRw'), 'qgkPCgtqTlFYQUM5SVZSdxgB');
+  assert.equal(T.panelParams('dQw4w9WgXcQ'), 'qgkPCgtkUXc0dzlXZ1hjURgB');
+  assert.equal(T.panelParams(''), '');
+});
+
+/**
+ * Mốc và chữ phải đọc **từ cùng một mục**. Một hiện thực gom hai lượt riêng rồi ghép theo chỉ số
+ * sẽ lệch đúng một nấc kể từ tiêu đề chương — và kết quả vẫn là ba dòng transcript trông hoàn
+ * toàn hợp lệ, chỉ là mỗi dòng mang mốc của dòng khác.
+ */
+test('parsePanelTranscript — tiêu đề chương xen giữa không làm lệch cặp mốc ↔ chữ', () => {
+  assert.deepEqual(T.parsePanelTranscript(FULL_PANEL), [
+    { start: 1, text: 'dòng đầu' },
+    { start: 45, text: 'dòng giữa' },
+    { start: 70, text: 'dòng cuối' },
+  ]);
+});
+
+/**
+ * `startTimeSeconds` và chuỗi mốc hiển thị là hai nguồn **cùng đơn vị** cho cùng một giá trị, và
+ * trên trang thật chúng luôn bằng nhau — nên hoán vị chúng không làm hỏng lần chạy nào. Số đo
+ * được thắng hình chiếu: chuỗi hiển thị phụ thuộc ngôn ngữ giao diện.
+ */
+test('parsePanelTranscript — mốc lấy từ số giây của watchEndpoint, không từ chuỗi hiển thị', () => {
+  const payload = panelPayload([
+    panelSegment({ start: 12, timestamp: '0:30', text: 'số và chuỗi lệch nhau' }),
+  ]);
+  assert.deepEqual(T.parsePanelTranscript(payload), [{ start: 12, text: 'số và chuỗi lệch nhau' }]);
+});
+
+/**
+ * `Number(null)` là **0** — một con số hợp lệ lọt qua mọi phép kiểm `isFinite`. Một
+ * `watchEndpoint: null` (khoá có mặt, giá trị rỗng) vì thế dễ thành "dòng này bắt đầu ở giây 0"
+ * thay vì rơi về chuỗi mốc, và một dòng mốc 0 chen giữa transcript vẫn dựng ra file SRT mở lên
+ * xem được. Fixture để mục ấy ở **giữa** để `[0]` và `at(-1)` đều không lọt.
+ */
+test('parsePanelTranscript — watchEndpoint rỗng vẫn rơi về chuỗi mốc, không thành giây 0', () => {
+  const middle = panelSegment({ start: 0, timestamp: '3:15', text: 'mục giữa' });
+  middle.macroMarkersPanelItemViewModel.onTap.innertubeCommand.watchEndpoint = null;
+  const nulled = panelSegment({ start: 0, timestamp: '5:00', text: 'mục có startTimeSeconds rỗng' });
+  nulled.macroMarkersPanelItemViewModel.onTap.innertubeCommand.watchEndpoint.startTimeSeconds = null;
+
+  assert.deepEqual(T.parsePanelTranscript(panelPayload([
+    panelSegment({ start: 12, timestamp: '0:12', text: 'mục đầu' }),
+    middle,
+    nulled,
+    panelSegment({ start: 400, timestamp: '6:40', text: 'mục cuối' }),
+  ])), [
+    { start: 12, text: 'mục đầu' },
+    { start: 195, text: 'mục giữa' },
+    { start: 300, text: 'mục có startTimeSeconds rỗng' },
+    { start: 400, text: 'mục cuối' },
+  ]);
+});
+
+test('parsePanelTranscript — thiếu watchEndpoint thì mới đọc chuỗi mốc, và payload lạ ra rỗng', () => {
+  const payload = panelPayload([
+    panelSegment({ start: 0, timestamp: '1:05', text: 'không có endpoint', endpoint: false }),
+  ]);
+  assert.deepEqual(T.parsePanelTranscript(payload), [{ start: 65, text: 'không có endpoint' }]);
+  assert.deepEqual(T.parsePanelTranscript({}), []);
+  assert.deepEqual(T.parsePanelTranscript(null), []);
+});
+
+test('parsePanelTranscript — chữ dạng runs cũng đọc được, dòng trắng bị bỏ', () => {
+  const blank = panelSegment({ start: 5, timestamp: '0:05', text: '   ' });
+  const runs = panelSegment({ start: 9, timestamp: '0:09', text: '' });
+  runs.macroMarkersPanelItemViewModel.item.timelineItemViewModel.contentItems[0].transcriptSegmentViewModel = {
+    runs: [{ text: 'ghép ' }, { text: 'hai mảnh' }], timestamp: '0:09',
+  };
+  assert.deepEqual(T.parsePanelTranscript(panelPayload([blank, runs])), [{ start: 9, text: 'ghép hai mảnh' }]);
+});
+
+const panelNet = (payload) => {
+  const sent = [];
+  return { sent, async post(req) { sent.push(req); return payload; } };
+};
+
+const YTCFG = { apiKey: 'AIzaKEY', clientName: '1', clientVersion: '2.2026', hl: 'vi', gl: 'VN' };
+
+test('viaPanel — gửi đúng panelId và params của video đang hỏi, không gửi header Authorization', async () => {
+  const net = panelNet(FULL_PANEL);
+  const segments = await T.viaPanel({
+    videoId: 'aaaaaaaaaaa',
+    privacy: 'public',
+    ytcfg: YTCFG,
+    // Nếu một ngày nào đó ai đó chuyền token vào đây, nó vẫn không được rời khỏi hàm này.
+    authorization: 'SAPISIDHASH 111_bimat',
+  }, net);
+
+  assert.equal(segments.length, 3);
+  assert.equal(net.sent.length, 1);
+  assert.match(net.sent[0].url, /youtubei\/v1\/get_panel/);
+  assert.match(net.sent[0].url, /[?&]key=AIzaKEY/);
+  assert.equal(net.sent[0].body.panelId, T.PANEL_ID);
+  assert.equal(net.sent[0].body.params, T.panelParams('aaaaaaaaaaa'));
+  const headerNames = Object.keys(net.sent[0].headers).map((h) => h.toLowerCase());
+  assert.ok(!headerNames.includes('authorization'), `lộ header: ${headerNames.join(', ')}`);
+  assert.ok(!JSON.stringify(net.sent[0]).includes('bimat'), 'token rò vào request get_panel');
+});
+
+/**
+ * Ticket 013, ràng buộc cứng: **HTTP 200 với 0 segment là HỎNG, không phải "video không có phụ
+ * đề"**. Hai ca dưới đây cho cùng một triệu chứng và phải mang hai mã khác nhau — nếu không, một
+ * lượt chạy "thành công" sẽ ghi vào Sổ đã import một video chưa hề trích được gì (ADR 0009).
+ */
+test('viaPanel — không có caption track thì báo NO_CAPTIONS và KHÔNG gọi mạng lần nào', async () => {
+  const net = panelNet(FULL_PANEL);
+  await assert.rejects(
+    () => T.viaPanel({
+      videoId: 'aaaaaaaaaaa',
+      ytcfg: YTCFG,
+      player: { videoId: 'aaaaaaaaaaa', captionTracks: [] },
+    }, net),
+    (error) => {
+      // Neo cả **chuỗi thật**, không chỉ hằng số: hai mã này là hợp đồng dữ liệu đi ra ngoài lớp
+      // trích (`attempts[].code`). Hoán vị hai giá trị cho nhau giữ nguyên mọi phép so sánh theo
+      // tên hằng, nên một suite chỉ so theo tên hằng vẫn xanh trong khi máy đọc bên kia nhận
+      // đúng câu trả lời ngược lại.
+      assert.equal(error.reason, 'no-captions');
+      assert.equal(error.reason, T.REASON.NO_CAPTIONS);
+      return true;
+    },
+  );
+  assert.deepEqual(net.sent, [], 'đã biết không có phụ đề mà vẫn tốn một lượt gọi mạng');
+});
+
+test('viaPanel — câu trả lời không có khối content là "video không có phụ đề"', async () => {
+  const net = panelNet({ responseContext: {}, trackingParams: 'x' });
+  await assert.rejects(
+    () => T.viaPanel({ videoId: 'aaaaaaaaaaa', ytcfg: YTCFG }, net),
+    (error) => {
+      assert.equal(error.reason, T.REASON.NO_CAPTIONS);
+      return true;
+    },
+  );
+});
+
+test('viaPanel — có content mà 0 dòng là HỎNG (BLANK), mang mã khác hẳn ca không có phụ đề', async () => {
+  const net = panelNet(panelPayload([]));
+  await assert.rejects(
+    () => T.viaPanel({ videoId: 'aaaaaaaaaaa', ytcfg: YTCFG }, net),
+    (error) => {
+      assert.equal(error.reason, 'blank-response');
+      assert.equal(error.reason, T.REASON.BLANK);
+      assert.notEqual(error.reason, T.REASON.NO_CAPTIONS, 'gộp hai mã là mất phép phân biệt');
+      return true;
+    },
+  );
+  assert.equal(net.sent.length, 1);
+});
+
+/**
+ * Đo được trên Chrome thật (ticket 013): sau một lần điều hướng SPA, `location.href` đã sang
+ * video B mà `ytInitialPlayerResponse.videoDetails.videoId` vẫn là video A, kèm nguyên danh sách
+ * caption track của A. Đây là hình lặp lại "một thứ của video A còn sống trên trang video B"
+ * (`WORKSPACE_PROTOCOL.md`) — và nếu tin nó, mọi video B sau một lần điều hướng SPA sẽ bị tuyên
+ * là "không có phụ đề" dựa trên dữ liệu của video A.
+ */
+test('viaPanel — ảnh chụp playerResponse của video KHÁC bị bỏ qua, không bị tin cũng không thành lỗi', async () => {
+  const net = panelNet(FULL_PANEL);
+  const segments = await T.viaPanel({
+    videoId: 'bbbbbbbbbbb',
+    ytcfg: YTCFG,
+    player: { videoId: 'aaaaaaaaaaa', captionTracks: [] },
+  }, net);
+
+  assert.equal(segments.length, 3, 'ảnh chụp của video A đã tuyên video B không có phụ đề');
+  assert.equal(net.sent[0].body.params, T.panelParams('bbbbbbbbbbb'), 'params phải theo video đang hỏi');
+});
+
+test('viaPanel — thiếu ytcfg hoặc thiếu adapter mạng thì hỏng ngay, không gọi mạng', async () => {
+  const net = panelNet(FULL_PANEL);
+  await assert.rejects(() => T.viaPanel({ videoId: 'aaaaaaaaaaa' }, net), /ytcfg/i);
+  await assert.rejects(() => T.viaPanel({ videoId: 'aaaaaaaaaaa', ytcfg: YTCFG }, {}), /adapter mạng/i);
+  await assert.rejects(() => T.viaPanel({ ytcfg: YTCFG }, net), /video nào/i);
+  assert.deepEqual(net.sent, []);
 });
 
 // ------------------------------------------------------------------ timedtext

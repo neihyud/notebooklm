@@ -2,15 +2,16 @@
 //
 // ĐÂY LÀ FILE NHẠY CẢM NHẤT REPO. Nó chạy trong ngữ cảnh của trang, hook `fetch`/`XHR`, và
 // nhìn thấy đúng bộ header mà YouTube tự gửi cho InnerTube. Phạm vi của nó — `NBLM_BRIDGE_PROTOCOL.OPS`
-// — là **hai việc**: đọc ytcfg, và liệt kê playlist. Mở rộng phạm vi file này là quyết định
-// của owner, không phải của Lead và không phải của peer (`WORKSPACE_PROTOCOL.md`).
+// — là **ba việc**: đọc ytcfg, đọc ytInitialPlayerResponse, và liệt kê playlist. Ranh giới thật
+// không phải số op mà là `AUTH_OPS`: cho một op mới mượn header `Authorization` là quyết định của
+// owner (`WORKSPACE_PROTOCOL.md` v4). Hai op đầu chỉ đọc biến toàn cục của trang, không gọi mạng.
 //
 // Vì sao transcript **không** đi qua đây: PoToken là chứng minh nguồn gốc chứ không phải xác
 // thực. Header mượn được trả lời "bạn là ai", không chạm tới câu "bạn có phải player thật
 // không", nên với video private nó không mở được đường nào — chỉ làm phạm vi rộng ra vô ích
 // (ADR 0003).
 //
-// Ba cái ở dưới là thuần và test được (`test/bridge.test.js`); phần hook chỉ tự cài khi thật
+// Bốn hàm ở dưới là thuần và test được (`test/bridge.test.js`); phần hook chỉ tự cài khi thật
 // sự đang ở trong một trang.
 (function (root) {
   'use strict';
@@ -107,6 +108,49 @@
     };
   }
 
+  // ------------------------------------------------------- đọc ytInitialPlayerResponse
+
+  const captionTracklist = (playerResponse) => {
+    const captions = playerResponse && playerResponse.captions;
+    const list = captions && captions.playerCaptionsTracklistRenderer;
+    return list && Array.isArray(list.captionTracks) ? list.captionTracks : [];
+  };
+
+  const trackName = (name) => {
+    if (!name) return '';
+    if (Array.isArray(name.runs)) return str(name.runs.map((r) => (r && r.text) || '').join(''));
+    return str(name.simpleText);
+  };
+
+  /**
+   * Ảnh chụp `ytInitialPlayerResponse` theo **danh sách trắng**, cùng lý do với `ytcfgSnapshot`:
+   * đối tượng gốc chứa `streamingData` (URL đã ký), `responseContext.visitorData`, cả cấu hình
+   * player — và YouTube thêm trường mới bất cứ lúc nào.
+   *
+   * Hai thứ đi ra, và **cả hai đều là dữ liệu, không phải chữ để in**:
+   *   - `videoId`: danh tính của video mà đối tượng này *nói về*. YouTube là SPA và
+   *     `ytInitialPlayerResponse` là biến của lần dựng trang gần nhất, nên nó là một ứng viên
+   *     điển hình của hình "một thứ của video A còn sống trên trang video B"
+   *     (`WORKSPACE_PROTOCOL.md`). Không mang id ra thì phía bên kia không có gì để đối chiếu.
+   *   - `captionTracks`: **có hay không có phụ đề**, biết trước khi gọi mạng. Đây là vế thứ nhất
+   *     của phép phân biệt mà ticket 013 đòi: "video không có phụ đề" và "gọi được mà không ra
+   *     dòng nào" phải tách nhau ở tầng dữ liệu.
+   *
+   * `baseUrl` của từng track cố ý **không** đi ra: nó là URL đã ký, và phép đo ticket 013 cho
+   * thấy nó vô dụng — `timedtext` với `exp=xpe` trả HTTP 200 body rỗng ở mọi biến thể.
+   */
+  function playerResponseSnapshot(playerResponse) {
+    const details = (playerResponse && playerResponse.videoDetails) || {};
+    return {
+      videoId: str(details.videoId),
+      captionTracks: captionTracklist(playerResponse).map((track) => ({
+        languageCode: str(track && track.languageCode),
+        kind: str(track && track.kind),
+        name: trackName(track && track.name),
+      })),
+    };
+  }
+
   // ------------------------------------------------------------------ điều phối
 
   const fail = (message) => ({ ok: false, error: String(message) });
@@ -123,8 +167,16 @@
 
     const params = (message && message.params) || {};
     if (op === P.YTCFG) return { ok: true, result: ytcfgSnapshot(deps.ytcfg) };
+    if (op === P.PLAYER_RESPONSE) return { ok: true, result: playerResponseSnapshot(deps.playerResponse) };
 
-    // Còn lại đúng một op: liệt kê playlist, chỗ duy nhất header mượn được đi ra.
+    // Nhánh cuối phải **khai tên op**, không phải "còn lại thì...". Một op mới thêm vào `OPS` mà
+    // quên nhánh xử lý sẽ rơi thẳng xuống đây; nếu đây là nhánh mặc định thì nó im lặng biến
+    // thành một request `browse` mang header mượn — đúng thứ `AUTH_OPS` sinh ra để chặn
+    // (kỷ luật định tuyến, ticket 011: khai nhận mà không xử lý là lỗi).
+    if (op !== P.LIST_PLAYLIST) {
+      return fail(`cầu MAIN world khai phục vụ "${op}" nhưng không có nhánh xử lý nào — lỗi lập trình, không phải lỗi của trang`);
+    }
+
     const headers = authHeadersFor(op, deps.borrowedAuth);
     if (!headers.Authorization) {
       return fail('chưa mượn được header Authorization của YouTube — hãy để trang tải xong rồi thử lại');
@@ -201,6 +253,9 @@
       get ytcfg() {
         return target.ytcfg;
       },
+      get playerResponse() {
+        return target.ytInitialPlayerResponse;
+      },
       get borrowedAuth() {
         return borrowedAuth;
       },
@@ -232,6 +287,7 @@
     captureAuth,
     authHeadersFor,
     ytcfgSnapshot,
+    playerResponseSnapshot,
     handleRequest,
     install,
   });
