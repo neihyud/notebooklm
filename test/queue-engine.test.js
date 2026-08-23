@@ -920,3 +920,129 @@ test('runQueue — mọi Nguồn mang đúng tên ta đặt thì bảng KHÔNG c
   assert.doesNotMatch(table, /Tên Nguồn KHÔNG/, table);
   assert.doesNotMatch(table, /^ {2}!/m, table);
 });
+
+// --------------------------- tên ta đặt PHẢI là chuỗi gửi đi (vòng hai ticket 021)
+
+/**
+ * Tiêu đề thật của YouTube có khoảng trắng đôi — YouTube cho phép, và `labelOf` không đụng vào.
+ * Nguồn lẻ lấy thẳng tiêu đề làm tên Nguồn, nên đây là đường duy nhất còn hở: `S.bundleName` đã
+ * `collapse` sẵn cả tên nguồn gốc lẫn tên Nhánh, nên Nguồn gộp không bao giờ dính.
+ */
+const MESSY = 'Video  giua';
+
+/**
+ * Đường đẩy đặt `S.collapse(source.name)` vào ô tiêu đề — **cả hai đường**: `buildParams` của
+ * `rpc.js` và `addTextSource` của `automation.js` gọi đúng hàm ấy. Notebook đọc lại đúng cái đã
+ * nhận, nên đây là hình dạng một lượt đẩy **hoàn toàn đúng**.
+ */
+const echoesWhatWasSent = async (source) => ({ ok: true, via: 'rpc', name: S.collapse(source.name) });
+
+test('runQueue — lượt đẩy ĐÚNG với tiêu đề khoảng trắng đôi KHÔNG bị báo mất tên', async () => {
+  // Hai phép chuẩn hoá khác nhau trên cùng một chuỗi cho một cảnh báo dương tính giả, và cảnh
+  // báo dương tính giả phá đúng thứ ticket này tồn tại để tạo ra: một dòng lúc nào cũng có là
+  // một dòng không ai đọc nữa. Chuẩn hoá ở **chỗ đặt tên**, một lần — chỗ so không chuẩn hoá.
+  const a = { extract: async (i) => ({ text: `${i.title} noi dung` }), push: echoesWhatWasSent };
+  const log = await E.runQueue({
+    items: [video('mo-dau'), { ...video('giua'), title: MESSY }, video('ke'), video('ket')],
+    notebookId: 'NB-1', extract: a.extract, push: a.push,
+  });
+
+  assert.equal(log.summary.unnamed, 0, E.formatSummary(log));
+  assert.deepEqual(log.sources.map((s) => s.nameWarning), ['', '', '', '']);
+  // Và tên đi vào bảng là **tên notebook đang giữ**, không phải bản chưa chuẩn hoá của ta.
+  assert.equal(log.sources[1].name, 'Video giua');
+  assert.doesNotMatch(E.formatSummary(log), /Tên Nguồn KHÔNG/);
+});
+
+test('runQueue — nhưng notebook đổi tên THẬT thì vẫn phải báo (chiều ngược lại)', async () => {
+  // Đối chứng phải sống cùng test trên: vá dương tính giả bằng cách nới phép so cho tới khi nó
+  // không bao giờ báo nữa thì đã xoá cả tính năng. Cùng fixture, cùng tiêu đề khoảng trắng đôi —
+  // chỉ khác đúng một chuyện: notebook trả về một cái tên khác.
+  const tuDat = 'Nội dung không tiêu đề';
+  const a = {
+    extract: async (i) => ({ text: `${i.title} noi dung` }),
+    push: async (source) => (source.name === 'Video giua'
+      ? { ok: true, via: 'rpc', name: tuDat }
+      : echoesWhatWasSent(source)),
+  };
+  const log = await E.runQueue({
+    items: [video('mo-dau'), { ...video('giua'), title: MESSY }, video('ke'), video('ket')],
+    notebookId: 'NB-1', extract: a.extract, push: a.push,
+  });
+
+  assert.equal(log.summary.unnamed, 1);
+  assert.match(
+    E.formatSummary(log),
+    new RegExp(`^ {2}! Video giua: notebook đang để tên "${tuDat}", không phải "Video giua"$`, 'm'),
+    E.formatSummary(log),
+  );
+});
+
+test('runQueue — tên ta đặt cho MỌI Nguồn đã là đúng chuỗi hai đường đẩy gửi đi', async () => {
+  // Bất biến giữ cho hai chỗ khỏi trôi ra xa nhau lần nữa: `source.name` là **điểm bất động** của
+  // `S.collapse`, nên "tên ta đặt" và "tên gửi đi" là một chuỗi, và chỗ so không cần biết gì về
+  // chuẩn hoá. Canh quan hệ, không khoá chuỗi — đổi câu chữ đặt tên sau này không làm test chết oan.
+  const pushed = [];
+  const a = {
+    extract: async (i) => ({ text: `${i.title} noi dung` }),
+    push: async (source) => { pushed.push(source.name); return echoesWhatWasSent(source); },
+  };
+  const group = playlist('Khoá  học\tRust');
+  const log = await E.runQueue({
+    items: [
+      video('mo-dau'),
+      { ...video('giua'), title: MESSY },
+      video('ke', { group }),
+      video('ket', { group }),
+    ],
+    notebookId: 'NB-1', extract: a.extract, push: a.push,
+  });
+
+  assert.equal(pushed.length, 3, 'fixture phải có cả Nguồn lẻ lẫn Nguồn gộp');
+  for (const name of pushed) {
+    assert.equal(name, S.collapse(name), `tên đưa cho đường đẩy chưa chuẩn hoá: ${JSON.stringify(name)}`);
+  }
+  // Nguồn gộp đi qua `S.bundleName` — nó đã collapse sẵn, nên chỗ hở chỉ có ở Nguồn lẻ.
+  assert.deepEqual(names(log), ['Video mo-dau', 'Video giua', 'Khoá học Rust — phần 1']);
+});
+
+test('runQueue — notebook thêm khoảng trắng vào tên ta gửi thì VẪN báo, không nuốt', async () => {
+  // Chiều nguy hiểm của bản vá: "nới phép so cho hết dương tính giả" nghĩa là `S.collapse` cả hai
+  // vế ở chỗ so — và khi ấy một notebook trả về tên đã bị sửa khoảng trắng thành ra không có
+  // triệu chứng gì. Ta gửi đi một chuỗi đã chuẩn hoá, nên mọi khoảng trắng trong tên nhận về là
+  // thứ **phía kia thêm vào**, và ADR 0009 đọc đúng cái tên đang nằm trong notebook.
+  for (const [nhan, tuDat] of [['thêm ở đuôi', 'Video giua '], ['nhả lại khoảng trắng đôi', 'Video  giua']]) {
+    const a = {
+      extract: async (i) => ({ text: `${i.title} noi dung` }),
+      push: async (source) => (source.name === 'Video giua'
+        ? { ok: true, via: 'rpc', name: tuDat }
+        : echoesWhatWasSent(source)),
+    };
+    const log = await E.runQueue({
+      items: [video('mo-dau'), { ...video('giua'), title: MESSY }, video('ke'), video('ket')],
+      notebookId: 'NB-1', extract: a.extract, push: a.push,
+    });
+
+    assert.equal(log.summary.unnamed, 1, `${nhan}: ${E.formatSummary(log)}`);
+    assert.match(log.sources[1].nameWarning, new RegExp(`^notebook đang để tên "${tuDat}"`), nhan);
+  }
+});
+
+test('runQueue — tên nhận về TOÀN khoảng trắng là "chưa xác nhận", không phải một cái tên khác', async () => {
+  // Chỗ duy nhất `.trim()` còn sống trong phép này, và nó chỉ trả lời câu *"có đọc được cái tên
+  // nào không"*: một chuỗi toàn khoảng trắng không phải một cái tên, in nó ra trong ngoặc kép chỉ
+  // làm dòng cảnh báo thành khó hiểu. Nó không đụng phép so bằng, nên không tạo ra dương tính giả.
+  const a = {
+    extract: async (i) => ({ text: `${i.title} noi dung` }),
+    push: async (source) => (source.name === 'Video giua'
+      ? { ok: true, via: 'rpc', name: '   ' }
+      : echoesWhatWasSent(source)),
+  };
+  const log = await E.runQueue({
+    items: [video('mo-dau'), { ...video('giua'), title: MESSY }, video('ke'), video('ket')],
+    notebookId: 'NB-1', extract: a.extract, push: a.push,
+  });
+
+  assert.equal(log.summary.unnamed, 1);
+  assert.match(log.sources[1].nameWarning, /^lượt đẩy không nói Nguồn mang tên gì/, log.sources[1].nameWarning);
+});

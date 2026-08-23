@@ -79,15 +79,22 @@
    * nhau không sửa lại được — và nó không có triệu chứng nào khác.
    */
   function nameWarningOf(intended, result) {
-    const wanted = String(intended || '').trim();
+    // **Không chuẩn hoá ở đây.** `labelOf`/`S.bundleName` đã đặt tên bằng đúng chuỗi hai đường
+    // đẩy gửi đi, nên phép so là phép so chuỗi trần: thêm một phép chuẩn hoá thứ ba ở chỗ so là
+    // dựng lại đúng con bọ nó vừa vá, chỉ ở một lớp khác — và lần này nó **giấu** chỗ lệch thay
+    // vì bịa ra chỗ lệch.
+    const wanted = String(intended || '');
     if (!wanted) return ''; // Nguồn không đặt tên thì không có cái tên nào để mất
     const r = result && typeof result === 'object' ? result : {};
     if (r.named === false) {
       const said = typeof r.warning === 'string' ? r.warning.trim() : '';
       return said || `không đặt được tên — NotebookLM sẽ tự đặt tên thay cho "${wanted}"`;
     }
-    const got = typeof r.name === 'string' ? r.name.trim() : '';
-    if (!got) return `lượt đẩy không nói Nguồn mang tên gì — không xác nhận được "${wanted}"`;
+    const got = typeof r.name === 'string' ? r.name : '';
+    // `.trim()` sống sót đúng ở đây, và chỉ cho câu hỏi *"có đọc được cái tên nào không"* — một
+    // chuỗi toàn khoảng trắng không phải một cái tên. Nó không đụng vào phép so bằng, nên nó
+    // không tạo ra được một dương tính giả nào.
+    if (!got.trim()) return `lượt đẩy không nói Nguồn mang tên gì — không xác nhận được "${wanted}"`;
     return got === wanted ? '' : `notebook đang để tên "${got}", không phải "${wanted}"`;
   }
 
@@ -130,7 +137,23 @@
 
   const queueOf = (item) => (item && item.kind === DOCS_QUEUE ? DOCS_QUEUE : VIDEO_QUEUE);
 
-  const labelOf = (item) => (item && item.title ? String(item.title) : String((item && item.id) || ''));
+  /**
+   * Tên người đọc của một Mục — và với **Nguồn lẻ, đây chính là tên Nguồn** sẽ nằm vĩnh viễn
+   * trong notebook (ADR 0002, ADR 0010).
+   *
+   * Vì vậy nó phải là **đúng chuỗi hai đường đẩy gửi đi**: cả `buildParams` (RPC) lẫn
+   * `addTextSource` (DOM) đặt `S.collapse(source.name)` vào ô tiêu đề. Chuẩn hoá ở chỗ *đặt
+   * tên*, một lần — không phải ở chỗ so. Hai phép chuẩn hoá khác nhau trên cùng một chuỗi là
+   * một lượt đẩy hoàn toàn đúng bị bảng tổng kết báo mất tên: tiêu đề YouTube có khoảng trắng
+   * đôi thì ta ghi `"Video  giua"` còn notebook giữ `"Video giua"`.
+   *
+   * `S.bundleName` đã `collapse` sẵn cả nguồn gốc lẫn Nhánh, nên trước đó chỉ Nguồn lẻ hở.
+   *
+   * `S.collapse` bỏ mọi thứ không phải chuỗi — **cùng phép** mà `S.ledgerKey` áp cho id, nên một
+   * Mục id không phải chuỗi đã chết ở `ledgerKey` trước khi tới đây. Không thêm phép ép kiểu:
+   * hàng rào thứ hai cho một luật đã có hàng rào là code chết, và code chết không test nào canh.
+   */
+  const labelOf = (item) => S.collapse(item && item.title) || S.collapse(item && item.id);
 
   /**
    * Khoá của một Nguồn gộp. Với tài liệu, **Nhánh nằm trong khoá**: đó là cách "cắt theo ranh
