@@ -1,12 +1,10 @@
 # 001 — Đường RPC cho việc thêm Nguồn, giữ DOM làm fallback
 
-- status: ready — **xếp hàng, chưa giao**
-- blocked-by: **002 rồi 003**. Peer `c417194` (selector) đã xong, đã nghiệm thu, đã archive
-  2026-08-23 — không còn chặn. Nhưng 002 (`7261780d`) đang write, và 003 xếp ngay sau nó; cả ba
-  ticket đụng cùng `automation.js` / `content.js` / `service-worker.js`. Một writer tại một thời
-  điểm trên working tree này.
-- cần owner duyệt trước khi giao: hạng "architecture lock-in" — `WORKSPACE_PROTOCOL.md` xếp
-  trade-off không đảo ngược vào diện Human quyết.
+- status: **ĐANG GIAO** — owner duyệt hướng "làm" ngày 2026-08-24. Lead giao peer cùng ngày.
+- blocked-by: **không còn**. 002 và 003 đã DONE và nghiệm thu, 004 cũng vậy; hai peer đã archive.
+  Working tree sạch, đang ở nhánh `fix/dan-dung-o-nhap` (3 commit). Bạn là writer DUY NHẤT.
+- owner đã duyệt: hạng "architecture lock-in", owner chọn **làm** ngày 2026-08-24 sau khi đọc
+  khuyến nghị ngược lại của `001-PHAN-TICH.md`. Quyết định đã có, đừng mở lại.
 - class: architecture lock-in → xem `WORKSPACE_PROTOCOL.md`
 - blocking edges: không có. Ticket này tự đứng được.
 - blocks: mọi ticket sau về tốc độ Lượt chạy.
@@ -73,8 +71,11 @@ Xoá/đổi tên Nguồn, tạo notebook, audio overview, đụng phía YouTube.
   (`WORKSPACE_PROTOCOL.md` → external side effects: thêm Nguồn không idempotent, gỡ phải xoá tay).
   Handback ghi: tên notebook nháp, số Nguồn trước/sau, và cả hai nhánh đã chạy — RPC thành công,
   và RPC hỏng-rơi-xuống-DOM (ép hỏng bằng cách đặt override id sang một giá trị rác).
-- Không có test đơn vị nào cho phần chạm mạng: repo không có jsdom, và shim tự viết chỉ tạo cảm
-  giác an toàn giả — lý do đã ghi ở đầu `tools/verify-live.mjs`.
+- **Câu "repo không có jsdom" trong bản gốc ticket nay SAI** — `package.json` có jsdom (devDependency
+  duy nhất), và `test/dom-harness.js` nạp source thật vào DOM thật dựng từ fixture. Kết luận cũ vẫn
+  đứng nhưng vì lý do khác: jsdom không cho bạn `fetch` thật, và shim tự viết vẫn chỉ chứng nhận
+  thứ ta gõ. Cái ĐO ĐƯỢC bằng jsdom là phần không chạm mạng — dựng payload, parse response mẫu,
+  gộp override, và quyết định rơi-xuống. Hãy phủ hết phần đó bằng test; đừng dừng ở "không test được".
 
 ## Ở acceptance sẽ hỏi
 
