@@ -344,8 +344,15 @@
    */
   async function confirmSourceAdded(before) {
     // Không đếm được TRƯỚC thì không có gì để so, nên chờ danh sách cập nhật
-    // cũng không đổi được kết luận — mà 8s vứt đi cho MỖI mục là 12 phút cho
-    // một lượt 89 video, đúng cỡ lượt chạy thật của owner.
+    // cũng không đổi được kết luận: chờ xong vẫn phải trả `verified:false`.
+    //
+    // Bản trước của comment này biện minh bằng "8s cho MỖI mục = 12 phút cho 89
+    // video". Con số đó SAI và đã lan sang `docs/tickets/001-PHAN-TICH.md` trước
+    // khi bị bắt: 8000 là `timeout` của `waitFor`, tức là TRẦN, không phải nhịp
+    // chờ cứng — `settledSourceCount` dò mỗi 300ms và trả về ngay lần đầu thấy
+    // đạt, nên đường thuận tốn ~300ms/mục (~27s cho 89 video). Chỉ ca danh sách
+    // không bao giờ đổi mới phải trả đủ 8s. Việc trả sớm ở đây vẫn đúng, nhưng
+    // đúng vì KHÔNG CÓ GÌ ĐỂ SO, không phải vì tiết kiệm thời gian.
     const after = before === null ? null : await settledSourceCount(before);
     if (before === null || after === null) {
       // Chỗ DUY NHẤT biết chắc "không đọc được danh sách Nguồn", và biết vào lúc
