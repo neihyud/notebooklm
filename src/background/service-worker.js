@@ -31,8 +31,17 @@ const {
 
 const TEXT_PREFIX = 'text:';
 
-/** Trần thời gian cho MỘT mục. Trích transcript chậm nhất cũng dưới ngưỡng này. */
+/** Trần thời gian cho việc THÊM NGUỒN của một mục. */
 const ITEM_TIMEOUT_MS = 240000;
+
+/**
+ * Trần thời gian cho MỘT lần ghi file xuống đĩa.
+ *
+ * Phải NGẮN HƠN `ITEM_TIMEOUT_MS`: vòng lặp ngoài cắt mục ở 240s bằng thông báo
+ * "quá 240s không xong", và nếu phép chờ ghi file dài hơn thế thì lần nào cũng bị
+ * cắt ngang — che mất lý do thật mà Chrome đã nói ra (đĩa đầy, blob URL hết hạn).
+ */
+const DOWNLOAD_TIMEOUT_MS = 90000;
 
 let runner = null;      // Promise của vòng lặp đang chạy
 let stopRequested = false;
@@ -596,10 +605,15 @@ async function finishTranscript(item, result, settings) {
     title: fullMeta.title || item.title,
     channel: fullMeta.channel || item.channel,
     privacy: fullMeta.privacy || item.privacy,
+    // Bản chép lời thiếu phần đuôi là sự thật về NỘI DUNG nguồn, và nó phải sống
+    // lâu hơn lời gọi này: Mục còn đi qua vài nấc nữa (ghi file, thử url, rơi về
+    // dán text) trước khi có ai kết luận `done`. Ghi thẳng vào Hàng đợi thì mọi
+    // nấc đọc lại được từ một chỗ. `|| null` để lượt chạy lại xoá được dấu cũ.
+    truncated: result.truncated || null,
   });
   // Trả kèm segments + meta: đường tải file cần dữ liệu thô để dựng .srt/.md,
   // chứ không dùng được `text` vốn đã định dạng sẵn cho NotebookLM.
-  return { text, title: sourceTitle(fullMeta), segments, meta: fullMeta };
+  return { text, title: sourceTitle(fullMeta), segments, meta: fullMeta, truncated: result.truncated || null };
 }
 
 /* -------------------------------------------------------------------- */
@@ -667,27 +681,64 @@ async function fileUrlFor(text, mime) {
   return toDataUrl(text, mime);
 }
 
-async function downloadItem(item, settings, index) {
-  const resolved = await resolveMeta(item);
-  if (resolved.kind === KIND.DOCS) {
-    return { ok: false, error: 'Mục này là trang tài liệu, không có transcript để tải.' };
-  }
+/**
+ * Chờ Chrome ghi XONG file, không phải chờ Chrome nhận yêu cầu.
+ *
+ * `chrome.downloads.download()` resolve ngay khi yêu cầu được nhận. Một download
+ * bị `interrupted` — đĩa đầy, hoặc blob URL đã bị revoke sau TTL 120s ở
+ * `offscreen.js` — vẫn resolve y hệt lúc thành công. Kết quả thật chỉ có trong
+ * `state` của `chrome.downloads`.
+ */
+function awaitDownloadComplete(downloadId, timeout = DOWNLOAD_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    let settled = false;
 
-  const prepared = await prepareTranscript(resolved, settings);
-  const segments = prepared.segments || [];
-  if (!segments.length) return { ok: false, error: 'Không có dòng transcript nào.' };
+    const verdict = (state, reason) =>
+      state === 'complete'
+        ? { ok: true }
+        : { ok: false, error: `Chrome không ghi được file (${reason || 'không rõ lý do'})` };
 
-  const fmt = self.NBLM_SRT.FORMATS[settings.downloadFormat] || self.NBLM_SRT.FORMATS.txt;
-  const meta = Object.assign({ videoId: resolved.videoId, title: resolved.title }, prepared.meta || {});
-  const content = fmt.render(segments, meta);
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      chrome.downloads.onChanged.removeListener(onChanged);
+      resolve(result);
+    };
 
-  const folder = String(settings.downloadSubfolder || '').replace(/[\\/:*?"<>|]/g, '').trim();
-  const filename = (folder ? `${folder}/` : '') + downloadName(meta, fmt.ext, index);
+    const onChanged = (delta) => {
+      // Cả hàng đợi dùng chung một stream sự kiện: bỏ lọc theo id là nhận delta
+      // của mục khác rồi báo xong cho một file chưa hề được ghi.
+      if (!delta || delta.id !== downloadId || !delta.state) return;
+      const state = delta.state.current;
+      if (state !== 'complete' && state !== 'interrupted') return;
+      finish(verdict(state, delta.error && delta.error.current));
+    };
 
-  await patchItem(resolved.id, { status: STATUS.IMPORTING });
+    chrome.downloads.onChanged.addListener(onChanged);
+    const timer = setTimeout(
+      () => finish({ ok: false, error: `Quá ${Math.round(timeout / 1000)}s mà Chrome chưa ghi xong file.` }),
+      timeout
+    );
+
+    // Transcript nhỏ có thể ghi xong TRƯỚC khi listener kịp gắn — không hỏi lại
+    // trạng thái hiện tại thì mọi file nhỏ đều treo tới hết giờ dù đã nằm trên đĩa.
+    Promise.resolve(chrome.downloads.search({ id: downloadId }))
+      .then((list) => {
+        const found = (list || [])[0];
+        if (!found || (found.state !== 'complete' && found.state !== 'interrupted')) return;
+        finish(verdict(found.state, found.error));
+      })
+      .catch(() => {});
+  });
+}
+
+/** Gửi yêu cầu tải rồi chờ tới lúc file thật sự nằm trên đĩa. */
+async function saveFile(url, filename) {
+  let downloadId;
   try {
-    await chrome.downloads.download({
-      url: await fileUrlFor(content, fmt.mime),
+    downloadId = await chrome.downloads.download({
+      url,
       filename,
       conflictAction: 'uniquify',
       saveAs: false,
@@ -695,9 +746,81 @@ async function downloadItem(item, settings, index) {
   } catch (e) {
     return { ok: false, error: `Không lưu được file: ${(e && e.message) || e}` };
   }
-  // File đã nằm trên đĩa, không cần giữ bản sao trong storage nữa.
-  await dropText(resolved.id);
-  return { ok: true, mode: 'download' };
+  if (downloadId == null) return { ok: false, error: 'Chrome không nhận yêu cầu tải file.' };
+  return awaitDownloadComplete(downloadId);
+}
+
+/** Vị trí 1-based của một Mục trong Hàng đợi; 0 nếu Mục đã bị xoá giữa chừng. */
+async function queueOrdinal(id) {
+  return (await getQueue()).findIndex((i) => i.id === id) + 1;
+}
+
+/**
+ * Ghi Bản sao xuống đĩa cho một video. Ném lỗi nếu không ghi được — người gọi
+ * quyết định làm gì với nó, và câu trả lời luôn là "ghi lại rồi đi tiếp".
+ *
+ * @returns {string|null} lý do file vừa ghi KHÔNG trọn vẹn (transcript chạm trần
+ * cuộn), hoặc null. File có nằm trên đĩa mà nội dung cụt đuôi vẫn là một khuyết
+ * tật phải nói ra.
+ */
+async function saveTranscriptCopy(item, settings) {
+  const resolved = await resolveMeta(item);
+  const prepared = await prepareTranscript(resolved, settings);
+  const segments = prepared.segments || [];
+  if (!segments.length) throw new Error('Không có dòng transcript nào.');
+
+  const fmt = self.NBLM_SRT.FORMATS[settings.downloadFormat] || self.NBLM_SRT.FORMATS.txt;
+  // `prepared.meta` là bản đầy đủ mà finishTranscript đã dựng — nó đã gồm cả
+  // videoId lẫn title của chính Mục này. Dựng lại một object cơ sở rồi để nó ghi
+  // đè lên là code chết: hoán vị hai trường trong object cơ sở đó không đổi được
+  // gì cả, tức là chẳng có gì để canh. Chỉ còn MỘT chỗ quyết định cặp này.
+  const meta = prepared.meta;
+  const content = fmt.render(segments, meta);
+
+  const folder = String(settings.downloadSubfolder || '').replace(/[\\/:*?"<>|]/g, '').trim();
+  // Số thứ tự đọc từ VỊ TRÍ của chính Mục này trong Hàng đợi — một con số nằm
+  // trong chrome.storage, không phải bộ đếm chạy trong RAM. Hai thứ đó cùng kiểu
+  // số và cùng đi vào tên file, nhưng chỉ cái trước sống sót qua một lần Chrome
+  // ngắt service worker: bộ đếm RAM về 0 là cả loạt file được đánh số lại từ 001
+  // và `conflictAction:'uniquify'` đẻ ra một dãy bản sao " (1)".
+  const filename = (folder ? `${folder}/` : '') + downloadName(meta, fmt.ext, await queueOrdinal(resolved.id));
+
+  const saved = await saveFile(await fileUrlFor(content, fmt.mime), filename);
+  if (!saved.ok) throw new Error(saved.error);
+
+  // Chỉ ghi `savedFile` SAU khi Chrome xác nhận file đã nằm trên đĩa. Đây là
+  // toàn bộ tiến độ của đường tải đĩa, và nó phải đúng nghĩa đen.
+  await patchItem(resolved.id, { savedFile: filename });
+  return prepared.truncated || null;
+}
+
+/**
+ * Bước ghi Bản sao xuống đĩa trong một Lượt chạy.
+ *
+ * Bản sao xuống đĩa là *phụ phẩm* của việc trích Transcript, không phải mục đích
+ * của Lượt chạy — Nguồn mới là thứ đo được thành công. Nên bước này không bao giờ
+ * làm hỏng Mục: hỏng thì ghi lý do lên Mục rồi trả quyền điều khiển lại ngay.
+ */
+async function copyStep(item, settings) {
+  if (!settings.saveTranscriptCopy || item.kind === KIND.DOCS) return;
+
+  // Đã ghi rồi thì thôi. `savedFile` là chỗ DUY NHẤT giữ tiến độ của đường tải
+  // đĩa, và nó nằm trong chrome.storage chứ không phải trong một biến cục bộ:
+  // Chrome ngắt service worker MV3 giữa lượt chạy là mọi biến RAM về 0, alarm gọi
+  // lại runQueue, và cả loạt file đã tải bị tải lại lần nữa.
+  if (item.savedFile) return;
+
+  // KHÔNG bọc trong Promise.race. Chặn giờ ở đây sẽ bỏ rơi một promise vẫn đang
+  // chạy, mà promise đó lái `helper` — tab YouTube DÙNG CHUNG duy nhất. Nó và
+  // `importItem` ngay sau đó sẽ vừa điều hướng vừa kích hoạt cùng một tab, và
+  // mỗi bên thấy trang của bên kia. `saveTranscriptCopy` vốn đã có trần: mọi
+  // `sendToTab` bên trong đều mang timeout riêng, cộng thêm DOWNLOAD_TIMEOUT_MS
+  // — nó chậm được, nhưng không treo vĩnh viễn được.
+  const copyError = await saveTranscriptCopy(item, settings).then(
+    (truncated) => truncated,
+    (e) => (e && e.message) || String(e)
+  );
+  await patchItem(item.id, { copyError });
 }
 
 /** Chiến lược cho từng mức riêng tư. */
@@ -737,8 +860,11 @@ async function importVideo(item, settings, notebookTabId) {
         { type: MSG.NLM_ADD_URL, url: resolved.url, label: resolved.title || resolved.videoId },
         150000
       );
-      if (res.ok) return { ok: true, mode };
+      if (res.ok) return { ok: true, mode, verified: res.verified === true, unverified: res.unverified || null };
       if (res.limit) return { ok: false, mode, error: res.error, fatal: true };
+      // Nguồn ĐÃ vào notebook (chỉ là không đúng 1). Rơi sang đường kế tiếp là
+      // thêm lần nữa — thao tác này không idempotent, bản trùng phải xoá tay.
+      if (res.sourceAdded) return { ok: false, mode, error: res.error };
       failures.push(`URL: ${res.error}`);
       continue;
     }
@@ -763,9 +889,10 @@ async function importVideo(item, settings, notebookTabId) {
     );
     if (res.ok) {
       await dropText(resolved.id);
-      return { ok: true, mode };
+      return { ok: true, mode, verified: res.verified === true, unverified: res.unverified || null };
     }
     if (res.limit) return { ok: false, mode, error: res.error, fatal: true };
+    if (res.sourceAdded) return { ok: false, mode, error: res.error }; // xem ghi chú ở nhánh 'url'
     failures.push(`Dán text: ${res.error}`);
   }
 
@@ -856,8 +983,11 @@ async function importDoc(item, settings, notebookTabId) {
         { type: MSG.NLM_ADD_URL, url: item.url, label: item.title || item.url },
         150000
       );
-      if (res.ok) return { ok: true, mode };
+      if (res.ok) return { ok: true, mode, verified: res.verified === true, unverified: res.unverified || null };
       if (res.limit) return { ok: false, mode, error: res.error, fatal: true };
+      // Nguồn ĐÃ vào notebook (chỉ là không đúng 1). Rơi sang đường kế tiếp là
+      // thêm lần nữa — thao tác này không idempotent, bản trùng phải xoá tay.
+      if (res.sourceAdded) return { ok: false, mode, error: res.error };
       failures.push(`URL: ${res.error}`);
       continue;
     }
@@ -879,9 +1009,10 @@ async function importDoc(item, settings, notebookTabId) {
     );
     if (res.ok) {
       await dropText(item.id);
-      return { ok: true, mode };
+      return { ok: true, mode, verified: res.verified === true, unverified: res.unverified || null };
     }
     if (res.limit) return { ok: false, mode, error: res.error, fatal: true };
+    if (res.sourceAdded) return { ok: false, mode, error: res.error }; // xem ghi chú ở nhánh 'url'
     failures.push(`Dán text: ${res.error}`);
   }
 
@@ -892,18 +1023,19 @@ async function importDoc(item, settings, notebookTabId) {
 /* vòng lặp                                                              */
 /* -------------------------------------------------------------------- */
 
-async function runQueue({ downloadOnly = false } = {}) {
+/**
+ * MỘT Lượt chạy: xử lý hết Hàng đợi một mạch, không đòi bấm gì giữa chừng.
+ *
+ * Trước ticket 003 còn một chế độ chạy thứ hai (chỉ tải về đĩa) với `targets`,
+ * `cursor` và `index` sống trong RAM. Bỏ hẳn nó, chứ không vá: tiến độ giờ nằm
+ * đúng ở nơi vốn đã sống sót qua mọi lần Chrome ngắt service worker — `status`
+ * của từng Mục và `savedFile` của từng Mục, cả hai trong chrome.storage.
+ */
+async function runQueue() {
   if (runner) return runner;
   stopRequested = false;
   runner = (async () => {
-    await chrome.storage.local.set({
-      [KEYS.RUNNING]: true,
-      // Nhớ chế độ: Chrome ngắt service worker MV3 rất thường xuyên, và alarm sẽ
-      // khởi động lại hàng đợi. Không nhớ thì lượt chạy hồi phục nhầm sang chế độ
-      // import, đòi mở tab NotebookLM, rồi chết lặng — để lại đúng một mục kẹt ở
-      // 'extracting' và phần còn lại không bao giờ tới lượt. Đã xảy ra thật.
-      [KEYS.RUN_MODE]: downloadOnly ? 'download' : 'import',
-    });
+    await chrome.storage.local.set({ [KEYS.RUNNING]: true });
     // 0.5 phút là mốc tối thiểu Chrome chấp nhận; đặt thấp hơn thì bị kẹp lại
     // hoặc bỏ qua, mà alarm này chính là thứ đánh thức lại hàng đợi sau khi
     // Chrome ngắt service worker.
@@ -924,46 +1056,26 @@ async function runQueue({ downloadOnly = false } = {}) {
 
     try {
       const settings = await getSettings();
-      // Chế độ tải về không cần notebook — đừng bắt người dùng mở tab NotebookLM
-      // chỉ để lưu file xuống máy.
-      notebookTabId = downloadOnly ? null : await resolveNotebookTab();
-      let index = 0;
-
-      // Đường tải về xử lý mọi mục đang có, kể cả `done` và `error`: transcript
-      // nằm trên YouTube chứ không nằm trong hàng đợi, nên tải lại lúc nào cũng
-      // được — trạng thái cũ không nói lên điều gì về việc còn tải được hay không.
-      //
-      // Phải chốt danh sách id ngay từ đầu thay vì dò theo trạng thái như đường
-      // import: mục vừa xử lý xong được đánh dấu `done`, mà `done` cũng nằm
-      // trong diện tải, nên dò lại sẽ chọn trúng chính nó và lặp vô tận.
-      const targets = downloadOnly
-        ? (await getQueue()).filter((i) => i.kind !== KIND.DOCS).map((i) => i.id)
-        : null;
-      let cursor = 0;
+      notebookTabId = await resolveNotebookTab();
 
       for (;;) {
         if (stopRequested) break;
         const queue = await getQueue();
 
-        let item = null;
-        if (downloadOnly) {
-          // Mục có thể bị xoá khỏi hàng đợi giữa chừng — bỏ qua và đi tiếp.
-          while (cursor < targets.length && !item) {
-            item = queue.find((i) => i.id === targets[cursor++]) || null;
-          }
-        } else {
-          item = queue.find((i) => i.status === STATUS.PENDING) || null;
-        }
+        const item = queue.find((i) => i.status === STATUS.PENDING) || null;
         if (!item) break;
 
         try {
+          // Bản sao xuống đĩa đi TRƯỚC, và với trần giờ RIÊNG (xem copyStep).
+          // Trước vì nó trích sẵn Transcript vào storage, nên nhánh dán text ngay
+          // sau đó dùng lại được, không trích hai lần.
+          await copyStep(item, settings);
+
           // Chặn giờ cho từng mục. Không có nó thì một mục treo là cả hàng đợi
           // đứng im vĩnh viễn ở trạng thái 'extracting' — không lỗi, không tiến
           // triển, không dấu vết. Thà bỏ mục đó kèm thông báo rõ rồi đi tiếp.
           const result = await Promise.race([
-            downloadOnly
-              ? downloadItem(item, settings, ++index)
-              : importItem(item, settings, notebookTabId),
+            importItem(item, settings, notebookTabId),
             sleep(ITEM_TIMEOUT_MS).then(() => ({
               ok: false,
               error: `Quá ${Math.round(ITEM_TIMEOUT_MS / 1000)}s không xong — bỏ qua để chạy tiếp mục sau.`,
@@ -971,7 +1083,31 @@ async function runQueue({ downloadOnly = false } = {}) {
           ]);
           if (result.ok) {
             done++;
-            await patchItem(item.id, { status: STATUS.DONE, mode: result.mode, error: null });
+            // Hai nguồn nghi ngờ khác nhau gặp nhau ở đúng chỗ này, và cùng đi ra
+            // một cửa vì với người đọc chúng là một câu: "đã xong nhưng không dám
+            // chắc". Một là NotebookLM không đối chiếu được số Nguồn (ticket 002),
+            // hai là bản chép lời thiếu phần đuôi (ticket 003).
+            //
+            // Cái thứ hai CHỈ tính khi bản chép lời đó chính là thứ đã thành Nguồn
+            // (mode 'text'). Đi đường link thì Nguồn là do NotebookLM tự đọc từ
+            // YouTube, transcript cụt đuôi của ta không nói được gì về nó — kêu
+            // "chưa xác minh được" ở đó là báo động giả, và báo động giả ăn mòn
+            // đúng tín hiệu mà ticket 002 vừa dựng lên. Chỗ cụt ấy thuộc về file
+            // trên đĩa, và `copyStep` đã ghi nó vào `copyError` rồi.
+            const fresh = (await getQueue()).find((i) => i.id === item.id) || {};
+            const cutDuoiNguon = result.mode === 'text' ? fresh.truncated || null : null;
+            const lyDo = [cutDuoiNguon, result.unverified].filter(Boolean);
+            await patchItem(item.id, {
+              status: STATUS.DONE,
+              mode: result.mode,
+              verified: result.verified === true && !cutDuoiNguon,
+              unverified: lyDo.length ? lyDo.join(' ') : null,
+              error: null,
+            });
+            // Nguồn đã vào rồi thì bản nháp trong storage hết việc. Nhánh dán text
+            // tự dọn phần của nó; nhánh url thì không, mà từ ticket 003 nhánh url
+            // cũng có thể đã trích transcript sẵn cho Bản sao xuống đĩa.
+            await dropText(item.id);
           } else {
             failed++;
             await patchItem(item.id, {
@@ -1007,10 +1143,8 @@ async function runQueue({ downloadOnly = false } = {}) {
       runner = null;
 
       if (done || failed) {
-        const summary = downloadOnly
-          ? `${done} transcript đã tải${failed ? `, ${failed} lỗi` : ''}`
-          : `${done} nguồn đã thêm${failed ? `, ${failed} lỗi` : ''}`;
-        await note(downloadOnly ? 'Tải transcript xong' : 'Import xong', summary);
+        const summary = `${done} nguồn đã thêm${failed ? `, ${failed} lỗi` : ''}`;
+        await note('Import xong', summary);
         if (notebookTabId != null) {
           chrome.tabs
             .sendMessage(notebookTabId, { type: 'nblm-hud', message: summary, done: true })
@@ -1038,10 +1172,10 @@ async function note(title, message) {
 chrome.alarms.onAlarm.addListener((alarm) => {
   // Chỉ để service worker khỏi bị ngủ giữa chừng khi hàng đợi đang chạy.
   if (alarm.name === 'nblm-keepalive' && !runner) {
-    chrome.storage.local.get([KEYS.RUNNING, KEYS.RUN_MODE]).then((got) => {
-      // Phải hồi phục ĐÚNG chế độ. Gọi runQueue() trống sẽ mặc định về chế độ
-      // import, đòi mở tab NotebookLM rồi ném lỗi — giết chết lượt tải đang chạy.
-      if (got[KEYS.RUNNING]) runQueue({ downloadOnly: got[KEYS.RUN_MODE] === 'download' });
+    chrome.storage.local.get(KEYS.RUNNING).then((got) => {
+      // Chỉ còn một kiểu Lượt chạy nên không có chế độ nào để hồi phục nhầm. Mục
+      // đang dở dang được nhận ra qua `status` trong Hàng đợi, không qua biến RAM.
+      if (got[KEYS.RUNNING]) runQueue();
     });
   }
 });
@@ -1180,11 +1314,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
         case MSG.RUN:
           runQueue();
-          sendResponse({ ok: true });
-          return;
-
-        case MSG.RUN_DOWNLOAD:
-          runQueue({ downloadOnly: true });
           sendResponse({ ok: true });
           return;
 
@@ -1400,6 +1529,10 @@ chrome.commands.onCommand.addListener(async (command) => {
   const result = await enqueue([{ videoId }]);
   if (result.added) runQueue();
 });
+
+// Xuất ra để test (và DevTools console) quan sát được phần chờ-ghi-xong-file;
+// đây là chỗ duy nhất trong service worker có kết quả không suy ra được từ storage.
+self.NBLM_SW_INTERNALS = { awaitDownloadComplete, saveFile, runQueue, DOWNLOAD_TIMEOUT_MS, ITEM_TIMEOUT_MS };
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (helper.tabId === tabId) {

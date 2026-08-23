@@ -22,7 +22,6 @@
     empty: $('empty'),
     counts: $('counts'),
     run: $('run'),
-    runDownload: $('run-download'),
     stop: $('stop'),
     retry: $('retry'),
     clearDone: $('clear-done'),
@@ -62,6 +61,13 @@
     return '';
   }
 
+  /**
+   * Chỉ `done` mới có chuyện xác minh: mục lỗi thì đã biết là hỏng rồi.
+   * `undefined` (mục `done` từ trước bản vá, còn nằm trong hàng đợi cũ của owner)
+   * KHÔNG phải `false` — không có dữ liệu thì im, đừng dựng báo động ngược dòng.
+   */
+  const isUnverified = (item) => item.status === STATUS.DONE && item.verified === false;
+
   function itemTitle(item) {
     if (item.title) return item.title;
     return isDoc(item) ? urlLabel(item.url) : item.videoId;
@@ -89,11 +95,6 @@
     els.run.hidden = running;
     els.stop.hidden = !running;
     els.run.disabled = !pending;
-    // Tải về không phụ thuộc trạng thái: mục `done`/`error` vẫn trích lại được
-    // từ YouTube, nên chỉ cần hàng đợi có video là bấm được. Trang tài liệu
-    // không có transcript nên không tính.
-    const downloadable = queue.filter((i) => !isDoc(i)).length;
-    els.runDownload.disabled = !downloadable || running;
     els.retry.disabled = !(counts[STATUS.ERROR] || 0);
     els.clearDone.disabled = !(counts[STATUS.DONE] || 0);
     els.clearAll.disabled = !queue.length;
@@ -107,6 +108,9 @@
           const li = document.createElement('li');
           li.className = 'item';
           li.dataset.status = item.status;
+          if (item.status === STATUS.DONE && typeof item.verified === 'boolean') {
+            li.dataset.verified = String(item.verified);
+          }
 
           const dot = document.createElement('span');
           dot.className = 'item__dot';
@@ -125,7 +129,12 @@
           const meta = document.createElement('div');
           meta.className = 'item__meta';
           meta.innerHTML = tagHtml(item);
-          const parts = [STATUS_TEXT[item.status] || item.status];
+          // Chữ này cố ý nằm ngay cạnh "Xong" chứ không phải một biểu tượng nhỏ:
+          // "đã vào" và "chưa biết có vào không" là hai kết quả khác nhau, và
+          // toàn bộ ticket này tồn tại vì trước đó chúng trông giống hệt nhau.
+          const parts = [
+            isUnverified(item) ? `${STATUS_TEXT[STATUS.DONE]} — chưa xác minh được` : STATUS_TEXT[item.status] || item.status,
+          ];
           if (item.site) parts.push(item.site);
           if (item.durationSec) parts.push(fmtTime(item.durationSec));
           const mode = modeText(item);
@@ -139,6 +148,25 @@
             err.className = 'item__error';
             err.textContent = item.error;
             body.appendChild(err);
+          }
+
+          if (isUnverified(item)) {
+            const warn = document.createElement('div');
+            warn.className = 'item__unverified';
+            warn.textContent =
+              item.unverified || 'Không đối chiếu được kết quả nên chưa xác minh được nguồn đã vào hay chưa.';
+            body.appendChild(warn);
+          }
+
+          // Bản sao xuống đĩa hỏng là một chuyện KHÁC với Nguồn chưa xác minh
+          // được, nên nó có dòng riêng: Nguồn vẫn có thể đã vào hoàn hảo trong
+          // khi ~/Downloads không có gì. Gộp chung một dòng là người đọc mất khả
+          // năng biết cái nào hỏng.
+          if (item.copyError) {
+            const warn = document.createElement('div');
+            warn.className = 'item__copy-error';
+            warn.textContent = `Bản sao xuống đĩa: ${item.copyError}`;
+            body.appendChild(warn);
           }
 
           const remove = document.createElement('button');
@@ -274,7 +302,6 @@
   }
 
   els.run.addEventListener('click', () => send(MSG.RUN).then(refresh));
-  els.runDownload.addEventListener('click', () => send(MSG.RUN_DOWNLOAD).then(refresh));
   els.stop.addEventListener('click', () => send(MSG.STOP).then(refresh));
   els.retry.addEventListener('click', () => send(MSG.RETRY, {}).then(refresh));
   els.clearDone.addEventListener('click', () => send(MSG.CLEAR_DONE).then(refresh));

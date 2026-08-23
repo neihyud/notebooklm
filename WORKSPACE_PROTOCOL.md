@@ -1,0 +1,206 @@
+# Workspace Protocol — notebooklm importer
+
+## Bạn đang duyệt cái gì (đọc mục này là đủ để quyết)
+
+File này dài, nhưng phần **binding** chỉ có mục `Authority`. Ba câu dưới đây là bản nén của đúng
+mục đó — không thêm gì. Bản đầy đủ ở `## Authority`; nếu hai chỗ lệch nhau thì `Authority` thắng.
+
+1. **Lead tự quyết**: phân rã ticket, thứ tự thực thi, seam đặt ở đâu, nhận hay từ chối handback,
+   khi nào cần review seat độc lập.
+2. **Phải hỏi bạn**: publish lên Chrome Web Store; thêm quyền mới vào `manifest.json`; gỡ đường
+   DOM automation; đổi cam kết bảo mật ở `README.md:19` và `README.md:107`; chạy thử nghiệm ghi
+   lên notebook không phải notebook nháp.
+3. **Cấm kể cả khi Lead thấy hợp lý**: xin quyền `cookies`; lưu hay gửi cookie/token ra ngoài
+   origin `notebooklm.google.com`; chạy lượt import hàng loạt lên tài khoản bạn như một bước
+   "kiểm chứng".
+
+Bạn **đã duyệt ba câu này** ngày 2026-08-23 (`status: accepted` bên dưới). Đổi ý câu nào → nói
+câu đó, Lead sửa rồi hỏi lại. Lead muốn thêm ràng buộc mới → phải hỏi, không tự ghi vào `Authority`.
+
+### Đề xuất bổ sung — CHƯA DUYỆT, chưa binding
+
+Lead thấy bốn thứ dưới đây cũng nên phải hỏi bạn, nhưng chúng **không nằm trong** bản `Authority`
+bạn duyệt 2026-08-23, nên hiện Lead **không** bị ràng buộc bởi chúng. Muốn nhận thì nói, Lead
+chuyển lên `Authority`; không nói thì mục này cứ nằm đây như ghi chép.
+
+- bỏ hoặc đổi nút trong popup;
+- đổi hình dạng `selectorOverrides` (bạn có thể đã lưu override — đổi cấu trúc là làm hỏng cài
+  đặt đang chạy);
+- đổi định nghĩa `done`;
+- đổi mặc định trong trang Cài đặt.
+
+> **Vì sao mục này phải tồn tại thay vì Lead sửa lén.** Khối tóm tắt cũ ở đây liệt kê đúng bốn
+> gạch đầu dòng trên và gọi chúng là bản nén của `Authority`, trong khi `Authority` nói bốn thứ
+> khác hẳn — không mục nào trùng. Ai đọc tóm tắt rồi duyệt là duyệt một danh sách khác cái đang
+> binding. Đây chính là **đường dữ liệu song song** mô tả ở cuối file, lần này trong văn bản chứ
+> không phải code: một danh sách chạy cạnh danh sách thật, cùng kiểu, không ai đối chiếu.
+> Phát hiện 2026-08-24 khi truy transcript xem ai đã đổi `draft` → `accepted`.
+
+- status: accepted   <!-- owner duyệt 2026-08-23 -->
+- version: 1
+- last_reviewed: 2026-08-23
+- applies_to: /home/neihyud/Space/github-me/notebooklm
+- readers: Lead; Supervisor khi được giao audit
+
+## Project characteristics
+
+- **criticality**: công cụ cá nhân của owner, chạy trên tài khoản Google của chính owner.
+  Chưa phát hành Chrome Web Store (`git remote` chỉ có `neihyud/notebooklm` private).
+  *Giả định của Lead — nếu có ý định publish thì mọi mục "external side effects" bên dưới đổi hạng.*
+
+- **dominant risks** (mỗi mục trỏ artifact cụ thể):
+  1. **Hằng số chép tay không có đối chứng runtime.** `src/notebooklm/selectors.js` là 135 dòng
+     nhãn UI chép tay; hướng RPC sắp thêm rpc id (`izAoDd`) cùng loại. Test ghim một hằng số như
+     vậy xanh vĩnh viễn kể cả sau khi Google đổi giá trị — nó chứng nhận thứ ta gõ, không chứng
+     nhận thứ server nhận.
+  2. **Ba content script gặp nhau trên một tab.** `manifest.json:96` khớp `http://*/*` cho docs;
+     `exclude_matches` không chi phối `chrome.scripting.executeScript`. Chrome lấy phản hồi đến
+     trước, nên một listener trả lời tin của listener khác là đủ giết cả tab tới khi reload.
+     Ba lớp phòng thủ + `test/messaging.test.js` canh — thêm `case` mới **phải** thêm vào `HANDLED`
+     (`src/notebooklm/content.js:63`, `src/docs/content.js`).
+  3. **Nhận diện lỗi quá rộng huỷ oan lượt chạy đang tốt.** `dialogErrorText()`
+     (`src/notebooklm/automation.js:143`) cố tình chỉ đọc `mat-error`/`[role="alert"]`, không quét
+     cả hộp thoại — NotebookLM in "Source limit 3/50" như chữ bình thường.
+  4. **`host_permissions` gồm `http://*/*` + `https://*/*`** (`manifest.json:22-23`). Mọi thay đổi
+     mở rộng thêm quyền là leo thang trên một bề mặt vốn đã rộng tối đa.
+
+- **expensive-to-reverse decisions**:
+  - Bỏ đường DOM automation (`src/notebooklm/automation.js`) để chỉ còn RPC. Đường DOM là fallback
+    duy nhất khi Google xoay rpc id; gỡ đi là mất lưới an toàn đã chạy tốt.
+  - Đổi `manifest.json` sang xin `cookies` permission — không cần thiết cho fetch same-origin từ
+    content script, và một khi đã xin thì rất khó rút lại cam kết ở `README.md:107`.
+  - Đổi hình dạng dữ liệu Hàng đợi trong `chrome.storage` (`src/common/shared.js:93`): hàng đợi
+    tồn tại qua các lần Chrome tắt service worker, nên dữ liệu cũ của owner sẽ gặp code mới.
+
+- **external side effects**:
+  - Ghi Nguồn thật vào notebook thật của owner. **Không idempotent**: chạy lại tạo bản trùng, gỡ
+    phải xoá tay trong UI. Mọi thử nghiệm RPC phải nhắm một notebook nháp, không phải notebook thật.
+  - Ghi file vào `~/Downloads` (`downloads` permission).
+  - Gửi request đã xác thực tới backend Google bằng phiên của owner. Rate limit là rủi ro thật;
+    lượt chạy hàng loạt (đo thực tế: 89 video) là nơi nó xuất hiện.
+
+## Authority
+
+- **Lead may decide**: phân rã ticket, thứ tự thực thi, seam đặt ở đâu, chấp nhận/từ chối handback,
+  khi nào cần review seat độc lập.
+- **Human must decide**: publish lên Chrome Web Store hay không; thêm quyền mới vào `manifest.json`;
+  gỡ đường DOM automation; đổi cam kết bảo mật ở `README.md:19` và `README.md:107`; chạy thử nghiệm
+  ghi lên notebook không phải notebook nháp.
+- **prohibited without explicit authority**: xin `cookies` permission; lưu trữ hay gửi cookie/token
+  ra ngoài origin `notebooklm.google.com`; chạy lượt import hàng loạt lên tài khoản owner như một
+  bước "kiểm chứng".
+
+## Task classes
+
+> Seat matrix và mặc định của phòng: `claude/SEATS.md`.
+
+### Tiny / bounded
+1 peer seat chạy `/implement`. Verification = `bash test/run.sh`.
+
+### Cross-module / lifecycle-sensitive
+Áp cho: bất cứ thay đổi nào chạm `manifest.json`, `src/common/shared.js`, hoặc thêm/sửa `MSG.*`.
+1 peer write scope + review seat độc lập trên stable candidate.
+
+### Architecture lock-in
+Áp cho: hướng RPC batchexecute, và bất cứ đề xuất nào bỏ một trong hai đường (DOM / RPC).
+So sánh alternatives + ghi rõ điều kiện đảo ngược trước khi viết code.
+
+## Verification
+
+- **Cổng bắt buộc**: `bash test/run.sh` — cộng `node --check` toàn bộ `src/**/*.js`.
+  Baseline **phải đo trên một cây sạch** (`git stash` hoặc checkout commit đang xét) và ghi kèm sha.
+  Con số đo giữa lúc peer khác đang sửa cây thì không tái lập được.
+  **Baseline đã đo lại 2026-08-23 bằng `git archive 6c63617 | tar -x -C $(mktemp -d)`** — cây giải
+  nén sạch tuyệt đối, không thể lẫn working tree: **295 pass / 0 fail / 8 file**. Một bản trước của
+  đoạn này ghi 295/8 là "ảnh chụp giữa chừng công việc của peer khác"; điều đó **sai**, đã bác bằng
+  phép đo trên. Sau ticket selector: **339 pass / 0 fail / 9 file**.
+  **Cần `npm install` một lần** — `jsdom` là devDependency duy nhất (`test/dom-harness.js`);
+  mã chạy trong extension vẫn zero-dep, `manifest.json` không đổi.
+- **Cái test suite KHÔNG với tới**: mọi thứ chạm DOM thật của Google hoặc backend thật.
+  `src/notebooklm/automation.js`, `src/youtube/transcript.js` và (sắp tới) `rpc.js` không có test
+  tự động — và **một bộ shim DOM tự viết chỉ tạo cảm giác an toàn giả** (lý do đã ghi ở đầu
+  `tools/verify-live.mjs`). Đường duy nhất là chạy thật: `node tools/verify-live.mjs` cho YouTube;
+  NotebookLM cần script tương đương nhưng phải dùng profile Chrome đã đăng nhập của owner.
+- **candidate identity**: handback phải ghi commit sha; Lead đọc `git log --oneline` chứ không tin
+  status field.
+- **independent-review triggers**: diff chạm ≥2 trong {`manifest.json`, `src/common/shared.js`,
+  `src/background/service-worker.js`}; hoặc thêm bề mặt mạng mới.
+
+- **correspondence-critical pairs** — cặp cùng kiểu mà **hoán vị nhau vẫn xanh cả suite**, và đọc
+  nhầm thì hỏng thật. Ở acceptance, hỏi peer: *hoán vị cặp này thì test nào chết?*
+  1. `addTextSource(title, text)` — hai string. Hoán vị → mỗi Nguồn có tiêu đề là cả bản
+     transcript. Suite không chạm hàm này.
+  2. Trong payload RPC sắp viết: URL sources đặt url ở `params[0][2]`, YouTube đặt ở `params[0][7]`
+     — cùng kiểu, cùng giá trị. Hoán vị → sai loại Nguồn mà request vẫn 200.
+  3. `{ ok, error, limit }` trả từ automation (`src/notebooklm/content.js:78`) — `error` và `limit`
+     quyết định "dừng cả lượt chạy" hay "bỏ qua mục này".
+  4. `MSG.NLM_ADD_URL` vs `MSG.NLM_ADD_TEXT` — **ĐÃ CÓ LƯỚI Ở CẢ HAI TẦNG** (2026-08-23).
+     Lịch sử đáng giữ: sau ticket 002 với 23 cặp hoán vị của peer, cặp này **vẫn hở** — Lead hoán
+     vị hai nhãn `case` trong router `src/notebooklm/content.js` và cả 418 assertion vẫn xanh.
+     Bịt xong: hoán vị lại cho **6 đỏ**. Lưới đúng phải assert *hàm nào được gọi và với đối số
+     nào* (spy trên `NBLM_AUTOMATION`), không assert giá trị trả về — hai nhánh trả cùng hình
+     dạng `{ok, error}` nên assert kết quả cho xanh giả.
+     Bài học chung: **danh sách hoán vị của peer là bản đồ chỗ nó đã soi, không phải bản án.**
+
+  Trạng thái đo thật 2026-08-23, **sau** ticket selector — trước đó cả bốn cặp dưới đều hoán vị mà suite vẫn xanh:
+  5. `S.css.urlInput` ↔ `S.css.textArea` — **ĐÃ CÓ LƯỚI**. Lead tự hoán vị: **5 test đỏ**, gồm
+     "transcript phải vào ô văn bản" và "URL phải vào ô URL".
+  6. `S.submit` ↔ `S.cancel` — **ĐÃ CÓ LƯỚI**. Lead tự hoán vị: **3 test đỏ**. Cặp nguy hiểm nhất:
+     hoán vị thì mọi import lặng lẽ bị *huỷ*, mà `awaitDialogResolution` vẫn trả `{ok:true}` vì
+     hộp thoại có đóng thật.
+  7. `addTextSource(title, text)` (= cặp 1 ở trên) — **ĐÃ CÓ LƯỚI** từ peer HV5. Cặp 1 nói "suite
+     không chạm hàm này"; điều đó không còn đúng.
+  8. `S.websiteChip` ↔ `S.youtubeChip` — **HỞ, nhưng hở có lý do đúng**: giao diện hiện tại chỉ có
+     MỘT nút "Trang web" gánh cả hai, nên `youtubeChip` không khớp gì và thứ tự hai mảng không
+     quan sát được. Là sự thật về giao diện, không phải thiếu test. Google tách lại thành hai nút
+     thì cặp này thành hở thật — kiểm lại lúc đó.
+  9. `downloadItem` `index` ↔ `resolved.id` — **ĐÃ CÓ LƯỚI** (ticket 003, 6 đỏ).
+  10. `done` ↔ `failed` trong `runQueue` — **ĐÃ CÓ LƯỚI** (2026-08-23). Lịch sử: sau 23 cặp hoán
+     vị của peer, cặp này **vẫn hở** — Lead đổi chỗ hai dòng `done++`/`failed++`, cả 513 assertion
+     vẫn xanh. Bịt xong: 6 đỏ. Có **ba** chỗ đếm chứ không phải hai — chỗ thứ ba nằm trong khối
+     `catch`, và nó là cặp xanh giả riêng. Lưới đúng phải bắt câu gửi vào `chrome.notifications`
+     và ghim **số nào đứng chỗ nào**; ca "toàn thành công" một mình không đủ.
+
+  11. `REPORT.SUBMIT_NOT_FOUND` ↔ `REPORT.URL_INPUT_FALLBACK` ở call site — **ĐÃ CÓ LƯỚI**
+     (ticket 004, 2026-08-23). Lead chọn cặp này *đúng theo hình dạng dưới đây* — bản chụp chẩn
+     đoán là một đường dữ liệu song song điển hình — và lần đầu trong bốn lượt, cặp **không hở**:
+     6+ đỏ, dẫn đầu là `mọi khoá phải mang đúng nội dung mà tên nó hứa`. Peer 004 đã tự bịt ở
+     HV1 của nó. Bài học ngược lại: hình dạng dưới đây là **chỗ để tìm**, không phải lời tiên
+     đoán chắc chắn — khi peer đã biết hình dạng đó thì nó bịt được.
+
+### Hình dạng lỗi mà nghi thức hoán vị của peer bỏ sót
+
+Đo hai lượt liên tiếp (002 và 003, 2026-08-23). Cả hai lần, peer thử 23 cặp và bịt hết; cả hai
+lần cặp Lead chọn ngoài danh sách đó lại **hở với toàn bộ suite xanh**. Hai cặp ấy khác nhau về
+nội dung nhưng **cùng một hình dạng**:
+
+> Một **đường dữ liệu song song** — chạy cạnh đường chính, mang thông tin cùng kiểu, và đổ ra
+> một nơi mà không assertion nào nhìn tới.
+
+- 002: `MSG.NLM_ADD_URL` ↔ `MSG.NLM_ADD_TEXT` ở router. Đường chính (`{ok, error}`) vẫn đúng
+  hình dạng nên mọi assertion soi *kết quả* đều xanh; cái sai nằm ở *hàm nào được gọi*.
+- 003: `done++` ↔ `failed++` trong `runQueue`. Đường chính (`STATUS.DONE`/`STATUS.ERROR` ghi qua
+  `patchItem`) vẫn đúng nên mọi assertion soi *hàng đợi* đều xanh; cái sai chỉ đổ vào
+  `chrome.notifications` — thứ duy nhất người dùng đọc khi lượt chạy kết thúc lúc popup đã đóng.
+
+**Cách dùng ở acceptance.** Đừng chọn cặp bằng cách đọc danh sách của peer rồi tìm cái na ná.
+Hỏi ngược: *thông tin này còn chảy đi đâu nữa ngoài chỗ test đang soi?* Ứng viên điển hình trong
+repo này — thông báo `chrome.notifications`, badge `chrome.action.setBadgeText`, HUD gửi qua
+`chrome.tabs.sendMessage`, tên file tải về, và câu chữ trong `error` mà popup hiển thị. Mỗi thứ
+đó là một đường song song; đường chính đúng không nói gì về chúng.
+
+## Project-specific anti-patterns
+
+- **signal**: handback báo "đã thêm test cho X" mà X là hằng số ngoại sinh (nhãn UI, rpc id, selector).
+  **evidence required**: chỉ ra cơ chế phát hiện **lúc chạy** khi giá trị đó lệch, không phải test.
+  **allowed response**: nhận nếu có runtime detection + fallback; trả lại nếu chỉ có assertion ghim.
+
+- **signal**: "chạy thử trên notebook của tôi rồi, thấy ok".
+  **evidence required**: tên notebook nháp, số Nguồn trước/sau, và ảnh chụp hoặc log request.
+  **allowed response**: từ chối mọi kiểm chứng chạm notebook thật.
+
+- **open question**: chưa có `docs/agents/issue-tracker.md`; ticket hiện để dưới `docs/tickets/`.
+  Owner chốt tracker thật thì chuyển.
+
+## Protocol evolution
+- Supervisor ghi causal evidence; Human duyệt thay đổi `Authority`; giữ version history.

@@ -54,7 +54,7 @@ Yêu cầu: Chrome 111+ (dùng content script `world: "MAIN"`), và bạn đang 
 
 **Xem / tải transcript** — nút **Transcript** cạnh nút NotebookLM mở panel bên phải: có ô tìm kiếm (bỏ dấu vẫn khớp), bấm timestamp là video nhảy tới đúng đoạn, sao chép, và tải về `.txt` / `.srt` / `.md`. Chạy được với cả video private của bạn, vì dùng chung đúng cơ chế trích ở trên.
 
-**Tải transcript hàng loạt về máy** — popup có nút **Tải transcript**: chạy hết hàng đợi ở chế độ *chỉ tải về*, trích transcript rồi lưu thành file, **không đụng tới NotebookLM** (không cần mở notebook, không cần đăng nhập NotebookLM). Hữu ích khi khâu import trục trặc — transcript vẫn giữ lại được thay vì trích xong rồi vứt đi. Định dạng `.txt` / `.srt` / `.vtt` / `.md` và thư mục đích đặt trong Cài đặt; file được đánh số thứ tự cho dễ sắp.
+**Bản sao transcript xuống đĩa** — bật *Lưu thêm một bản transcript vào Downloads* trong Cài đặt. Từ đó mỗi Lượt chạy vừa thêm Nguồn vào NotebookLM vừa ghi file, **trong cùng một lượt, không phải bấm thêm nút nào**. Định dạng `.txt` / `.srt` / `.vtt` / `.md` và thư mục đích cũng nằm trong Cài đặt; file được đánh số theo vị trí của mục trong hàng đợi cho dễ sắp. Bản sao là *phụ phẩm*: ghi hỏng thì nguồn vẫn được thêm vào NotebookLM bình thường và lý do hỏng hiện ngay trên dòng của mục trong popup.
 
 **Dán danh sách link** — mở popup, dán vào ô, bấm *Thêm vào hàng đợi*.
 
@@ -63,6 +63,8 @@ Yêu cầu: Chrome 111+ (dùng content script `world: "MAIN"`), và bạn đang 
 **Trang tài liệu** — mở trang docs bất kỳ. Extension dò sidebar và hiện nút nổi **→ NotebookLM · N trang** ở góc dưới bên phải; bấm vào để mở bảng chọn. Bảng dựng lại đúng cây mục lục của sidebar, có ô lọc, tick theo nhánh (tick mục cha là chọn cả nhánh con), rồi bấm *Thêm N trang*. Không thấy nút thì gọi bằng phím tắt `Alt+Shift+D`, popup, hoặc chuột phải → *Chọn link tài liệu…*.
 
 Hàng đợi chạy tuần tự, lưu bền qua các lần khởi động lại, và xem/dừng/thử-lại được từ popup. Cả hai loại nguồn dùng chung một hàng đợi.
+
+**"Xong" nghĩa là đã kiểm chứng.** Import xong, extension đếm lại số **Nguồn** trong notebook và so với số đếm trước khi mở hộp thoại: tăng đúng 1 mới là xong. Không tăng — hộp thoại đóng mà nguồn không vào — thì mục báo lỗi kèm số trước/sau. Khi extension *không đọc được* danh sách Nguồn (Google đổi giao diện), mục hiện **"Xong — chưa xác minh được"** với chấm vàng rỗng thay vì chấm xanh: đã bấm xong nhưng không có gì đối chiếu, và nói thẳng ra thay vì im lặng. Tương tự với **Bản sao xuống đĩa**: chỉ ghi nhận là đã lưu khi Chrome xác nhận file nằm trên đĩa, download bị gián đoạn thì hiện lý do Chrome trả về. Và khi bản chép lời lấy từ panel YouTube **chạm trần cuộn** — video rất dài, danh sách vẫn còn dài ra khi hết ngân sách cuộn — mục cũng hiện *"Xong — chưa xác minh được"* kèm số dòng lấy được, thay vì im lặng nhận một transcript cụt đuôi.
 
 ---
 
@@ -164,6 +166,8 @@ Quy tắc chung: **hễ dò tìm phần tử theo chữ hiển thị thì phải
 
 Nhãn viết thường, **không dấu**. Các mảng được *gộp thêm* vào mặc định chứ không thay thế, và nhãn bạn thêm được ưu tiên trước.
 
+Nhãn phải trùng **trọn vẹn** chữ trên nút, không phải một mẩu của nó: nút ghi "Lưu nguồn" thì viết `"submit": ["luu nguon"]`, viết `["luu"]` sẽ không khớp. Khớp một-phần từng được hỗ trợ và đã bị gỡ — nó khiến extension bấm nhầm nút "Tải tệp lên" (chữ `upload` của icon font lọt vào phép so khớp) và dán transcript vào ô "Khám phá nguồn". Chữ của `<mat-icon>` và chữ chỉ dành cho trình đọc màn hình đều không tính; cứ lấy đúng chữ bạn nhìn thấy trên nút.
+
 ---
 
 ## Tải transcript hàng loạt nhanh hơn — `tools/`
@@ -223,10 +227,10 @@ tools/                            chạy ngoài extension — xem tools/README.m
 
 - **Video không có phụ đề nào** (kể cả tự động) thì không trích được gì. YouTube thường chưa sinh phụ đề tự động cho video mới upload, và không sinh cho video không có tiếng nói. Bật/tải phụ đề trong YouTube Studio rồi thử lại.
 - Nguồn dán tay vào NotebookLM là **ảnh chụp tại một thời điểm**. Nếu bạn sửa video, phải import lại. Nguồn dạng link thì NotebookLM tự quản.
-- Giới hạn NotebookLM: **50 nguồn/notebook** ở bản miễn phí, tối đa 500.000 từ mỗi nguồn. Khi chạm giới hạn, extension dừng hàng đợi và báo lại thay vì cắm đầu chạy tiếp.
+- Giới hạn NotebookLM: **300 nguồn/notebook** (đo thật trên hộp thoại thêm nguồn 2026-08-23: `1/300`), tối đa 500.000 từ mỗi nguồn. Khi chạm giới hạn, extension dừng hàng đợi và báo lại thay vì cắm đầu chạy tiếp.
 - Video đã import xong vẫn nằm trong hàng đợi để chống trùng lặp. Muốn import lại cùng một video, bấm **Xoá xong** trước.
 - Tự động hoá dựa trên DOM sẽ hỏng khi Google đổi giao diện. Đó là lý do có phần ghi đè selector ở trên.
-- **Mỗi trang tài liệu là một nguồn riêng.** Trích dẫn của NotebookLM nhờ vậy chỉ đúng tên trang, nhưng docs 120 trang sẽ ăn hết quota 50 nguồn từ lâu trước khi import xong — chọn nhánh cần thiết trong bảng chọn thay vì tick *Chọn hết*.
+- **Mỗi trang tài liệu là một nguồn riêng.** Trích dẫn của NotebookLM nhờ vậy chỉ đúng tên trang, nhưng docs vài trăm trang sẽ ăn hết quota 300 nguồn trước khi import xong — chọn nhánh cần thiết trong bảng chọn thay vì tick *Chọn hết*.
 - Bảng chọn chỉ thấy **những gì sidebar đang hiện**. Sidebar thu gọn theo mục đang mở (khá phổ biến) thì phần chưa bung ra sẽ không có trong danh sách; bung mục đó ra rồi mở lại bảng.
 - Extension chỉ đi theo link **cùng host**. Docs trỏ sang subdomain khác (`api.example.com`) phải import riêng từ chính trang đó.
 - Nguồn dán tay là ảnh chụp tại một thời điểm — tài liệu cập nhật thì phải import lại.
@@ -237,7 +241,7 @@ tools/                            chạy ngoài extension — xem tools/README.m
 
 Sòng phẳng về chuyện này:
 
-- **Đã chạy test:** 277 test (`bash test/run.sh`) cho các hàm thuần — bóc videoId (mọi định dạng URL), khử trùng lặp danh sách, bỏ dấu tiếng Việt, gộp transcript theo mốc thời gian, dựng nội dung nguồn, gộp override selector, chuẩn hoá URL tài liệu (kể cả phân biệt hash-route với neo trong trang), cắt nguồn quá dài, và bộ chuyển định dạng transcript (chỗ đáng ngờ nhất là suy ra mốc kết thúc cho SRT khi nguồn chỉ cho mốc bắt đầu). Cộng hai test soát tính toàn vẹn: manifest (mọi đường dẫn tồn tại, không file JS nào mồ côi, thứ tự nạp đúng chuỗi phụ thuộc, và **cả 3 mảng `SCRIPTS.*` trong service worker khớp từng dòng với `content_scripts`** — ràng buộc này đã sập một lần, comment ở hai đầu là chưa đủ) và cấu hình (mọi setting trong `DEFAULTS` đều có ô nhập, mọi id popup.js tham chiếu đều tồn tại trong HTML).
+- **Đã chạy test:** 339 test (`bash test/run.sh`) — trong đó 44 test chạy chính mã điều khiển giao diện NotebookLM (`src/notebooklm/automation.js`) qua DOM thật của hộp thoại "Thêm nguồn" đã chụp lại (`test/fixtures/`, dựng bằng jsdom). Phần còn lại kiểm các hàm thuần: bóc videoId (mọi định dạng URL), khử trùng lặp danh sách, bỏ dấu tiếng Việt, gộp transcript theo mốc thời gian, dựng nội dung nguồn, gộp override selector, chuẩn hoá URL tài liệu (kể cả phân biệt hash-route với neo trong trang), cắt nguồn quá dài, và bộ chuyển định dạng transcript (chỗ đáng ngờ nhất là suy ra mốc kết thúc cho SRT khi nguồn chỉ cho mốc bắt đầu). Cộng hai test soát tính toàn vẹn: manifest (mọi đường dẫn tồn tại, không file JS nào mồ côi, thứ tự nạp đúng chuỗi phụ thuộc, và **cả 3 mảng `SCRIPTS.*` trong service worker khớp từng dòng với `content_scripts`** — ràng buộc này đã sập một lần, comment ở hai đầu là chưa đủ) và cấu hình (mọi setting trong `DEFAULTS` đều có ô nhập, mọi id popup.js tham chiếu đều tồn tại trong HTML).
 
   Cộng một test thứ ba về **kỷ luật định tuyến tin nhắn** (xem dưới).
 

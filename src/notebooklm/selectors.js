@@ -3,8 +3,14 @@
  *
  * NotebookLM là app Angular Material và Google đổi DOM khá thường xuyên, nên
  * mọi thứ dễ vỡ đều gom hết vào đây. Cách so khớp chính là theo *chữ hiển thị*
- * (aria-label / textContent) đã bỏ dấu, nên vẫn chạy khi class name đổi và
- * hoạt động với cả giao diện tiếng Anh lẫn tiếng Việt.
+ * đã bỏ dấu (aria-label, title, hoặc chữ trong phần tử sau khi loại bỏ glyph của
+ * <mat-icon> và chữ chỉ dành cho trình đọc màn hình), nên vẫn chạy khi class name
+ * đổi và hoạt động với cả giao diện tiếng Anh lẫn tiếng Việt.
+ *
+ * So khớp là CHÍNH XÁC, không phải khớp chứa: nhãn viết ở đây phải trùng trọn vẹn
+ * chữ trên nút. Khớp chứa từng tồn tại và đã bị gỡ — nó bắt nhầm nút "Tải tệp lên"
+ * cho `submit` (qua glyph 'upload') và nút "Trang web" cho `youtubeChip` (qua
+ * glyph 'video_youtube').
  *
  * Người dùng ghi đè được ở trang Options bằng JSON có cùng cấu trúc — các
  * mảng sẽ được *gộp thêm* chứ không thay thế, nên chỉ cần bổ sung nhãn mới.
@@ -45,11 +51,26 @@
         '.mat-mdc-dialog-container',
         'upload-dialog',
       ],
+      /*
+       * Danh sách Nguồn của notebook (khung ngoài) và MỘT Nguồn trong đó.
+       *
+       * CHƯA KIỂM CHỨNG trên DOM thật — bản chụp duy nhất đang có là hộp thoại
+       * thêm nguồn, không chứa danh sách này. Vì thế `countSources()` được thiết
+       * kế để trả `null` khi hai mảng dưới đây không khớp gì, và `null` lan ra
+       * tận popup thành "chưa xác minh được". Selector sai thì hỏng thành một
+       * lời thú nhận nhìn thấy được, không phải thành báo lỗi giả cũng không
+       * phải thành im lặng. Đó là cơ chế phát hiện lúc chạy cho chính hai mảng này.
+       */
       sourceList: [
+        'labs-tailwind-source-list',
         '.source-list',
         '[role="list"].sources',
-        'labs-tailwind-source-list',
+      ],
+      sourceItem: [
         '.single-source-container',
+        'single-source',
+        '[role="listitem"]',
+        '.source-item',
       ],
       urlInput: [
         'input[formcontrolname="url"]',
@@ -108,6 +129,31 @@
     snackbar: ['mat-snack-bar-container', '.mat-mdc-snack-bar-container', '[role="alert"]'],
   };
 
+  /**
+   * Danh sách CẤM, neo theo *cấu trúc* — cố ý tách khỏi mọi danh sách ở trên,
+   * vốn neo theo *chữ hiển thị*. Cũng cố ý nằm NGOÀI `merge()`, nên phần Ghi đè
+   * selector ở trang Options không nới lỏng được nó.
+   *
+   * `discoverSourcesQuery` là ô "Khám phá nguồn" — ô đi tìm nguồn mới trên web,
+   * không phải nơi đưa nội dung vào. Nó nằm TRƯỚC ô nhập nội dung trong DOM, nên
+   * mọi selector trần ('textarea', 'input[type="text"]') bắt trúng nó trước. Ghi
+   * vào đây là biến transcript thành một truy vấn tìm kiếm, và hộp thoại không hề
+   * báo lỗi — nên không có tầng nào phía sau bắt được. Vì vậy: cấm vô điều kiện.
+   */
+  const FORBIDDEN_WRITE_TARGETS = ['[formcontrolname="discoverSourcesQuery"]'];
+
+  /**
+   * Selector "vơ bèo vạt tép" — khớp bất kỳ ô nhập nào, không nói lên điều gì về
+   * việc ta có đang gõ vào ĐÚNG ô hay không. Chúng nằm cuối `css.urlInput` như
+   * lưới cuối cùng, và mỗi lần lưới đó phải ra tay là một lần ta không biết
+   * `formcontrolname` thật — nên `automation.js` chụp lại cấu trúc hộp thoại
+   * đúng lúc đó (`REPORT.URL_INPUT_FALLBACK`).
+   *
+   * Nằm NGOÀI `merge()` như FORBIDDEN_WRITE_TARGETS, cùng lý do: đây là mô tả về
+   * mức độ tin cậy của selector, không phải một danh sách để người dùng nới ra.
+   */
+  const BROAD_FALLBACK_SELECTORS = ['input[type="text"]', 'input:not([type])'];
+
   /** Gộp override của người dùng: mảng thì nối thêm, object thì merge sâu. */
   function merge(base, override) {
     if (!override || typeof override !== 'object') return base;
@@ -128,6 +174,8 @@
 
   root.NBLM_SELECTORS = {
     BASE,
+    FORBIDDEN_WRITE_TARGETS,
+    BROAD_FALLBACK_SELECTORS,
     build(overrides) {
       return merge(BASE, overrides);
     },

@@ -140,6 +140,9 @@ input[type="url"]:focus, textarea:focus { outline: 2px solid var(--blue); outlin
 }
 
 .item[data-status="done"] .item__dot { background: var(--green); }
+/* Đã xong nhưng KHÔNG đối chiếu được kết quả — chấm rỗng, không phải chấm xanh
+   đặc: "chưa biết có vào không" không được trông giống "đã vào". */
+.item[data-verified="false"] .item__dot { background: transparent; box-shadow: inset 0 0 0 2px var(--amber); }
 .item[data-status="error"] .item__dot { background: var(--red); }
 .item[data-status="importing"] .item__dot,
 .item[data-status="extracting"] .item__dot { background: var(--blue); animation: pulse 1s infinite; }
@@ -161,6 +164,10 @@ input[type="url"]:focus, textarea:focus { outline: 2px solid var(--blue); outlin
 
 .item__meta { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .item__error { margin-top: 3px; color: var(--red); font-size: 11px; word-break: break-word; }
+.item__unverified { margin-top: 3px; color: var(--amber); font-size: 11px; word-break: break-word; }
+/* Bản sao xuống đĩa là phụ phẩm, nên tô nhạt hơn Nguồn chưa xác minh được: hai
+   dòng này nằm cạnh nhau và không được nhìn ngang hàng nhau. */
+.item__copy-error { margin-top: 3px; color: var(--muted); font-size: 11px; word-break: break-word; }
 
 .tag {
   display: inline-block;

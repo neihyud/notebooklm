@@ -1,0 +1,79 @@
+<!--
+  DOM thật của hộp thoại "Thêm nguồn" NotebookLM, trạng thái `state-main`
+  (trước khi bấm nút loại nguồn). Chụp 2026-08-23, giao diện tiếng Việt.
+
+  Giữ NGUYÊN VĂN, không dọn dẹp. Ba chi tiết là lý do file này tồn tại:
+
+  1. <textarea formcontrolname="discoverSourcesQuery"> nằm TRƯỚC .drop-zone-container.
+     Selector 'textarea' trần sẽ bắt trúng nó thay vì ô dán nội dung.
+  2. <mat-icon> là icon font — chữ bên trong ('link', 'video_youtube', 'content_paste')
+     lọt vào textContent. Nhãn máy đọc được của nút là "linkvideo_youtubeTrang web",
+     không phải "Trang web".
+  3. Chỉ có MỘT nút "Trang web" gánh cả link thường lẫn YouTube. Không có nút YouTube riêng.
+-->
+<div class="dialog-container state-main" jslog="279302;track:impression">
+  <div class="header ng-star-inserted">
+    <h1 mat-dialog-title="" class="mat-mdc-dialog-title mdc-dialog__title dialog-title" id="mat-mdc-dialog-title-13">Tạo bản Tổng quan bằng video và âm thanh từ<br>
+      <span aria-hidden="true" class="highlight-container"><span class="highlight ng-star-inserted wait-and-fade-in">video trên YouTube</span></span><span class="cdk-visually-hidden">tài liệu của bạn</span></h1>
+  </div>
+  <div mat-dialog-content="" class="mat-mdc-dialog-content mdc-dialog__content">
+    <div class="search-container ng-star-inserted">
+      <source-discovery-query-box>
+        <div mattooltip="Hãy nhập hoặc xoá kết quả trước khi bắt đầu lượt tìm kiếm khác" class="mat-mdc-tooltip-trigger container mat-mdc-tooltip-disabled">
+          <form novalidate="" class="ng-untouched ng-pristine ng-invalid">
+            <div class="query-box">
+              <mat-form-field appearance="outline" class="mat-mdc-form-field query-box-input mat-mdc-form-field-type-mat-input mat-form-field-appearance-outline mat-primary ng-star-inserted">
+                <div class="mat-mdc-text-field-wrapper mdc-text-field mdc-text-field--outlined mdc-text-field--no-label">
+                  <div class="mat-mdc-form-field-flex">
+                    <div class="mat-mdc-form-field-infix">
+                      <textarea rows="1" matinput="" aria-label="Khám phá nguồn dựa trên truy vấn đã nhập" formcontrolname="discoverSourcesQuery" class="mat-mdc-input-element cdk-textarea-autosize query-box-textarea mat-body-medium ng-untouched ng-pristine ng-invalid mat-mdc-form-field-textarea-control mat-mdc-form-field-input-control mdc-text-field__input" placeholder="Tìm nguồn mới trên web" style="min-height: 24px; height: 24px;" jslog="274655;track:impression,input_text" id="mat-input-22" required="" aria-required="true"></textarea>
+                    </div>
+                  </div>
+                </div>
+              </mat-form-field>
+            </div>
+            <div class="actions">
+              <div class="actions-options">
+                <div class="actions-options-left">
+                  <div class="corpus-select-wrapper">
+                    <button mat-stroked-button="" class="mdc-button mat-mdc-button-base mat-mdc-menu-trigger corpus-select corpus-menu-trigger button-small mdc-button--outlined mat-mdc-outlined-button mat-unthemed" jslog="282717;track:generic_click,impression" aria-haspopup="menu" aria-expanded="false"><span class="mat-mdc-button-persistent-ripple mdc-button__ripple"></span><span class="mdc-button__label"><div class="corpus-select-content-wrapper"><div class="corpus-select-content"><mat-icon role="img" class="mat-icon notranslate corpus-select-icon google-symbols mat-icon-no-color ng-star-inserted" aria-hidden="true" data-mat-icon-type="font">language</mat-icon><span class="corpus-select-label ng-star-inserted">Web</span></div><mat-icon role="img" class="mat-icon notranslate corpus-select-icon google-symbols mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">keyboard_arrow_down</mat-icon></div></span></button>
+                  </div>
+                </div>
+                <div class="action-options-right">
+                  <div class="corpus-select-wrapper">
+                    <button mat-stroked-button="" class="mdc-button mat-mdc-button-base mat-mdc-menu-trigger corpus-select researcher-menu-trigger button-small mdc-button--outlined mat-mdc-outlined-button mat-unthemed" jslog="282720;track:generic_click,impression" aria-haspopup="menu" aria-expanded="false"><span class="mat-mdc-button-persistent-ripple mdc-button__ripple"></span><span class="mdc-button__label"><div class="corpus-select-content-wrapper"><div class="corpus-select-content"><mat-icon role="img" class="mat-icon notranslate corpus-select-icon google-symbols mat-icon-no-color ng-star-inserted" aria-hidden="true" data-mat-icon-type="font">search_spark</mat-icon><span class="corpus-select-label ng-star-inserted"><span class="ng-star-inserted"> Nghiên cứu nhanh </span></span></div><mat-icon role="img" class="mat-icon notranslate corpus-select-icon google-symbols mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">keyboard_arrow_down</mat-icon></div></span></button>
+                  </div>
+                </div>
+              </div>
+              <div class="actions-enter">
+                <button mat-icon-button="" aria-label="Gửi" class="mdc-icon-button mat-mdc-icon-button mat-mdc-button-base actions-enter-button outset-focus-ring mat-mdc-button-disabled mat-unthemed" jslog="282723;track:generic_click,impression" disabled="true"><span class="mat-mdc-button-persistent-ripple mdc-icon-button__ripple"></span><mat-icon role="img" class="mat-icon notranslate search-icon mat-icon-rtl-mirror google-symbols mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">search</mat-icon></button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </source-discovery-query-box>
+    </div>
+    <div class="drop-zone-container ng-star-inserted">
+      <div class="xap-uploader-dropzone drop-zone" jslog="335042;track:impression">
+        <div class="drop-zone-title">
+          <span class="mat-title-large ng-star-inserted">hoặc thả tệp của bạn</span>
+          <div class="drop-zone-subtitle mat-body-medium ng-star-inserted"><span>pdf, hình ảnh, tài liệu, âm thanh,</span>&nbsp;<span class="mat-mdc-tooltip-trigger and-more-link">và các định dạng khác</span></div>
+        </div>
+        <div class="drop-zone-actions" style="position: relative;">
+          <button mat-stroked-button="" class="mdc-button mat-mdc-button-base drop-zone-icon-button mdc-button--outlined mat-mdc-outlined-button mat-unthemed" jslog="279304;track:generic_click,impression"><span class="mat-mdc-button-persistent-ripple mdc-button__ripple"></span><mat-icon role="img" class="mat-icon notranslate google-symbols mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">upload</mat-icon><span class="mdc-button__label"><span>Tải tệp lên</span></span></button>
+          <input type="file" name="Filedata" multiple="" accept=".pdf,.txt,.md,.docx,.csv,.pptx,.epub,.mp3,.mp4,.wav,.png,.jpg" aria-hidden="true" tabindex="-1" style="position: absolute; overflow: hidden; height: 40px; width: 137px; opacity: 0; left: 0px; top: 0px; display: none;">
+          <button mat-stroked-button="" class="mdc-button mat-mdc-button-base drop-zone-icon-button mdc-button--outlined mat-mdc-outlined-button mat-unthemed" jslog="279308;track:generic_click,impression"><span class="mat-mdc-button-persistent-ripple mdc-button__ripple"></span><mat-icon role="img" class="mat-icon notranslate google-symbols mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">link</mat-icon><mat-icon role="img" class="mat-icon notranslate youtube-icon google-symbols mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">video_youtube</mat-icon><span class="mdc-button__label"><span>Trang web</span></span></button>
+          <button mat-stroked-button="" class="mdc-button mat-mdc-button-base drop-zone-icon-button mdc-button--outlined mat-mdc-outlined-button mat-unthemed ng-star-inserted" jslog="279299;track:generic_click,impression"><span class="mat-mdc-button-persistent-ripple mdc-button__ripple"></span><mat-icon role="img" class="mat-icon notranslate google-symbols mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">drive</mat-icon><span class="mdc-button__label"><span>Drive</span></span></button>
+          <button mat-stroked-button="" class="mdc-button mat-mdc-button-base drop-zone-icon-button mdc-button--outlined mat-mdc-outlined-button mat-unthemed" jslog="279295;track:generic_click,impression"><span class="mat-mdc-button-persistent-ripple mdc-button__ripple"></span><mat-icon role="img" class="mat-icon notranslate google-symbols mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">content_paste</mat-icon><span class="mdc-button__label"><span>Văn bản đã sao chép</span></span></button>
+        </div>
+        <div class="drive-hint-container ng-star-inserted"></div>
+      </div>
+    </div>
+    <quota-bar class="ng-star-inserted">
+      <div class="container"><div class="row"><div class="prefix"></div><div class="progress-bar-container"><mat-progress-bar role="progressbar" aria-valuemin="0" aria-valuemax="100" tabindex="-1" mode="determinate" class="mat-mdc-progress-bar mdc-linear-progress progress-bar mat-primary ng-star-inserted" aria-valuenow="0.33333333333333337"></mat-progress-bar></div><div class="postfix"><span class="mat-body-medium">1/300</span></div></div></div>
+    </quota-bar>
+  </div>
+  <button aria-label="Đóng" mat-icon-button="" class="mdc-icon-button mat-mdc-icon-button mat-mdc-button-base close-button mat-unthemed" jslog="279294;track:generic_click,impression"><span class="mat-mdc-button-persistent-ripple mdc-icon-button__ripple"></span><mat-icon role="img" class="mat-icon notranslate google-symbols mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">close</mat-icon></button>
+  <div class="blue-blob color-blob"></div>
+  <div class="green-blob color-blob"></div>
+</div>

@@ -1,0 +1,12 @@
+{
+  "name": "notebooklm-importer",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Extension Chrome đưa YouTube/trang tài liệu vào NotebookLM. Mã nguồn chạy trong extension KHÔNG dùng dependency nào — jsdom chỉ phục vụ test.",
+  "scripts": {
+    "test": "bash test/run.sh"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

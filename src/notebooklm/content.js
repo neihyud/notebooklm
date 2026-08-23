@@ -63,6 +63,30 @@
    */
   const HANDLED = new Set([MSG.NLM_PING, MSG.NLM_ADD_URL, MSG.NLM_ADD_TEXT, 'nblm-hud']);
 
+  /**
+   * Trả nguyên vẹn cả `verified` lẫn `unverified` về background.
+   *
+   * `verified: false` nghĩa là "đã thêm xong nhưng KHÔNG đọc được danh sách Nguồn
+   * nên không đối chiếu được" — nó phải đi hết đường tới popup. Nuốt ở đây là
+   * quay lại đúng khuyết tật cũ: báo xong dựa trên một tín hiệu không phải kết quả.
+   */
+  function reply(result) {
+    return {
+      ok: result.ok,
+      error: result.error || null,
+      limit: !!result.limit,
+      verified: result.verified === true,
+      unverified: result.unverified || null,
+      // "Đã ghi vào notebook nhưng không đúng 1 Nguồn" — background cần biết để
+      // KHÔNG thử lại bằng đường khác và tạo ra bản trùng.
+      sourceAdded: result.sourceAdded === true,
+    };
+  }
+
+  function hudDone(label, result) {
+    return result.verified === true ? `Đã thêm: ${label}` : `Đã thêm (chưa xác minh được): ${label}`;
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || !HANDLED.has(message.type)) return false; // của script khác — im lặng
     (async () => {
@@ -75,18 +99,18 @@
           case MSG.NLM_ADD_URL: {
             showHud(`Đang thêm: ${message.label || message.url}`);
             const result = await A.addUrlSource(message.url);
-            if (result.ok) hideHud(`Đã thêm: ${message.label || message.url}`);
+            if (result.ok) hideHud(hudDone(message.label || message.url, result));
             else showHud(`Lỗi: ${result.error}`, { spinning: false });
-            sendResponse({ ok: result.ok, error: result.error || null, limit: !!result.limit });
+            sendResponse(reply(result));
             return;
           }
 
           case MSG.NLM_ADD_TEXT: {
             showHud(`Đang thêm transcript: ${message.title}`);
             const result = await A.addTextSource(message.title, message.text);
-            if (result.ok) hideHud(`Đã thêm: ${message.title}`);
+            if (result.ok) hideHud(hudDone(message.title, result));
             else showHud(`Lỗi: ${result.error}`, { spinning: false });
-            sendResponse({ ok: result.ok, error: result.error || null, limit: !!result.limit });
+            sendResponse(reply(result));
             return;
           }
 

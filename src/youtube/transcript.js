@@ -177,7 +177,21 @@
     return clone.textContent || '';
   }
 
-  /** Cuộn hết danh sách cho tới khi số dòng không tăng nữa. */
+  /**
+   * Trần số vòng cuộn. Phải có trần: danh sách ảo hoá của YouTube không có dấu
+   * hiệu "hết" nào đọc được, nên vòng lặp chỉ dừng được bằng hai điều — số dòng
+   * thôi tăng, hoặc hết ngân sách.
+   */
+  const SCROLL_ROUNDS = 40;
+
+  /**
+   * Cuộn hết danh sách cho tới khi số dòng không tăng nữa.
+   *
+   * @returns {{settled: boolean, rounds: number}} `settled:false` = ra khỏi vòng
+   * lặp vì HẾT NGÂN SÁCH chứ không phải vì danh sách đã hết. Người gọi bắt buộc
+   * phải phân biệt: đó là ranh giới giữa "đủ transcript" và "mất phần đuôi mà
+   * không ai biết".
+   */
   async function loadAllSegments() {
     const panel = transcriptPanel();
     const container =
@@ -186,9 +200,15 @@
       (panel && Array.from(panel.querySelectorAll('*')).find((el) => el.scrollHeight > el.clientHeight + 50)) ||
       panel;
     let previous = -1;
-    for (let i = 0; i < 40; i++) {
+    let settled = false;
+    let rounds = 0;
+    for (let i = 0; i < SCROLL_ROUNDS; i++) {
+      rounds = i + 1;
       const count = segmentNodes().length;
-      if (count === previous) break;
+      if (count === previous) {
+        settled = true;
+        break;
+      }
       previous = count;
       if (container && container.scrollHeight > container.clientHeight) {
         container.scrollTop = container.scrollHeight;
@@ -199,6 +219,7 @@
       await sleep(250);
     }
     if (container) container.scrollTop = 0;
+    return { settled, rounds };
   }
 
   /** Phương án 3: quét panel transcript trên trang. */
@@ -226,7 +247,7 @@
       }
     }
     await waitFor(() => segmentNodes().length > 0, { timeout: 15000, label: 'các dòng transcript' });
-    await loadAllSegments();
+    const scan = await loadAllSegments();
 
     const segments = segmentNodes()
       .map((node) => ({
@@ -237,7 +258,19 @@
       .filter((s) => s.text);
 
     if (!segments.length) throw new Error('panel transcript rỗng');
-    return { segments, method: 'dom:panel' };
+
+    // Hết ngân sách cuộn trong khi danh sách VẪN còn dài ra: phần đuôi chắc chắn
+    // còn thiếu. Vẫn trả về phần đã lấy được — nó dùng được — nhưng kèm theo lý
+    // do, vì hai nhánh ở đây trả cùng một hình dạng và người gọi không có cách
+    // nào khác để phân biệt.
+    return {
+      segments,
+      method: 'dom:panel',
+      truncated: scan.settled
+        ? null
+        : `Chỉ lấy được ${segments.length} dòng: danh sách transcript vẫn còn dài ra sau ${scan.rounds} vòng cuộn ` +
+          '(trần của extension), nên phần đuôi của video này nhiều khả năng bị thiếu.',
+    };
   }
 
   /* ------------------------------------------------------------------ */

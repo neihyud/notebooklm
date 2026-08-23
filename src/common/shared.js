@@ -36,7 +36,6 @@
     DOCS_READ: 'docs-read',       // trích ngay từ DOM đang hiển thị
     // popup -> background
     OPEN_DOCS_PANEL: 'open-docs-panel',
-    RUN_DOWNLOAD: 'run-download',             // chạy hàng đợi ở chế độ chỉ tải về máy
     COLLECT_TABS: 'collect-tabs',             // gom mọi tab YouTube đang mở
     COLLECT_PAGE_LINKS: 'collect-page-links', // quét link YouTube trên tab hiện tại
     IMPORT_PLAYLIST: 'import-playlist',       // import toàn bộ playlist/kênh của tab hiện tại
@@ -68,8 +67,8 @@
     QUEUE: 'queue',
     SETTINGS: 'settings',
     RUNNING: 'running',
-    /** Chế độ của lượt chạy đang diễn ra, để hồi phục đúng kiểu sau khi SW bị ngắt. */
-    RUN_MODE: 'runMode',
+    /** Bản chụp cấu trúc DOM khi extension lạc đường — xem getDomReports(). */
+    DOM_REPORTS: 'domReports',
   };
 
   const DEFAULTS = {
@@ -95,11 +94,18 @@
     bulkSelectUI: true,
     /**
      * Trần số video khi quét toàn bộ một playlist/kênh.
-     * Kênh lớn có hàng nghìn video, mà notebook miễn phí chỉ chứa 50 nguồn —
-     * quét sạch chỉ tổ mất thời gian rồi tắc ở hàng đợi.
+     * Kênh lớn có hàng nghìn video, mà một notebook chỉ chứa được 300 nguồn (đo
+     * thật trên hộp thoại thêm nguồn 2026-08-23: "1/300") — quét sạch chỉ tổ mất
+     * thời gian rồi tắc ở hàng đợi.
      */
     maxBulkVideos: 500,
-    /** Định dạng file khi tải transcript về máy: txt | srt | vtt | md */
+    /**
+     * Ghi thêm một Bản sao xuống đĩa cho mỗi video, ngay trong Lượt chạy.
+     * Là *phụ phẩm* của việc trích Transcript, không phải mục đích của Lượt chạy:
+     * hỏng thì ghi lý do lên Mục rồi đi tiếp, không chặn việc thêm Nguồn.
+     */
+    saveTranscriptCopy: false,
+    /** Định dạng Bản sao xuống đĩa: txt | srt | vtt | md */
     downloadFormat: 'txt',
     /** Thư mục con trong Downloads để gom transcript lại một chỗ. */
     downloadSubfolder: 'Transcript YouTube',
@@ -139,6 +145,32 @@
     const next = Object.assign(await getSettings(), patch);
     await chrome.storage.local.set({ [KEYS.SETTINGS]: next });
     return next;
+  }
+
+  /**
+   * Bản chụp cấu trúc DOM mà `automation.js` ghi lại khi nó KHÔNG tìm được thứ
+   * nó cần: `{ [tình huống]: bản chụp }`.
+   *
+   * Một bản GẦN NHẤT cho mỗi tình huống, cố ý không phải nhật ký — thứ đáng đọc
+   * là hiện trạng giao diện lúc này, còn tích lại thì chỉ phình storage. Trang
+   * Options là nơi duy nhất đọc nó; nội dung chỉ có cấu trúc (tên thẻ, class,
+   * formcontrolname, nhãn nút), không có dữ liệu của người dùng.
+   */
+  async function getDomReports() {
+    const got = await chrome.storage.local.get(KEYS.DOM_REPORTS);
+    const value = got[KEYS.DOM_REPORTS];
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  }
+
+  async function saveDomReport(situation, report) {
+    const all = await getDomReports();
+    all[situation] = report;
+    await chrome.storage.local.set({ [KEYS.DOM_REPORTS]: all });
+    return all;
+  }
+
+  async function clearDomReports() {
+    await chrome.storage.local.remove(KEYS.DOM_REPORTS);
   }
 
   async function getQueue() {
@@ -450,6 +482,7 @@
   root.NBLM = {
     MSG, STATUS, PRIVACY, KIND, KEYS, DEFAULTS,
     getSettings, setSettings, getQueue, setQueue,
+    getDomReports, saveDomReport, clearDomReports,
     videoIdFrom, canonicalUrl, parseUrlList,
     docKey, isHashRoute, urlLabel,
     uid, sleep, fmtTime, norm, waitFor,

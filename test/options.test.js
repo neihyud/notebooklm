@@ -28,10 +28,18 @@ for (const key of keys) {
   ok(optionsHtml.includes(`id="${key}"`), `options.html thiếu ô nhập id="${key}"`);
 }
 
+// Nút điều khiển và vùng hiển thị: không phải setting nên không có key trong
+// DEFAULTS — nhưng vẫn phải tồn tại trong HTML, vì options.js gọi thẳng
+// `$(id).addEventListener` không guard.
+const DIEU_KHIEN = ['save', 'reset', 'saved', 'jsonStatus', 'domReports', 'domReportsStatus', 'copyDomReports', 'clearDomReports'];
+for (const id of DIEU_KHIEN) {
+  ok(optionsHtml.includes(`id="${id}"`), `options.html thiếu phần tử điều khiển id="${id}"`);
+}
+
 // Chiều ngược lại: mọi id trong FIELDS của options.js phải là key thật của DEFAULTS.
 for (const m of optionsJs.matchAll(/\$\('([A-Za-z][\w-]*)'\)/g)) {
   const id = m[1];
-  if (['save', 'reset', 'saved', 'jsonStatus'].includes(id)) continue; // nút điều khiển, không phải setting
+  if (DIEU_KHIEN.includes(id)) continue;
   ok(keys.includes(id), `options.js trỏ tới id="${id}" nhưng DEFAULTS không có key đó`);
 }
 

@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const { DEFAULTS, getSettings, setSettings } = globalThis.NBLM;
+  const { DEFAULTS, getSettings, setSettings, getDomReports, clearDomReports } = globalThis.NBLM;
   const $ = (id) => document.getElementById(id);
 
   const FIELDS = {
@@ -31,6 +31,11 @@
     },
     autoCloseTabs: { el: () => $('autoCloseTabs'), read: (el) => el.checked, write: (el, v) => (el.checked = !!v) },
     bulkSelectUI: { el: () => $('bulkSelectUI'), read: (el) => el.checked, write: (el, v) => (el.checked = !!v) },
+    saveTranscriptCopy: {
+      el: () => $('saveTranscriptCopy'),
+      read: (el) => el.checked,
+      write: (el, v) => (el.checked = !!v),
+    },
     downloadFormat: { el: () => $('downloadFormat'), read: (el) => el.value, write: (el, v) => (el.value = v || 'txt') },
     downloadSubfolder: {
       el: () => $('downloadSubfolder'),
@@ -94,6 +99,46 @@
     setTimeout(() => (saved.hidden = true), 2000);
   }
 
+  /* ------------------------------------------------------------------ */
+  /* bản chụp cấu trúc DOM                                               */
+  /* ------------------------------------------------------------------ */
+
+  const KHONG_CO =
+    'Chưa có bản chụp nào — extension chỉ ghi khi nó không tìm được ô nhập, nút xác nhận,\n' +
+    'hoặc danh sách Nguồn trên giao diện NotebookLM.';
+
+  async function loadDomReports() {
+    const reports = await getDomReports();
+    const situations = Object.keys(reports);
+    // Một chỗ dựng chữ, một chỗ hiện chữ: nút Sao chép đọc lại từ chính phần tử
+    // đang hiện, nên không có cách nào chép ra thứ khác với thứ bạn đang đọc.
+    $('domReports').textContent = situations.length ? JSON.stringify(reports, null, 2) : KHONG_CO;
+    $('domReportsStatus').textContent = situations.length
+      ? `${situations.length} tình huống: ${situations.join(', ')}`
+      : '';
+    $('copyDomReports').disabled = situations.length === 0;
+    $('clearDomReports').disabled = situations.length === 0;
+  }
+
+  $('copyDomReports').addEventListener('click', async () => {
+    const status = $('domReportsStatus');
+    try {
+      await navigator.clipboard.writeText($('domReports').textContent);
+      status.textContent = 'Đã sao chép bản chụp vào clipboard.';
+      status.classList.remove('error');
+    } catch (e) {
+      // Clipboard API từ chối khi trang không được focus — nói ra đường thủ công
+      // thay vì im lặng để người dùng tưởng đã chép được.
+      status.textContent = `Không sao chép được (${(e && e.message) || e}) — bôi đen đoạn trên rồi Ctrl+C.`;
+      status.classList.add('error');
+    }
+  });
+
+  $('clearDomReports').addEventListener('click', async () => {
+    await clearDomReports();
+    await loadDomReports();
+  });
+
   $('save').addEventListener('click', save);
   $('reset').addEventListener('click', async () => {
     await setSettings(Object.assign({}, DEFAULTS));
@@ -120,4 +165,5 @@
   });
 
   load();
+  loadDomReports();
 })();

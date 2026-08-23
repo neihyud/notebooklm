@@ -66,7 +66,22 @@
     <label class="check"><input type="checkbox" id="autoCloseTabs"> Tự đóng tab YouTube mà extension mở để trích transcript</label>
     <label class="check"><input type="checkbox" id="bulkSelectUI"> Hiện checkbox chọn hàng loạt trên trang danh sách YouTube</label>
 
-    <label for="downloadFormat">Định dạng file khi tải transcript về máy</label>
+    <label for="maxBulkVideos">Trần số video khi quét toàn bộ playlist / kênh</label>
+    <input type="number" id="maxBulkVideos" min="1" max="5000" step="50">
+    <p class="hint">Kênh lớn có hàng nghìn video, mà một notebook chỉ chứa được 300 nguồn — quét sạch chỉ tổ mất thời gian rồi tắc ở hàng đợi.</p>
+  </section>
+
+  <section>
+    <h2>Bản sao xuống đĩa</h2>
+
+    <label class="check"><input type="checkbox" id="saveTranscriptCopy"> Lưu thêm một bản transcript vào Downloads cho mỗi video</label>
+    <p class="hint">
+      Làm ngay trong Lượt chạy, cùng lúc với việc thêm Nguồn — không phải một lượt chạy riêng và
+      không đòi bấm gì giữa chừng. Bản sao là <em>phụ phẩm</em>: ghi hỏng thì Mục vẫn được thêm vào
+      NotebookLM bình thường, lý do hỏng hiện ngay trên dòng của Mục trong popup.
+    </p>
+
+    <label for="downloadFormat">Định dạng file</label>
     <select id="downloadFormat">
       <option value="txt">.txt — có timestamp, dễ đọc</option>
       <option value="srt">.srt — phụ đề, nạp được vào trình phát</option>
@@ -77,10 +92,6 @@
     <label for="downloadSubfolder">Thư mục con trong Downloads</label>
     <input type="text" id="downloadSubfolder" spellcheck="false">
     <p class="hint">Để trống thì lưu thẳng vào Downloads.</p>
-
-    <label for="maxBulkVideos">Trần số video khi quét toàn bộ playlist / kênh</label>
-    <input type="number" id="maxBulkVideos" min="1" max="5000" step="50">
-    <p class="hint">Kênh lớn có hàng nghìn video, mà notebook miễn phí chỉ chứa được 50 nguồn — quét sạch chỉ tổ mất thời gian rồi tắc ở hàng đợi.</p>
   </section>
 
   <section>
@@ -128,6 +139,28 @@
   "submit": ["luu"]
 }'></textarea>
     <p class="hint" id="jsonStatus"></p>
+  </section>
+
+  <section>
+    <h2>Bản chụp cấu trúc DOM <span class="tag">gỡ lỗi</span></h2>
+    <p class="hint">
+      Khi extension <strong>không tìm được</strong> ô nhập, nút xác nhận, hay danh sách Nguồn trong
+      giao diện NotebookLM, nó tự ghi lại <em>cấu trúc</em> của vùng đang nhìn: tên thẻ, class,
+      <code>formcontrolname</code>, <code>placeholder</code> và nhãn nút. Gửi đoạn dưới đây kèm báo
+      lỗi thì sửa selector nhanh hơn hẳn — mà không phải chụp màn hình notebook.
+    </p>
+    <p class="hint locked">
+      Bản chụp <strong>chỉ có cấu trúc</strong>. Nội dung bạn gõ vào ô nhập, nội dung các Nguồn và
+      tiêu đề notebook đều không được ghi lại — hãy tự đọc qua trước khi gửi đi.
+    </p>
+    <pre id="domReports" class="report"></pre>
+    <div class="actions">
+      <!-- Tắt sẵn: bật lên là việc của loadDomReports() sau khi đã đọc storage.
+           Bấm được trước lúc đó thì chép ra một ô còn rỗng mà vẫn báo "đã sao chép". -->
+      <button type="button" id="copyDomReports" class="btn" disabled>Sao chép</button>
+      <button type="button" id="clearDomReports" class="btn" disabled>Xoá bản chụp</button>
+      <span class="hint" id="domReportsStatus"></span>
+    </div>
   </section>
 
   <div class="actions">

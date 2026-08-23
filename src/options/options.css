@@ -129,3 +129,21 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--blue); outl
 
 .saved { color: var(--green); font-size: 13px; }
 .error { color: var(--red); }
+
+.report {
+  max-height: 340px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--fg);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.btn[disabled] { opacity: .5; cursor: default; }
+.btn[disabled]:hover { background: transparent; }
