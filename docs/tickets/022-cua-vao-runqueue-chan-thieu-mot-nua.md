@@ -1,5 +1,5 @@
 ---
-status: open
+status: done
 labels: [ready-for-agent, risk]
 blocked_by: []
 spec: docs/spec/0001-notebooklm-importer.md
@@ -59,3 +59,70 @@ Mục không dùng được bị chặn **ở cửa**, khi chưa có gì bị đ
   (`WORKSPACE_PROTOCOL.md` v10) — Mục hỏng nằm đầu thì không Nguồn nào kịp đẩy và cả ticket mất
   nghĩa.
 - Suite xanh, in `tests N`.
+
+---
+
+## Nghiệm thu — 2026-08-23, Lead
+
+**Trạng thái: ĐÃ NHẬN.** Commit `c55c255`. Không cần vá vòng hai.
+
+### Bằng chứng Lead tự chạy
+`bash test/run.sh` → `XANH — tests 802, 25 file.` (nền 796 / 25)
+
+Phép Lead dùng để mở ticket, chạy lại: `OK {"queued":2,"imported":1,"dropped":1,"balanced":true}`
+— trước đó là `NÉM: ledgerKey: thiếu mục` sau khi đã đẩy một Nguồn.
+
+### Nửa quan trọng hơn — và peer làm đúng nửa ấy
+Brief dặn: đây không phải chuyện kiểm đầu vào, vì cửa nào cũng có ca chưa nghĩ tới. Peer làm cả hai
+nửa, và nửa thứ hai là nửa đáng giá:
+
+- **Cửa vào gọi thẳng `S.ledgerKey`**, không chép điều kiện. Khoá dựng ở đó **chính là** khoá khử
+  trùng, mang theo qua `ledgerKeyOf` — nên chỉ còn **một** lời gọi `ledgerKey`, một chỗ trôi thay
+  vì hai. Đúng thứ ticket đòi ("không thể trôi khỏi nhau nữa"), không phải hàng rào thứ hai.
+- **`runQueue` không ném ra ngoài nữa sau khi đã đẩy.** `ledger.add` + `log.sources.push` chạy
+  **ngay** khi `cfg.push` trả về, trước mọi phép đọc `result`; hai hàng đợi chạy `allSettled`; lỗi
+  vào `log.failures` → bảng tổng kết; Mục chưa ra ở đâu quay lại hàng đợi kèm dòng `còn nợ`.
+
+**Quyết định loại-Mục thay vì từ-chối-cả-lượt**, và lý do đúng: từ chối cả lượt đổi một Mục hỏng
+lấy cả một playlist 300 video không chạy — ngược ADR 0008. Điều kiện để loại là an toàn chính là
+bảng tổng kết: Mục bị loại vẫn có một dòng người đọc được, và `summary.balanced` canh kế toán.
+
+### Ba phép xanh, hai lần vá bằng cách GỠ
+- "Khoá khử trùng tính lần hai" xanh → peer **gỡ** lời gọi `ledgerKey` thứ hai (tính một lần, mang
+  qua `Map`). Sau đó phép M1 giết **hai** test thay vì một.
+- "Hoán vị hai nhãn hàng đợi" không có test nào canh → peer thêm test canh cặp `(queue, reason)`
+  khi **cả hai** hàng đợi chết vì hai lý do khác nhau, **rồi gỡ luôn chỗ trôi**: `allSettled` và
+  vòng đọc kết quả lấy từ **cùng một** mảng. Đo lại: hoán vị không còn phân biệt được.
+- Hai phép xanh còn lại peer **không** vá, và Lead đồng ý: không ca nào phân biệt được, thêm assert
+  ở đó là hàng rào cho một luật không tồn tại.
+
+Fixture mới đều là **4 Mục, Mục hỏng ở vị trí hai** (luật v10). Test id-hỏng chạy toàn bộ fixture
+cho **7** giá trị (`7, 0, false, true, {}, ['x'], '   '`), và lấy câu trả lời đúng bằng cách **gọi
+lại chính `S.ledgerKey`** thay vì chép điều kiện — chép thì test cũng trôi y như code đã trôi.
+
+### Phép Lead tự chạy — ngoài 16 phép của peer
+Peer có phép "bỏ **cả** khối kế toán lại phần dở dang". Lead bỏ **riêng** phần đóng góp của
+`log.sources` vào `accounted`: khối vẫn chạy, chỉ khác ở chỗ Mục **đã đẩy thành công** cũng bị trả
+về hàng đợi — tức đúng cú đẩy trùng mà cả ticket này tồn tại để chặn, và đúng hạng ADR 0010 không
+lấy lại được.
+
+**ĐỎ**, 2 test:
+```
+✖ runQueue — ném giữa chừng: Sổ đã import giữ được những gì đã đẩy (ticket 022)
+✖ runQueue — bảng tổng kết nói đúng hàng đợi nào chết, không lẫn hai hàng (ticket 022)
+```
+Cây khôi phục sạch sau phép thử.
+
+### Phát hiện ngoài phạm vi → **ticket 023**, Lead đã xác minh
+`service-worker.js:371` là `const failed = log.dropped.length;` — đúng như peer mô tả. Lỗi của
+ticket 022 nằm ở `log.failures`, nên lượt chạy hỏng giữa chừng đi vào nhánh thành công và **badge
+bị xoá trắng**. Câu cảnh báo có trong bảng tổng kết ở popup, nhưng badge là thứ thấy được mà không
+cần mở popup. Peer đúng khi không tự sửa file ngoài phạm vi.
+
+### Nợ ghi lại
+- **Cửa sổ giữa `cfg.push()` trả về và `ledger.add`** thu hẹp tối đa nhưng không đóng được: nếu
+  chính `cfg.push` đẩy xong rồi mới ném thì Nguồn đã ở trong notebook mà chưa có ô Sổ. Đó là hợp
+  đồng của adapter, engine không nhìn thấy — ghi ra để đừng ai tưởng ticket này đóng hết.
+- **Nội dung đã trích của bó chưa chốt bị vứt** khi lượt chạy chết giữa chừng; Mục quay lại hàng
+  đợi và lần sau trích lại (video private 15–20 giây/mục, ADR 0003). Mất thời gian, không mất dữ
+  liệu.
