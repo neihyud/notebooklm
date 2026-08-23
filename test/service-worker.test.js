@@ -171,3 +171,123 @@ test('một lượt import chạm ba tab, và ba vai không lẫn vào nhau', as
   assert.equal(intersect(tier2(sw), picker(sw)).length, 0);
   assert.equal(new Set([...picker(sw), ...tier2(sw), ...notebook]).size, 3, 'ba vai phải là ba tab');
 });
+
+// ------------------------------------------------ huy hiệu sau một lượt chạy (ticket 023)
+
+/**
+ * Nhóm bó **không mang tên nguồn gốc** — hình dạng làm một hàng đợi chết *sau* khi đã đẩy.
+ *
+ * Nó không phải thứ bịa ra cho vui: `queueItems` (`src/youtube/playlist.js:360`) và
+ * `itemsFromPicker` (`src/background/docs-queue.js:50`) đều **từ chối** dựng Mục với nhóm không
+ * tên, tức cả hai chỗ dựng Mục đều biết hình này là hình hỏng. Nhưng hai chỗ ấy chạy trên
+ * *trang*, còn `IMPORT_VIDEO` nhận `message.items` thô từ tab — nên hình ấy vẫn tới được engine,
+ * lọt cửa vào của `runQueue` (id dùng được, `ledgerKey` dựng được), rồi ném ở `S.bundleName` lúc
+ * **chốt Nguồn**: sau khi Nguồn của bó trước đã vào notebook.
+ *
+ * Đó đúng là hạng lỗi mà ticket 022 chuyển từ "ném ra ngoài" sang `log.failures`, và đúng hạng
+ * mà ticket 023 nói badge đang im lặng.
+ */
+const NHOM_MAT_TEN = { kind: 'docs', source: '', branch: '', key: 'docs:nhóm mất tên' };
+const NHOM_LANH = { kind: 'docs', source: 'docs.acme.dev', branch: 'Hướng dẫn' };
+
+/**
+ * Mục hàng đợi tài liệu. `kind` là thứ định tuyến hàng đợi (`queueOf` trong `queue-engine.js`),
+ * không phải tên loại tin — và `IMPORT_VIDEO` là **cửa duy nhất** nhận Mục thô, nên đây là cách
+ * duy nhất lái một hàng đợi thật qua service worker thật với một fixture tự soạn.
+ */
+const trang = (id, group) => ({ id, kind: 'docs', url: `${SITE}/guide/${id}`, title: `Trang ${id}`, group });
+
+/** Trang mà lớp tài liệu **không trích được** — Mục rớt, lượt chạy vẫn trọn vẹn (ADR 0008). */
+const trangRot = (ids) => (layer, tab, message) => {
+  if (layer !== 'docs' || M.typeOf(message) !== M.TYPES.EXTRACT_DOC) return undefined;
+  const id = message.url.split('/').pop();
+  return ids.includes(id) ? { ok: false, error: `trang ${id} không trích được` } : undefined;
+};
+
+const chayHangDoi = async (items, given) => {
+  const sw = bootServiceWorker(given);
+  await sw.send({ type: M.TYPES.PICK_DOCS });
+  const answer = await sw.send({ type: M.TYPES.IMPORT_VIDEO, items });
+  return { sw, answer };
+};
+
+test('badge — lượt chạy hỏng giữa chừng VÀ có Mục rớt: nói ra cả hai hạng, không gộp (ticket 023)', async () => {
+  // Bảy Mục, hai hạng đặc biệt xen kẽ và **không** nằm đầu, cuối, hay tâm đối xứng của dãy
+  // (`WORKSPACE_PROTOCOL.md` v10). Bó lành đứng trước bó mất tên nên nó kịp chốt và đẩy — nếu
+  // không thì `log.sources` rỗng và cả câu "Sổ giữ được phần đã đẩy" mất nghĩa.
+  const items = [
+    trang('ok-1', NHOM_LANH),
+    trang('hong-1', NHOM_MAT_TEN),
+    trang('rot-1', NHOM_LANH),
+    trang('ok-2', NHOM_LANH),
+    trang('rot-2', NHOM_LANH),
+    trang('hong-2', NHOM_MAT_TEN),
+    trang('rot-3', NHOM_LANH),
+  ];
+  const { sw, answer } = await chayHangDoi(items, { answer: trangRot(['rot-1', 'rot-2', 'rot-3']) });
+
+  // Nhánh **thành công**: đó là cả vấn đề. Trước ticket 022 chuyện này đi vào `catch` và badge
+  // nói được; giờ nó trả về nhật ký như một lượt chạy trọn vẹn.
+  assert.equal(answer.ok, true, answer.error);
+  assert.match(answer.result.summary, /LƯỢT CHẠY HỎNG GIỮA CHỪNG/);
+
+  // Ba con số **khác nhau đôi một** (3 rớt, 1 hàng đợi chết, 2 còn nợ): fixture cho hai con số
+  // bằng nhau thì một phép hoán vị hai mảng không làm lệch dòng nào.
+  const { text, title } = sw.badge();
+  assert.equal(text, '!', `badge bị xoá trắng đúng lúc lượt chạy hỏng giữa chừng: ${JSON.stringify(text)}`);
+  assert.match(title, /(?<!\d)1 hàng đợi chết/);
+  assert.match(title, /(?<!\d)2 mục còn nợ/);
+  assert.match(title, /(?<!\d)3 mục rớt/);
+  assert.match(title, /chạy lại sẽ chạy tiếp/);
+});
+
+test('badge — hỏng giữa chừng mà KHÔNG Mục nào rớt vẫn phải kêu (ticket 023)', async () => {
+  // Đúng ca ticket 023 nói tới: `log.dropped` rỗng, `log.failures` không. Badge đọc mỗi
+  // `dropped` thì đây là một nút trơn — trông y hệt một lượt chạy trọn vẹn.
+  // Dãy [lành, mất tên, mất tên, lành, lành] khác hẳn bản đảo ngược của nó (v10).
+  const items = [
+    trang('ok-1', NHOM_LANH),
+    trang('hong-1', NHOM_MAT_TEN),
+    trang('hong-2', NHOM_MAT_TEN),
+    trang('ok-2', NHOM_LANH),
+    trang('ok-3', NHOM_LANH),
+  ];
+  const { sw, answer } = await chayHangDoi(items);
+
+  assert.equal(answer.ok, true, answer.error);
+  const { text, title } = sw.badge();
+  assert.equal(text, '!', `lượt chạy hỏng giữa chừng mà badge im: ${JSON.stringify(text)}`);
+  assert.match(title, /(?<!\d)1 hàng đợi chết/);
+  assert.match(title, /(?<!\d)2 mục còn nợ/);
+  assert.doesNotMatch(title, /mục rớt/, 'không Mục nào rớt mà badge vẫn báo có');
+});
+
+test('badge — Mục rớt mà lượt chạy trọn vẹn: con số, không phải dấu chấm than (ticket 023)', async () => {
+  // Vế đối chứng. Hai hạng là hai hạng, nên ca này **không** được nói "chạy lại sẽ chạy tiếp":
+  // hàng đợi đã chạy hết, và Mục rớt thường rớt vì lý do dai dẳng (ADR 0008).
+  const items = [
+    trang('ok-1', NHOM_LANH),
+    trang('rot-1', NHOM_LANH),
+    trang('rot-2', NHOM_LANH),
+    trang('ok-2', NHOM_LANH),
+    trang('ok-3', NHOM_LANH),
+  ];
+  const { sw, answer } = await chayHangDoi(items, { answer: trangRot(['rot-1', 'rot-2']) });
+
+  assert.equal(answer.ok, true, answer.error);
+  const { text, title } = sw.badge();
+  assert.equal(text, '2', `Mục rớt phải hiện thành con số: ${JSON.stringify(text)}`);
+  assert.match(title, /(?<!\d)2 mục rớt/);
+  assert.doesNotMatch(title, /hàng đợi chết/);
+  assert.doesNotMatch(title, /chạy lại sẽ chạy tiếp/);
+});
+
+test('badge — lượt chạy trọn vẹn, không rớt gì: nút trơn (ticket 023)', async () => {
+  // Cột mốc cho ba test trên: nút trơn phải **là** câu trả lời của một lượt chạy sạch, chứ
+  // không phải giá trị mặc định mà mọi lượt chạy đều rơi vào.
+  const items = ['ok-1', 'ok-2', 'ok-3'].map((id) => trang(id, NHOM_LANH));
+  const { sw, answer } = await chayHangDoi(items);
+
+  assert.equal(answer.ok, true, answer.error);
+  assert.deepEqual(sw.badge(), { text: '', title: 'NotebookLM Importer' });
+});

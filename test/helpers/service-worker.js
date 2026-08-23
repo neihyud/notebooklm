@@ -133,7 +133,13 @@ export function fakeChrome(given = {}) {
       onClicked: { addListener: () => {} },
     },
     commands: { onCommand: { addListener: () => {} } },
-    action: { setBadgeText: () => {}, setTitle: () => {} },
+    // Huy hiệu **có ghi sổ**: nó là dấu hiệu duy nhất người dùng thấy khi popup đang đóng, nên
+    // một stub nuốt lặng nó làm mọi câu hỏi "lượt chạy này nói được gì ra ngoài?" trở thành
+    // không hỏi được. Ghi vào cùng sổ với `chrome.tabs`, không `tabId`.
+    action: {
+      setBadgeText: ({ text }) => note('action.setBadgeText', null, { text }),
+      setTitle: ({ title }) => note('action.setTitle', null, { title }),
+    },
     downloads: { download: async (file) => { note('downloads.download', null, { file }); return 1; } },
     storage: {
       local: {
@@ -309,5 +315,17 @@ export function bootServiceWorker(given = {}) {
     messaged: (...types) => new Set(
       log.filter((row) => row.api === 'tabs.sendMessage' && types.includes(row.type)).map((row) => row.tabId),
     ),
+    /**
+     * Huy hiệu **đang hiện**: chữ và tooltip của lượt đặt gần nhất, tức đúng thứ người dùng
+     * nhìn thấy sau khi lượt chạy xong. Lấy lượt cuối chứ không lấy cả dãy: `importItems` đặt
+     * `…` lúc bắt đầu rồi đặt lại lúc xong, và cái còn lại trên nút mới là câu trả lời.
+     */
+    badge: () => {
+      const lastOf = (name, field) => {
+        const rows = log.filter((row) => row.api === name);
+        return rows.length ? rows[rows.length - 1][field] : undefined;
+      };
+      return { text: lastOf('action.setBadgeText', 'text'), title: lastOf('action.setTitle', 'title') };
+    },
   };
 }

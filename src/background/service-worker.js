@@ -341,6 +341,46 @@ const DOCS_SCRIPTS = [
     if (title) chrome.action.setTitle({ title });
   }
 
+  /**
+   * Huy hiệu của một lượt chạy **đã trả về nhật ký** — tức nhánh *thành công* của `importItems`.
+   *
+   * Nhánh ấy là chỗ phải đọc kỹ, và lý do có ngày tháng: tới ticket 022 `runQueue` còn **ném**
+   * khi một hàng đợi chết giữa chừng, nên chuyện đó rơi vào `catch` bên dưới và huy hiệu kêu
+   * `!` như mọi lỗi khác. Ticket 022 gỡ cú ném ấy đi (nó nuốt mất cả Sổ đã import lẫn nhật ký),
+   * và từ đó **cùng một chuyện đi vào cùng nhánh với một lượt chạy trọn vẹn** — chỉ khác ở
+   * `log.failures`. Đọc mỗi `log.dropped` ở đây là xoá trắng huy hiệu đúng lúc lượt chạy hỏng
+   * nặng nhất.
+   *
+   * Hai hạng, **không phải hai mức nặng nhẹ của một hạng**, vì việc người dùng cần làm khác nhau:
+   *
+   *   - `dropped` — Mục không import được. Lượt chạy vẫn **trọn vẹn**: phần còn lại đã vào
+   *     notebook, và Mục hỏng thường hỏng vì lý do dai dẳng — không có phụ đề, mất quyền xem
+   *     (ADR 0008). Bấm chạy lại thường không đổi được gì cho chúng.
+   *   - `failures` — cả một hàng đợi **chết giữa chừng**. Sổ đã import chỉ giữ được phần đã
+   *     đẩy, còn Mục chưa ra ở đâu quay lại hàng đợi (`deferred`), nên bấm chạy lại là **chạy
+   *     tiếp** chứ không phải chạy lại từ đầu. Đó là hành động người dùng chỉ làm nếu biết, và
+   *     bảng tổng kết nói được câu ấy — nhưng bảng tổng kết đòi mở popup, còn huy hiệu thì không.
+   *
+   * Chữ trên huy hiệu chỉ đủ chỗ cho một hạng nên nó mang hạng **quyết định hành động**: `!` là
+   * "lượt chạy chưa xong", một con số là "lượt chạy xong, ngần ấy Mục rớt". Con số của từng hạng
+   * nằm ở tooltip, mỗi hạng một mệnh đề riêng — cộng hai hạng vào một con số là nói với người
+   * dùng rằng chạy lại không giúp được gì, đúng lúc chạy lại là việc duy nhất giúp được.
+   */
+  function badgeForRun(log) {
+    const dropped = log.dropped.length;
+    const broken = log.failures.length;
+    const owed = log.deferred.length;
+    const notes = [];
+    if (broken) {
+      notes.push(`LƯỢT CHẠY HỎNG GIỮA CHỪNG — ${broken} hàng đợi chết, ${owed} mục còn nợ; chạy lại sẽ chạy tiếp`);
+    }
+    if (dropped) notes.push(`${dropped} mục rớt`);
+    badge(
+      broken ? '!' : (dropped ? String(dropped) : ''),
+      notes.length ? notes.join(' — ') : 'NotebookLM Importer',
+    );
+  }
+
   let running = false;
 
   /**
@@ -368,8 +408,7 @@ const DOCS_SCRIPTS = [
         deps,
       });
       await writeLocal(STATE_KEY, log.state);
-      const failed = log.dropped.length;
-      badge(failed ? String(failed) : '', failed ? `${failed} mục rớt` : 'NotebookLM Importer');
+      badgeForRun(log);
       // Phần của nhánh tài liệu đi kèm bảng tổng kết chung: một Nguồn mỏng vì trang render bằng
       // JS trông y hệt một Nguồn mỏng vì trang mỏng thật, và chỉ câu kia phân biệt được.
       const summary = [E.formatSummary(log), D.formatDocNotes(log)].filter(Boolean).join('\n');
