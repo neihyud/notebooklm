@@ -205,7 +205,12 @@
    */
   async function runQueue(config) {
     const cfg = config || {};
-    const notebookId = String(cfg.notebookId || '');
+    // `S.collapse` chứ không phải `String(...)`: Notebook đích đi thẳng vào `S.ledgerKey`, và
+    // `ledgerKey` collapse vế của nó. Chuẩn hoá ở **chỗ đặt** — một lần, ngay đây — thì phép
+    // collapse bên trong `ledgerKey` thành ra vô hại, và `!notebookId` ở dòng dưới đúng bằng
+    // điều kiện `ledgerKey` áp cho vế Notebook. Giữ `String(cfg.notebookId || '')` là nhận một
+    // Notebook đích mà `ledgerKey` sẽ từ chối, rồi từ chối nó ở giữa vòng chạy.
+    const notebookId = S.collapse(cfg.notebookId);
     if (!notebookId) throw new Error('runQueue: thiếu Notebook đích');
     if (typeof cfg.extract !== 'function') throw new Error('runQueue: thiếu adapter trích');
     if (typeof cfg.push !== 'function') throw new Error('runQueue: thiếu adapter đẩy');
@@ -221,18 +226,36 @@
     const incoming = [...state.pending, ...(cfg.items || [])].filter(Boolean);
     state.pending = [];
 
-    // Mục không có id không đi tiếp được: `ledgerKey` từ chối nó, và một lỗi ném ra giữa vòng
-    // chạy sẽ nuốt luôn nhật ký lẫn Sổ đã import vừa cập nhật — những Nguồn đã đẩy thành công
-    // sẽ bị đẩy lại ở lần sau, mà Nguồn đã đẩy thì không xoá được. Loại nó ở cửa vào, và loại
-    // *có tên tuổi*: nó vẫn phải có một dòng trong bảng tổng kết.
+    // Mục nào không dựng được khoá Sổ đã import thì không đi tiếp được, và cửa vào hỏi điều đó
+    // bằng cách **gọi thẳng `S.ledgerKey`** — không chép lại điều kiện của nó. Một bản chép là
+    // hàng rào thứ hai cho cùng một luật, và hai hàng rào thì trôi khỏi nhau: bản cũ hỏi
+    // `String(item.id).trim()` nên `{ id: 7 }` lọt qua cửa, chạy được một quãng, rồi ném ở
+    // `ledgerKey` **sau khi** đã đẩy Nguồn đầu.
+    //
+    // Loại Mục chứ không từ chối cả lượt: một Mục hỏng không được chặn cả playlist 300 video
+    // (ADR 0008 — mục hỏng không chặn Nguồn), và bảng tổng kết là chỗ đảm bảo nó không biến mất
+    // im lặng. Loại *có tên tuổi*: nó vẫn phải có một dòng mang tên người đọc được.
+    //
+    // Khoá dựng được ở đây **chính là** khoá khử trùng, cùng lý do: hai Mục cùng một ô Sổ là
+    // **một** Mục theo đúng định nghĩa của Sổ đã import (ADR 0006). Khử trùng bằng một phép
+    // chuẩn hoá khác thì `'v x'` và `'v  x'` cùng vào một Nguồn gộp — cùng nội dung vào notebook
+    // hai lần, Sổ ghi một ô, và Nguồn đã đẩy không xoá được (ADR 0010). Tính một lần rồi mang
+    // theo, vì hai lời gọi `ledgerKey` ở cùng một cửa vào là hai chỗ trôi được.
     const usable = [];
     const rejected = [];
+    const ledgerKeyOf = new Map();
     for (const item of incoming) {
-      const id = item.id == null ? '' : String(item.id).trim();
-      if (id) usable.push(item);
-      else rejected.push({ id: `(không có id #${rejected.length + 1}: ${labelOf(item) || 'không rõ'})` });
+      let key;
+      try {
+        key = S.ledgerKey(item && item.id, notebookId);
+      } catch {
+        rejected.push({ id: `(không có id #${rejected.length + 1}: ${labelOf(item) || 'không rõ'})` });
+        continue;
+      }
+      ledgerKeyOf.set(item, key);
+      usable.push(item);
     }
-    const queued = S.dedupe(usable, (i) => String(i.id).trim());
+    const queued = S.dedupe(usable, (item) => ledgerKeyOf.get(item));
 
     const ledger = new Set(state.ledger);
     const log = {
@@ -240,10 +263,13 @@
       queued: [...queued.map((i) => i.id), ...rejected.map((r) => r.id)],
       sources: [],
       skipped: [],
-      dropped: rejected.map((r) => ({ id: r.id, stage: 'queue', reason: 'Mục hàng đợi không có id' })),
+      dropped: rejected.map((r) => ({ id: r.id, stage: 'queue', reason: 'Mục hàng đợi không có id dùng được cho Sổ đã import' })),
       deferred: [],
       trace: [],
       stopped: false,
+      // Lỗi không lường trước làm chết một hàng đợi giữa chừng. Rỗng ở mọi lượt chạy lành —
+      // nó có mặt để một lỗi như thế *hiện ra* thay vì bốc hơi cùng cả nhật ký.
+      failures: [],
     };
 
     // Nhóm nào đã chạy xong ở lần trước thì lần này là *import lại*, nên sinh nguồn bổ sung
@@ -290,6 +316,15 @@
         return;
       }
       trace(queue, 'push', 'end', source.name);
+      // Nguồn đã nằm trong notebook rồi, và extension không xoá được nó (ADR 0010). Vì vậy Sổ đã
+      // import và bảng kế toán được ghi **ngay tại đây**, trước mọi phép đọc `result` bên dưới:
+      // nếu một trong những phép ấy ném, thứ mất đi chỉ là *nhãn đường đẩy* — chứ không phải
+      // bằng chứng rằng Nguồn này đã tồn tại. Ngược lại thì lần chạy sau đẩy nó lần thứ hai.
+      //
+      // Nguồn gộp vẫn ghi vào Sổ **từng mục một**, để một lần import lẻ sau đó biết là trùng
+      // (ADR 0006).
+      for (const item of items) ledger.add(S.ledgerKey(item.id, notebookId));
+      log.sources.push(source);
       // Đường đẩy gắn vào **chính Nguồn vừa đẩy**, ngay tại lượt đẩy ấy: đó là chỗ duy nhất còn
       // biết cặp (Nguồn, đường) là của nhau. Ghép lại sau bằng thứ tự hai danh sách là mở đúng
       // cửa cho việc gán `via` của Nguồn A cho Nguồn B, mà hai chuỗi ấy cùng kiểu và cùng tập
@@ -300,10 +335,6 @@
       // cửa cho cảnh báo của Nguồn A đứng dưới tên Nguồn B — hai chuỗi cùng kiểu, và bảng tổng
       // kết vẫn đọc trôi chảy trong khi nó chỉ sai đúng cái tên người dùng cần.
       source.nameWarning = nameWarningOf(source.name, result);
-      log.sources.push(source);
-      // Nguồn gộp vẫn ghi vào Sổ **từng mục một**, để một lần import lẻ sau đó biết là trùng
-      // (ADR 0006).
-      for (const item of items) ledger.add(S.ledgerKey(item.id, notebookId));
     }
 
     /** Chốt một bó và đẩy ngay, không đợi biết tổng số phần (ADR 0008). */
@@ -411,11 +442,39 @@
     const byQueue = { [VIDEO_QUEUE]: [], [DOCS_QUEUE]: [] };
     for (const item of queued) byQueue[queueOf(item)].push(item);
 
-    await Promise.all([
-      runOne(VIDEO_QUEUE, byQueue[VIDEO_QUEUE]),
-      runOne(DOCS_QUEUE, byQueue[DOCS_QUEUE]),
-    ]);
+    // Một danh sách hàng đợi, dùng cho cả lúc chạy lẫn lúc đọc kết quả. Hai mảng rời nhau phải
+    // khớp chỉ số là đúng hình "hai thứ cùng kiểu, mỗi thứ một vai": đảo một trong hai thì lý do
+    // của hàng đợi này đứng dưới tên hàng đợi kia, và bảng tổng kết vẫn đọc trôi chảy.
+    const queues = [VIDEO_QUEUE, DOCS_QUEUE];
+    // `allSettled`, không phải `all`: `all` ném ngay khi hàng đợi thứ nhất chết, để hàng đợi kia
+    // chạy tiếp và ghi vào một `log` mà người gọi đã không còn cầm. Ở đây cả hai chạy hết rồi mới
+    // tính sổ.
+    const runs = await Promise.allSettled(queues.map((queue) => runOne(queue, byQueue[queue])));
     await pushChain;
+    queues.forEach((queue, index) => {
+      if (runs[index].status === 'rejected') {
+        log.failures.push({ queue, reason: messageOf(runs[index].reason) });
+      }
+    });
+
+    // Một lỗi không lường trước ở giữa vòng chạy **không được ném ra ngoài**: người gọi ghi
+    // `log.state` xuống storage ngay sau khi `runQueue` trả về, nên một exception là mất trắng
+    // Sổ đã import vừa cập nhật — và những Nguồn đã đẩy sẽ bị đẩy lại ở lần sau, mà Nguồn đã đẩy
+    // thì không xoá được (ADR 0010). Cửa vào ở trên chỉ chặn được ca đã biết; đây mới là chỗ
+    // chặn được cả ca chưa nghĩ tới.
+    //
+    // Đổi lại, lỗi phải *hiện ra*: nó vào bảng tổng kết (ADR 0008), và mọi Mục chưa kịp ra ở
+    // đâu được trả về hàng đợi kèm một dòng — nếu không chúng biến mất khỏi phép kế toán.
+    if (log.failures.length) {
+      const accounted = new Set();
+      for (const source of log.sources) for (const id of source.itemIds) accounted.add(id);
+      for (const entry of [...log.skipped, ...log.dropped, ...log.deferred]) accounted.add(entry.id);
+      for (const item of queued) {
+        if (accounted.has(item.id)) continue;
+        log.deferred.push({ id: item.id, reason: 'lượt chạy hỏng giữa chừng' });
+        requeue(item);
+      }
+    }
 
     // Nhóm nào không còn nợ mục nào thì lần chạy này coi như xong: lần import sau vào cùng
     // nhóm là *import lại*, sinh nguồn bổ sung (ADR 0009).
@@ -480,6 +539,7 @@
       dropped: log.dropped.length,
       deferred: (log.deferred || []).length,
       sources: log.sources.length,
+      failures: (log.failures || []).length,
       pushVia: Object.fromEntries(viaCounts),
       unnamed,
       words: log.sources.reduce((sum, s) => sum + s.words, 0),
@@ -541,6 +601,13 @@
       for (const entry of log.deferred) lines.push(`  - ${entry.id}: ${entry.reason}`);
     }
     if (log.stopped) lines.push(`Đã dừng giữa chừng — còn nợ ${log.state.pending.length} mục.`);
+    // Lượt chạy chết giữa chừng là câu người dùng phải đọc được, không phải một exception nuốt cả
+    // bảng: những Nguồn đã liệt kê ở trên **đã vào notebook rồi** và không xoá được (ADR 0010),
+    // nên câu này nói luôn rằng Sổ đã import giữ chúng lại — đó là thứ ngăn lần chạy sau đẩy trùng.
+    if (log.failures && log.failures.length) {
+      lines.push(`LƯỢT CHẠY HỎNG GIỮA CHỪNG — Sổ đã import vẫn giữ ${s.sources} Nguồn đã đẩy:`);
+      for (const entry of log.failures) lines.push(`  ! hàng đợi ${entry.queue}: ${entry.reason}`);
+    }
     if (!s.balanced) {
       lines.push(`LỆCH KẾ TOÁN — vào ${s.queued} mục, không ra: [${s.leaked.join(', ')}], ra hai lần: [${s.duplicated.join(', ')}]`);
     }

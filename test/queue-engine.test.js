@@ -1046,3 +1046,205 @@ test('runQueue — tên nhận về TOÀN khoảng trắng là "chưa xác nhậ
   assert.equal(log.summary.unnamed, 1);
   assert.match(log.sources[1].nameWarning, /^lượt đẩy không nói Nguồn mang tên gì/, log.sources[1].nameWarning);
 });
+
+// ------------------------------------------------- cửa vào ⟺ `ledgerKey` (ticket 022)
+
+/** Những id mà `String(id).trim()` nói "có" còn `S.collapse` của `ledgerKey` nói "không". */
+const NOT_A_LEDGER_ID = [7, 0, false, true, {}, ['x'], '   '];
+
+/**
+ * Mục nào **đi tiếp được** qua cửa vào — xuất hiện ở bất cứ đâu trong nhật ký dưới đúng id của
+ * nó, thay vì dưới một dòng "không có id" do cửa vào bịa ra.
+ */
+function admittedIds(log) {
+  const out = new Set();
+  for (const source of log.sources) for (const id of source.itemIds) out.add(id);
+  for (const entry of log.skipped) out.add(entry.id);
+  for (const entry of log.deferred) out.add(entry.id);
+  for (const entry of log.dropped) if (entry.stage !== 'queue') out.add(entry.id);
+  return out;
+}
+
+test('runQueue — cửa vào nhận đúng những Mục mà `ledgerKey` nhận, không rộng hơn (ticket 022)', async () => {
+  // Câu hỏi là **quan hệ giữa hai chỗ**, nên test chạy lại chính `S.ledgerKey` để lấy câu trả
+  // lời đúng, thay vì chép điều kiện của nó thành một hằng số ở đây — chép thì test cũng trôi
+  // khỏi `ledgerKey` y như code đã trôi.
+  for (const oddId of NOT_A_LEDGER_ID) {
+    // Fixture v10: bốn Mục, Mục hỏng ở **vị trí hai**. Không nằm đầu — nếu nằm đầu thì chưa
+    // Nguồn nào kịp đẩy và cả ticket mất nghĩa; không nằm cuối; và dãy khác hẳn bản đảo ngược.
+    const items = [
+      video('v1'),
+      { id: oddId, kind: 'video', title: 'Video số' },
+      video('v3'),
+      video('v4'),
+    ];
+    const a = fakeAdapters({ size: () => 5 });
+    const log = await E.runQueue({
+      items, notebookId: 'NB-1', extract: a.extract, push: a.push,
+    });
+
+    const admitted = admittedIds(log);
+    for (const item of items) {
+      let acceptedByLedger = true;
+      try {
+        S.ledgerKey(item.id, 'NB-1');
+      } catch {
+        acceptedByLedger = false;
+      }
+      assert.equal(
+        admitted.has(item.id), acceptedByLedger,
+        `id ${JSON.stringify(item.id)}: cửa vào và ledgerKey phải trả lời giống nhau`,
+      );
+    }
+
+    // Và không có gì biến mất im lặng: Mục bị loại vẫn có một dòng mang tên nó (ADR 0008).
+    assert.equal(log.summary.balanced, true, `id ${JSON.stringify(oddId)}: phải cân sổ`);
+    assert.equal(log.summary.dropped, 1);
+    assert.equal(log.dropped[0].stage, 'queue');
+    assert.match(E.formatSummary(log), /Video số/);
+    // Ba Mục còn lại vẫn chạy: loại một Mục, không từ chối cả lượt.
+    assert.deepEqual(idsOf(log), [['v1'], ['v3'], ['v4']]);
+    assert.deepEqual(
+      log.state.ledger.sort(),
+      ['v1', 'v3', 'v4'].map((id) => S.ledgerKey(id, 'NB-1')).sort(),
+    );
+  }
+});
+
+test('runQueue — hai Mục cùng một ô Sổ đã import chỉ qua cửa một lần (ticket 022)', async () => {
+  // `ledgerKey` gọi `collapse`, nên `'v x'` và `'v  x'` là **một** ô trong Sổ. Cửa vào khử trùng
+  // theo một phép chuẩn hoá khác thì cả hai cùng vào một Nguồn gộp: nội dung ấy vào notebook hai
+  // lần, Sổ chỉ ghi một ô, và Nguồn đã đẩy thì không xoá được (ADR 0010). Phép kế toán của
+  // `summarize` **không** bắt được ca này — nó đếm id thô, mà hai id ấy khác nhau từng ký tự.
+  // Cặp trùng nằm ở vị trí hai và ba của bốn Mục.
+  const group = playlist('P');
+  const items = ['v1', 'v x', 'v  x', 'v4'].map((id) => video(id, { group }));
+  const a = fakeAdapters({ size: () => 5 });
+  const log = await E.runQueue({
+    items, notebookId: 'NB-1', extract: a.extract, push: a.push, options: { maxWords: 1000 },
+  });
+
+  const keys = log.sources.flatMap((s) => s.itemIds).map((id) => S.ledgerKey(id, 'NB-1'));
+  assert.equal(
+    keys.length, new Set(keys).size,
+    'hai Mục cùng một ô Sổ đã import cùng đi vào notebook — đó là cú đẩy trùng',
+  );
+  assert.equal(log.state.ledger.length, new Set(log.state.ledger).size, 'Sổ không được có ô trùng');
+  assert.equal(log.summary.balanced, true);
+});
+
+// ------------------------------------------------- ném giữa chừng không nuốt Sổ (ticket 022)
+
+/**
+ * Adapter đẩy **thành công** rồi trả về một kết quả mà chính engine đọc không nổi: `via` là
+ * getter ném. Đây là hình dạng nguy hiểm nhất của lỗi giữa vòng chạy — Nguồn đã nằm trong
+ * notebook và không xoá được (ADR 0010), còn lỗi thì nổ ra **sau** cú đẩy ấy.
+ */
+function boobyTrappedPush(trapName, pushed) {
+  return async (source) => {
+    pushed.push(source.name);
+    if (source.name !== trapName) return { via: 'rpc', name: source.name };
+    return { name: source.name, get via() { throw new Error('kết quả đẩy hỏng'); } };
+  };
+}
+
+test('runQueue — ném giữa chừng: Sổ đã import giữ được những gì đã đẩy (ticket 022)', async () => {
+  // Fixture v10: bốn Mục, Mục làm nổ ở **vị trí hai** — một Nguồn đã kịp đẩy trước nó.
+  const items = [video('v1'), video('boom'), video('v3'), video('v4')];
+  const pushed = [];
+  const a = fakeAdapters({ size: () => 5 });
+
+  const log = await E.runQueue({
+    items, notebookId: 'NB-1',
+    extract: a.extract,
+    push: boobyTrappedPush('Video boom', pushed),
+  });
+
+  // 1. Không ném ra ngoài: người gọi ghi `log.state` xuống storage ở dòng ngay sau, nên một
+  //    exception ở đây là mất trắng Sổ đã import của cả lượt.
+  assert.deepEqual(pushed, ['Video v1', 'Video boom'], 'phải đẩy được ít nhất một Nguồn trước khi nổ');
+  // 2. Mọi Nguồn **đã thật sự vào notebook** đều có ô trong Sổ — kể cả Nguồn mà lỗi nổ ngay sau
+  //    cú đẩy của nó. Thiếu một ô ở đây là lần chạy sau đẩy lại đúng Nguồn ấy.
+  for (const id of ['v1', 'boom']) {
+    assert.ok(
+      log.state.ledger.includes(S.ledgerKey(id, 'NB-1')),
+      `Nguồn "${id}" đã đẩy đi rồi mà không có trong Sổ đã import`,
+    );
+  }
+  // 3. Lỗi phải nói ra, không nuốt (ADR 0008).
+  assert.equal(log.summary.failures, 1);
+  assert.match(E.formatSummary(log), /hỏng giữa chừng/);
+  assert.match(E.formatSummary(log), /kết quả đẩy hỏng/);
+  // 4. Hai Mục chưa tới lượt không được bốc hơi: còn nợ, và còn trong hàng đợi cho lần sau.
+  assert.deepEqual(log.state.pending.map((i) => i.id), ['v3', 'v4']);
+  assert.equal(log.summary.balanced, true, 'lượt chạy hỏng vẫn phải cân sổ');
+});
+
+test('runQueue — ném giữa chừng không đánh dấu Nguồn gộp là đã chạy xong (ADR 0009)', async () => {
+  const group = playlist('P');
+  const items = ['v1', 'boom', 'v3', 'v4'].map((id) => video(id, { group }));
+  const pushed = [];
+  const a = fakeAdapters({ size: () => 40 });
+
+  const log = await E.runQueue({
+    items, notebookId: 'NB-1',
+    extract: a.extract,
+    push: boobyTrappedPush('P — phần 1', pushed),
+    options: { maxWords: 100 },
+  });
+
+  assert.deepEqual(pushed, ['P — phần 1']);
+  // Nhóm còn nợ mục thì lần sau là *chạy tiếp*, không phải *import lại*: đánh dấu `done` ở đây
+  // là lần sau sinh "bổ sung 1" cho một playlist mới chạy được một phần.
+  assert.equal(log.state.groups[E.groupKey(group)].done, false);
+});
+
+test('runQueue — bảng tổng kết nói đúng hàng đợi nào chết, không lẫn hai hàng (ticket 022)', async () => {
+  // Hai hàng đợi chết vì hai lý do khác nhau: `queue` và `reason` là hai chuỗi cùng kiểu, và
+  // ghép nhầm cặp vẫn cho một bảng đọc trôi chảy nói ngược sự thật — đúng hình mà
+  // `WORKSPACE_PROTOCOL.md` ghi cho bảng xác nhận. Mỗi hàng bốn Mục, Mục làm nổ ở vị trí hai.
+  const pushed = [];
+  const items = [
+    ...['v1', 'boom-v', 'v3', 'v4'].map((id) => video(id)),
+    ...['d1', 'boom-d', 'd3', 'd4'].map((id) => doc(id)),
+  ];
+  const a = fakeAdapters({ size: () => 5 });
+  const log = await E.runQueue({
+    items, notebookId: 'NB-1',
+    extract: a.extract,
+    push: async (source) => {
+      pushed.push(source.name);
+      if (source.name === 'Video boom-v') return { name: source.name, get via() { throw new Error('video nổ'); } };
+      if (source.name === 'Trang boom-d') return { name: source.name, get via() { throw new Error('tài liệu nổ'); } };
+      return { via: 'rpc', name: source.name };
+    },
+  });
+
+  assert.deepEqual(
+    log.failures.map((f) => [f.queue, f.reason]).sort(),
+    [['docs', 'tài liệu nổ'], ['video', 'video nổ']],
+    'lý do phải đứng dưới đúng hàng đợi đã ném nó',
+  );
+  const summary = E.formatSummary(log);
+  assert.match(summary, /hàng đợi video: video nổ/);
+  assert.match(summary, /hàng đợi docs: tài liệu nổ/);
+  assert.equal(log.summary.failures, 2);
+  assert.equal(log.summary.balanced, true);
+});
+
+test('runQueue — Notebook đích mà `ledgerKey` không nhận bị từ chối ở cửa, không đổ lỗi cho Mục (ticket 022)', async () => {
+  // Vế Notebook của khoá Sổ cũng đi qua `collapse`. Cửa vào nhận rộng hơn thì lượt chạy vẫn khởi
+  // động, rồi **mọi** Mục bị loại kèm dòng "Mục không có id" — một bảng tổng kết đổ lỗi cho danh
+  // sách của người dùng trong khi chỗ hỏng là Notebook đích.
+  for (const bad of ['   ', 7, {}]) {
+    const a = fakeAdapters();
+    await assert.rejects(
+      () => E.runQueue({
+        items: [video('v1'), video('v2')], notebookId: bad, extract: a.extract, push: a.push,
+      }),
+      /Notebook đích/,
+      `notebookId ${JSON.stringify(bad)} phải bị từ chối bằng đúng tên của nó`,
+    );
+    assert.deepEqual(a.pushed, [], 'chưa Nguồn nào được đẩy');
+  }
+});
