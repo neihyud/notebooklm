@@ -4,7 +4,7 @@ Chrome extension (Manifest V3) đẩy nhanh **video YouTube** và **trang tài l
 
 > **Trạng thái: có code, chạy được một phần, chưa import thật lần nào.**
 >
-> 20/21 ticket đã nghiệm thu. Suite: `bash test/run.sh` → xanh, **783 test / 25 file**. Ngoài ra
+> 21/22 ticket đã nghiệm thu. Suite: `bash test/run.sh` → xanh, **796 test / 25 file**. Ngoài ra
 > có hai cổng chạy trên **Chrome thật** (`tools/verify-live.mjs`, `tools/verify-docs.mjs`) — chúng
 > nạp chính extension này vào Google Chrome for Testing 151 và chạy trên trang công khai thật.
 >
@@ -285,7 +285,7 @@ tools/                            hai cổng chạy trên Chrome thật, và m�
 Luật của mục này giữ nguyên: **một gạch đầu dòng chỉ được đổi sang thì quá khứ khi có lệnh chạy
 được kèm kết quả dán vào.** Dưới đây là chỗ đã đổi được, và chỗ chưa.
 
-Đã có, chạy được: `bash test/run.sh` → **783 test / 25 file**, cộng ba cổng —
+Đã có, chạy được: `bash test/run.sh` → **796 test / 25 file**, cộng ba cổng —
 `tools/verify-live.mjs` và `tools/verify-docs.mjs` nạp chính extension này vào Chrome for
 Testing 151 và chạy trên trang công khai thật; `tools/audit-fake-dom.mjs` đối chiếu cây node giả
 của bộ test với DOM thật và thoát 1 khi còn lệch.
