@@ -90,6 +90,25 @@
     autoCloseTabs: true,
     /** Ghi đè selector/nhãn của NotebookLM khi Google đổi giao diện (JSON). */
     selectorOverrides: null,
+    /**
+     * Thử thêm Nguồn bằng batchexecute trước, hỏng thì rơi xuống đường DOM.
+     *
+     * MẶC ĐỊNH TẮT, và đó là chủ ý chứ không phải quên bật. rpc id, đường
+     * batchexecute và hình dạng `f.req` trong `src/notebooklm/rpc.js` đều mới là
+     * GIẢ THUYẾT chép từ tài liệu cộng đồng — chưa ai đo trên một request thật.
+     * Id sai thì không ghi gì (ta phát hiện rồi rơi xuống DOM), nhưng id ĐÚNG mà
+     * hình dạng payload sai thì server vẫn có thể tạo ra một Nguồn rác, và thêm
+     * Nguồn không idempotent. Bật công tắc này = quyết định ghi thử lên tài
+     * khoản thật, nên nó là việc của owner sau khi chạy
+     * `tools/probe-notebooklm.mjs` trên một notebook nháp.
+     */
+    rpcEnabled: false,
+    /**
+     * Ghi đè rpc id / đường batchexecute / vị trí trong payload (JSON), gộp thêm
+     * theo đúng luật của `selectorOverrides`: mảng thì NỐI vào chứ không thay,
+     * nên dán id mới vào là nó được thử trước còn id cũ vẫn nằm đó làm dự phòng.
+     */
+    rpcOverrides: null,
     /** Hiện checkbox chọn hàng loạt trên trang danh sách. */
     bulkSelectUI: true,
     /**

@@ -60,6 +60,18 @@ Thử RPC trước; RPC hỏng → **tự động rơi xuống đường DOM hi�
 - **`limit`** — hiện nhận diện qua chữ hiển thị (`isLimitError`, `automation.js:171`). Đường RPC
   báo giới hạn 50 nguồn kiểu gì? Nếu không phân biệt được, nói thẳng là chưa phân biệt được.
 
+## Cam kết trong README sẽ thành sai — owner phải duyệt câu thay thế
+
+Lead phát hiện 2026-08-24, sau khi ticket đã viết xong. `README.md:107-109` lập luận rằng bám vào
+`batchexecute` "là bảo đảm sẽ hỏng", rồi cam kết: *"Không đọc, không lưu, không gửi đi cookie hay
+token nào."* Đường RPC phải đọc `at` token từ trang và gửi kèm request, nên **vế "không đọc token"
+thành sai**. (Vế cookie vẫn đúng: same-origin nên Chrome tự gắn, extension không đọc.)
+
+`WORKSPACE_PROTOCOL.md` → `Authority` xếp "đổi cam kết bảo mật ở `README.md:19` và `README.md:107`"
+vào diện **owner quyết**. Peer **không** được tự sửa, cũng **không** được để nguyên rồi im lặng —
+để nguyên là ship một README nói dối. Peer soạn đề xuất câu thay thế trong handback; Lead trình
+owner. **Ticket 001 chưa xong khi câu đó chưa được duyệt.**
+
 ## Không thuộc phạm vi
 
 Xoá/đổi tên Nguồn, tạo notebook, audio overview, đụng phía YouTube.

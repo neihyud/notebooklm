@@ -98,7 +98,16 @@ const SCRIPTS = {
   },
   notebooklm: {
     main: [],
-    isolated: ['src/common/shared.js', 'src/notebooklm/selectors.js', 'src/notebooklm/automation.js', 'src/notebooklm/content.js'],
+    // rpc.js nằm SAU automation.js và TRƯỚC content.js: nó bọc lại
+    // `NBLM_AUTOMATION.addUrlSource`/`addTextSource`, nên phải thấy bản gốc đã
+    // dựng xong, và phải bọc xong trước khi content.js giữ tham chiếu tới nó.
+    isolated: [
+      'src/common/shared.js',
+      'src/notebooklm/selectors.js',
+      'src/notebooklm/automation.js',
+      'src/notebooklm/rpc.js',
+      'src/notebooklm/content.js',
+    ],
     css: ['src/notebooklm/overlay.css'],
     ping: MSG.NLM_PING,
   },

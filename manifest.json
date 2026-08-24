@@ -97,6 +97,7 @@
         "src/common/shared.js",
         "src/notebooklm/selectors.js",
         "src/notebooklm/automation.js",
+        "src/notebooklm/rpc.js",
         "src/notebooklm/content.js"
       ],
       "css": [

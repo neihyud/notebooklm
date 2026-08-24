@@ -27,8 +27,18 @@ const FIXTURE = path.join(__dirname, 'fixtures', 'notebooklm-add-source-state-ma
  *                           được danh sách Nguồn của notebook, vốn không nằm trong bản chụp.
  * @param {boolean} opts.withContentScript nạp thêm `src/notebooklm/content.js` (router tin
  *                           nhắn) và trả về `dispatch()` để gửi tin như background vẫn gửi.
+ * @param {boolean} opts.withRpc nạp thêm `src/notebooklm/rpc.js` — file này BỌC LẠI
+ *                           `NBLM_AUTOMATION`, nên đường DOM bị thay bằng một stub ghi lại
+ *                           lời gọi. Không có stub thì không phân biệt được "đã rơi xuống
+ *                           DOM" với "đã bỏ qua DOM", mà đó chính là thứ cần đo.
+ * @param {object}  opts.settings settings ghi vào storage TRƯỚC khi nạp rpc.js (nó tự đọc).
+ * @param {Function} opts.domStub  thay cho `addUrlSource`/`addTextSource` thật.
  */
-function loadFixture(extraHtml = '', bodyHtml = '', { withContentScript = false } = {}) {
+function loadFixture(
+  extraHtml = '',
+  bodyHtml = '',
+  { withContentScript = false, withRpc = false, settings = null, domStub = null } = {}
+) {
   const fragment = fs.readFileSync(FIXTURE, 'utf8');
 
   // Bản chụp bắt đầu từ `.dialog-container` — phần tử host của Angular Material
@@ -91,6 +101,20 @@ function loadFixture(extraHtml = '', bodyHtml = '', { withContentScript = false 
   load('src/notebooklm/selectors.js');
   load('src/notebooklm/automation.js');
 
+  // Lời gọi xuống đường DOM, theo thứ tự. Phải cài TRƯỚC khi nạp rpc.js: file đó
+  // giữ tham chiếu tới `NBLM_AUTOMATION` ngay lúc nạp, nên thay sau là thay hụt.
+  const domCalls = [];
+  if (withRpc) {
+    if (settings) store[win.NBLM.KEYS.SETTINGS] = JSON.parse(JSON.stringify(settings));
+    const real = win.NBLM_AUTOMATION;
+    const stub = domStub || (async () => ({ ok: false, error: 'đường DOM (stub) không thêm được', limit: false }));
+    win.NBLM_AUTOMATION = Object.assign({}, real, {
+      addUrlSource: (...args) => (domCalls.push({ ten: 'addUrlSource', args }), stub('addUrlSource', args)),
+      addTextSource: (...args) => (domCalls.push({ ten: 'addTextSource', args }), stub('addTextSource', args)),
+    });
+    load('src/notebooklm/rpc.js');
+  }
+
   // Content script chỉ được nạp khi test cần nó: nó gắn listener và một HUD vào
   // DOM, thứ mọi test khác trong file này không quan tâm.
   let dispatch = null;
@@ -102,6 +126,8 @@ function loadFixture(extraHtml = '', bodyHtml = '', { withContentScript = false 
 
   return {
     dispatch,
+    domCalls,
+    R: win.NBLM_RPC || null,
     store,
     /**
      * Bản chụp DOM mà automation.js đã ghi vào storage, theo tình huống.

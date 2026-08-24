@@ -71,6 +71,17 @@
       },
       write: (el, v) => (el.value = v ? JSON.stringify(v, null, 2) : ''),
     },
+
+    rpcEnabled: { el: () => $('rpcEnabled'), read: (el) => el.checked, write: (el, v) => (el.checked = !!v) },
+    rpcOverrides: {
+      el: () => $('rpcOverrides'),
+      read: (el) => {
+        const raw = el.value.trim();
+        if (!raw) return null;
+        return JSON.parse(raw); // như selectorOverrides: lỗi cú pháp bắt ở save()
+      },
+      write: (el, v) => (el.value = v ? JSON.stringify(v, null, 2) : ''),
+    },
   };
 
   async function load() {
@@ -85,7 +96,9 @@
       try {
         patch[key] = field.read(field.el());
       } catch (e) {
-        status.textContent = `JSON ghi đè selector không hợp lệ: ${(e && e.message) || e}`;
+        // Gọi tên đúng ô đang hỏng: có HAI ô JSON trên trang này, mà dòng báo
+        // lỗi thì chỉ nằm dưới một ô. Câu chữ cố định sẽ chỉ owner đi sửa ô kia.
+        status.textContent = `JSON ở ô "${key}" không hợp lệ: ${(e && e.message) || e}`;
         status.classList.add('error');
         return;
       }

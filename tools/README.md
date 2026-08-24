@@ -174,18 +174,25 @@ Transcript đã tải không phụ thuộc gì vào yt-dlp sau đó.
 
 ## Công cụ kiểm chứng
 
-Phần DOM của extension không test tự động được (không có jsdom, và một bộ shim DOM tự viết chỉ tạo cảm giác an toàn giả). Các script này chạy mã nguồn thật trên trang thật.
+Phần chạm mạng thật và DOM thật của Google thì test tự động không với tới. (`jsdom` nay đã có trong repo và `test/dom-harness.js` nạp mã nguồn thật vào DOM dựng từ fixture — nhưng nó không cho `fetch` thật, và một bộ shim tự viết chỉ chứng nhận chính cái shim.) Các script này chạy mã nguồn thật trên trang thật.
 
 | Script | Việc |
 |---|---|
 | `verify-live.mjs` | Nạp `transcript.js` vào trang YouTube thật, chạy `fromPanel()`. Không cần đăng nhập, không cần nạp extension. |
 | `verify-docs.mjs` | Kiểm `extract.js`/`markdown.js` trên 4 bộ tạo docs (Docusaurus, MkDocs, VitePress, Sphinx). |
 | `probe-sidebar.mjs` | Dump điểm `rate()` của mọi ứng viên sidebar trên một trang — dùng khi dò sidebar ra kết quả sai. |
+| `probe-notebooklm.mjs` | Đo rpc id, hình dạng `f.req` và đường lấy token `at` trên tab NotebookLM đã đăng nhập; dump luôn cấu trúc danh sách Nguồn. **Cần đăng nhập, phải nhắm notebook nháp.** Không in cookie/token/nội dung — mọi chuỗi bị che thành `str(<độ dài>)`. |
 
 ```bash
 node tools/verify-live.mjs [videoId]
 node tools/verify-docs.mjs
+node tools/probe-notebooklm.mjs [urlNotebookNhap]
 ```
+
+`probe-notebooklm.mjs` khác ba cái còn lại ở chỗ nó **giữ lại** `--user-data-dir` giữa các lần
+chạy (`NBLM_PROFILE`, mặc định `/tmp/nblm-probe-notebooklm`): NotebookLM đòi đăng nhập, mà hồ sơ
+vứt đi mỗi lần thì owner phải đăng nhập lại mỗi lần. Nó không đọc và không chép hồ sơ Brave/Chrome
+thật của owner. Trình duyệt lấy từ `CHROME_BIN`, không có thì tự dò Brave/Chrome/Chromium.
 
 Ba lỗi thật đã bị `verify-live.mjs` bắt: extension bấm nhầm nút "Transcript" của chính nó, selector trỏ vào layout transcript YouTube đã thay, và `el.click()` không mở được panel. Chi tiết trong README chính, mục *"Ba lỗi mà chỉ trang thật mới lộ ra"*.
 

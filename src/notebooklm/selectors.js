@@ -176,6 +176,10 @@
     BASE,
     FORBIDDEN_WRITE_TARGETS,
     BROAD_FALLBACK_SELECTORS,
+    // Xuất ra vì `rpc.js` cũng phải gộp ghi đè của owner theo ĐÚNG luật này
+    // ("mảng thì nối thêm chứ không thay thế"). Hai bản cài đặt của cùng một
+    // luật sẽ lệch nhau lúc nào không hay; một hàm thì không.
+    merge,
     build(overrides) {
       return merge(BASE, overrides);
     },

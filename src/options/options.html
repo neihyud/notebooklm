@@ -142,6 +142,31 @@
   </section>
 
   <section>
+    <h2>Đường RPC thêm Nguồn <span class="tag">thử nghiệm</span></h2>
+    <p class="hint">
+      Thay vì bấm qua hộp thoại, extension gọi thẳng backend NotebookLM (<code>batchexecute</code>)
+      từ chính tab đã đăng nhập của bạn. Nhanh hơn nhiều, nhưng <strong>rpc id và hình dạng
+      request là thứ Google đổi không báo trước</strong> — hỏng thì extension tự quay lại đường
+      bấm giao diện, bạn chỉ thấy chậm hơn.
+    </p>
+    <p class="hint">
+      <strong>Chỉ bật sau khi đã đo trên một notebook nháp.</strong> Chạy
+      <code>node tools/probe-notebooklm.mjs</code>, dán các giá trị đo được vào ô dưới, rồi mới bật.
+      Bật khi hình dạng request còn sai có thể tạo ra một Nguồn rác phải xoá tay.
+    </p>
+    <label class="check"><input type="checkbox" id="rpcEnabled"> Thử đường RPC trước, hỏng thì rơi xuống đường bấm giao diện</label>
+    <p class="hint">
+      Ghi đè rpc id / đường gọi / vị trí trong payload. Mảng được <em>gộp thêm</em> vào danh sách
+      mặc định và giá trị bạn thêm được thử trước, nên id cũ vẫn nằm đó làm dự phòng.
+    </p>
+    <textarea id="rpcOverrides" rows="8" spellcheck="false" placeholder='{
+  "addSourceIds": ["id-moi-doc-tu-probe"],
+  "paths": ["/_/LabsTailwindUi/data/batchexecute"],
+  "slots": { "url": 2, "youtubeUrl": 7 }
+}'></textarea>
+  </section>
+
+  <section>
     <h2>Bản chụp cấu trúc DOM <span class="tag">gỡ lỗi</span></h2>
     <p class="hint">
       Khi extension <strong>không tìm được</strong> ô nhập, nút xác nhận, hay danh sách Nguồn trong
