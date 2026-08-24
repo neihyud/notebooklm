@@ -38,9 +38,15 @@ mã loại chỉ tồn tại với văn bản dán. Còn **hai chỗ lệch** v�
 `rpc.js` dựng `[ [[spec]], notebookId, [2,null,null,[1,null×9,[1]]] ]`; extension gửi
 `[ [spec], notebookId, [2], [1,null×9,[1]] ]`. Cùng các thành phần, khác cách nhóm.
 
-Đáng lưu ý: nghi thức hoán vị của peer chấm "bọc đôi → bọc đơn = 12 đỏ". Nếu bọc đơn mới đúng thì
-**12 assertion đó đang ghim một hình dạng sai** — đúng cái bẫy "test ghim hằng số chép tay".
-Chỉ probe trên tab thật mới phân xử được; cả hai đều là oracle bên thứ ba.
+**Đã giải quyết ở `25fde66`, và cách giải đáng giữ lại hơn cả kết luận.** Peer không chọn bên. Nó
+biến cách nhóm thành **dữ liệu** — `argsShape`, ghi đè được từ trang Cài đặt, thay nguyên khối chứ
+không gộp. Test không còn khẳng định hình dạng nào đúng; nó khẳng định owner **đổi được**: dán biến
+thể 3 ô/bọc đôi vào override thì request đi ra đúng 3 ô và đúng 2 lớp bọc, kèm đối chứng rằng bản
+mặc định phải khác bản ghi đè để khối đó không xanh giả.
+
+Số assertion ghim hình dạng: **0**. Ranh giới nay đúng chỗ — hợp đồng của ta thì test bịt được
+(thứ ta định gửi có tới đúng ô mà bản mô tả nói không), hằng số ngoại sinh thì không, và không giả
+vờ bịt. Bốn dòng `0 đỏ` trong bảng hoán vị của peer là kết quả mong muốn, không phải chỗ hở.
 
 **2. Thứ tự `addSourceIds`.**
 
@@ -53,8 +59,13 @@ cộng đồng — vẫn dùng `izAoDd`. Chưa có bằng chứng nào cho `ozz5
 Rủi ro thấp (id sai chỉ tốn một request thừa), nhưng thứ tự nên theo bằng chứng mạnh nhất.
 
 **3. Tham số URL.** Ngoài `rpcids`, `source-path`, `_reqid`, `rt`, extension còn gửi `bl`
-(build label, từ `WIZ_global_data.cfb2h`), `f.sid` (từ `FdrFJe`) và `hl`. `rpc.js` không gửi.
-Chưa rõ cái nào bắt buộc — cần đo.
+(build label, từ `WIZ_global_data.cfb2h`), `f.sid` (từ `FdrFJe`) và `hl`. `rpc.js` **cố ý chưa
+gửi** — chưa biết cái nào bắt buộc, và thêm ba tham số đoán là mở rộng bề mặt giả thuyết đúng lúc
+đang thu hẹp nó. Nếu hoá ra cần thì đọc từ trang, đừng chép hằng số như họ (`bl` của họ là một
+build label từ 2025-09-02, đã mục).
+
+`tools/probe-notebooklm.mjs` ghi lại `params` của request thật, nên **một lượt chạy của owner phân
+xử được cả cách nhóm `args` lẫn ba tham số này**.
 
 ## Chỗ `rpc.js` làm TỐT HƠN — đừng đánh đổi khi sửa
 

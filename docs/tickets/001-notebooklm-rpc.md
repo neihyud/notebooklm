@@ -1,6 +1,8 @@
 # 001 — Đường RPC cho việc thêm Nguồn, giữ DOM làm fallback
 
-- status: **ĐANG GIAO** — owner duyệt hướng "làm" ngày 2026-08-24. Lead giao peer cùng ngày.
+- status: **ĐÃ NHẬN 2026-08-24** — commit `25fde66`, chưa push. Còn MỘT việc mở và nó thuộc owner:
+  chạy `node tools/probe-notebooklm.mjs <url-notebook-nhap>` để phân xử cách nhóm `args` và ba
+  tham số `bl`/`f.sid`/`hl`. Tới lúc đó `rpcEnabled` vẫn tắt mặc định — đúng như thiết kế.
 - blocked-by: **không còn**. 002 và 003 đã DONE và nghiệm thu, 004 cũng vậy; hai peer đã archive.
   Working tree sạch, đang ở nhánh `fix/dan-dung-o-nhap` (3 commit). Bạn là writer DUY NHẤT.
 - owner đã duyệt: hạng "architecture lock-in", owner chọn **làm** ngày 2026-08-24 sau khi đọc
@@ -43,6 +45,16 @@ Thử RPC trước; RPC hỏng → **tự động rơi xuống đường DOM hi�
 5. Không log, không lưu, không gửi `at` token hay cookie đi đâu ngoài chính request tới
    `notebooklm.google.com`.
 
+## CẬP NHẬT 2026-08-24 — hình dạng payload đã có bằng chứng thật
+
+`docs/notebooklm-rpc-do-duoc.md` ghi lại đặc tả đọc được từ một extension đang bán trên Web Store.
+Nó xác nhận `izAoDd`, đường batchexecute và vỏ `f.req` là đúng, nhưng chỉ ra **bốn sai lệch làm
+`buildParams()` hiện tại gần như chắc chắn không chạy** — thiếu ba phần tử ngoài của `args`, URL
+đơn nằm ở ô 7 chứ không phải ô 2, thiếu ô 10, thiếu `bl`/`f.sid`/`hl`.
+
+Đọc file đó trước khi sửa. Nó **không thay** yêu cầu phát hiện lúc chạy: đây vẫn là quan sát một
+thời điểm của một bên thứ ba, không phải hợp đồng.
+
 ## Điểm cần đo, không đoán
 
 - **`at` token (CSRF) lấy thế nào.** Nó nằm trong `WIZ_global_data` của trang. Content script chạy
@@ -70,7 +82,20 @@ thành sai**. (Vế cookie vẫn đúng: same-origin nên Chrome tự gắn, ext
 `WORKSPACE_PROTOCOL.md` → `Authority` xếp "đổi cam kết bảo mật ở `README.md:19` và `README.md:107`"
 vào diện **owner quyết**. Peer **không** được tự sửa, cũng **không** được để nguyên rồi im lặng —
 để nguyên là ship một README nói dối. Peer soạn đề xuất câu thay thế trong handback; Lead trình
-owner. **Ticket 001 chưa xong khi câu đó chưa được duyệt.**
+owner.
+
+**GIẢI QUYẾT XONG 2026-08-24.** Lead soạn, owner duyệt, đã ghi vào `README.md` — mục "Cơ chế đẩy
+vào NotebookLM" nay mô tả cả hai đường và tách bạch cookie (không đọc, không lưu) với token `at`
+(có đọc, chỉ vào thân request tới chính origin đó). Peer **không phải làm gì thêm cho mục này**;
+nếu handback có đề xuất câu chữ riêng thì so với bản đã ghi rồi hãy nói.
+
+## Đường đo không nhất thiết là terminal
+
+`tools/probe-notebooklm.mjs` bắt owner mở Chrome riêng và đăng nhập lại — đó là hệ quả của cách
+ticket này được viết (neo vào tiền lệ `tools/verify-live.mjs`), không phải ràng buộc kỹ thuật.
+`docs/tickets/002-notebooklm-bridge-tu-do.md` mở đường đo ngay trong extension. Ticket 001 **không
+phải sửa gì** vì việc đó; chỉ là khi 002 xong thì mục "Điểm cần đo" trên đây có hai đường trả lời
+chứ không phải một.
 
 ## Không thuộc phạm vi
 
