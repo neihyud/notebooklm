@@ -104,9 +104,21 @@ Phần thân bài được chọn bằng danh sách selector quen thuộc (`.the
 
 ## Cơ chế đẩy vào NotebookLM
 
-NotebookLM bản consumer **không có API công khai**. Giao diện của nó nói chuyện với backend qua `batchexecute` với các RPC id mà Google xoay vòng không báo trước — bám vào đó là bảo đảm sẽ hỏng.
+NotebookLM bản consumer **không có API công khai**. Giao diện của nó nói chuyện với backend qua `batchexecute`, với các RPC id mà Google xoay vòng không báo trước. Extension đi được cả hai đường, và mặc định đi đường chậm.
 
-Extension vì thế thao tác đúng như người dùng thật: bấm *Thêm nguồn* → chọn loại → điền → bấm *Chèn*, ngay trong tab bạn đã đăng nhập. Không đọc, không lưu, không gửi đi cookie hay token nào.
+**Đường giao diện** (mặc định): thao tác đúng như người dùng thật — bấm *Thêm nguồn* → chọn loại → điền → bấm *Chèn*, ngay trong tab bạn đã đăng nhập.
+
+**Đường RPC** (tắt sẵn, bật trong Cài đặt): gọi thẳng `batchexecute` từ chính tab đó. Nhanh hơn nhiều. Nó *sẽ* hỏng vào một ngày nào đó — nên nó được viết để hỏng an toàn, và "an toàn" ở đây có nghĩa hẹp hơn "luôn chạy tiếp".
+
+Extension chỉ coi là "đã thêm" khi server trả về một frame mang **đúng RPC id vừa gửi** — đó cũng là cách nó biết Google đã xoay id. Sau đó có ba kết cục, không phải hai:
+
+- **Chắc chắn chưa ghi gì** (id đã lỗi thời, thiếu token, server từ chối trước khi làm) → lượt đó tự rơi xuống đường giao diện, bạn chỉ thấy chậm hơn.
+- **Đã ghi xong** → tiếp mục sau.
+- **Không biết** (mất mạng giữa chừng, server lỗi, phản hồi không đọc được) → **dừng mục đó và báo bạn tự mở notebook kiểm**. Đây là chủ ý: thêm Nguồn không idempotent, chạy lại đường giao diện cho một request có thể đã tới nơi là để lại một bản trùng phải xoá tay.
+
+> **Cam kết:** extension **không đọc, không lưu cookie nào**. Cả hai đường đều chạy trong tab `notebooklm.google.com` bạn đã đăng nhập, nên trình duyệt tự gắn cookie phiên — `manifest.json` không xin quyền `cookies`.
+>
+> Đường RPC có đọc token CSRF `at` mà trang tự nhúng sẵn, vì backend từ chối request thiếu nó. Token đó **chỉ đi vào thân request gửi tới chính `notebooklm.google.com`**: không vào bộ nhớ extension, không vào log, không vào bản chụp gỡ lỗi (bản chụp chỉ ghi *có tìm thấy hay không* và tên khoá chứa nó), và không ra khỏi origin đó.
 
 Vài chi tiết đáng lưu ý trong `src/notebooklm/automation.js`:
 

@@ -38,10 +38,42 @@ vì backend NotebookLM không có phiên đăng nhập của người dùng.
 
 **Chính sách đưa vào**:
 Public → Dán link. Private → Dán text.
-Unlisted chưa chốt.
+Unlisted: trong Hàng đợi thì theo cài đặt của người dùng; nhưng **không bao giờ** vào một
+Bó link — xem **Đường trao tay**.
 
-Lưu ý: **Dán link** và **Dán text** là *chính sách* — đưa cái gì vào. Chúng không nói
-gì về *cách* đưa. Hai thứ đó tách nhau, xem "Đường đưa vào" ngay dưới.
+Lưu ý: **Dán link** và **Dán text** là *chính sách* — đưa cái gì vào. Chúng không nói gì về
+*cách* đưa, cũng không nói *ai* đưa. Ba thứ tách nhau: xem "Ai đưa vào" và "Đường đưa vào"
+ngay dưới.
+
+### Ai đưa vào
+
+Trục này trả lời "ai thao tác". Nó tách hẳn với "Đường đưa vào" ngay dưới, vốn trả lời
+"extension thao tác kiểu gì". Đừng nhét Đường trao tay vào làm thành viên thứ ba của trục đó:
+nó không phải một kiểu thao tác của extension, nó là chỗ extension **ngừng** thao tác.
+
+**Extension đưa**:
+Extension tự hoàn tất việc thêm Nguồn, qua Đường giao diện hoặc Đường nhanh, rồi đối chiếu
+số Nguồn trước/sau để biết mình có làm được hay không.
+
+**Đường trao tay**:
+Extension gom link, ghi vào clipboard, rồi dừng. Người dùng tự dán vào NotebookLM. Extension
+không biết họ có dán hay không, và dán rồi có vào hay không.
+_Tránh_: "đường tự dán" — "dán" trong glossary này đã là tên của *chính sách* (Dán link, Dán
+text); mượn lại cho tên đường là trộn đúng hai thứ mục trên vừa tách ra.
+Quan hệ với **Không biết**: một Bó link đã trao tay ở *vĩnh viễn* trong trạng thái đó. Khác
+nhau ở chỗ Không biết là một tai nạn hiếm của Extension đưa, còn ở đây nó là thiết kế — nên
+Đường trao tay không bao giờ đạt tới "xong", và không được vờ như có.
+
+**Bó link**:
+Thứ nằm trong clipboard sau một lần trao tay: các URL trần, mỗi dòng một cái, không tiêu đề,
+không chú thích. Một Bó link luôn mang chính sách Dán link và không bao giờ mang Dán text.
+_Tránh_: "danh sách link" — Hàng đợi cũng là một danh sách; Bó link thì rời khỏi extension
+ngay khi sinh ra.
+
+**Sổ đã copy**:
+Ghi lại từng Bó link đã trao tay: URL nào, lúc nào, gom từ đâu. Tồn tại để chống trùng.
+_Tránh_: coi nó là một phần của Hàng đợi. Mục trong Hàng đợi có vòng đời extension điều khiển
+tới cùng; dòng trong Sổ đã copy kết thúc ngay lúc được ghi.
 
 ### Đường đưa vào
 
@@ -58,9 +90,18 @@ _Tránh_: "API" — NotebookLM bản consumer không có API công khai; đây l
 và gọi nó là API tạo cảm giác có hợp đồng, thứ không hề tồn tại.
 
 **Rơi xuống**:
-Đường nhanh hỏng thì Mục đó tự chuyển sang Đường giao diện, Lượt chạy không dừng.
-Đây là ràng buộc chứ không phải tối ưu: Đường nhanh bám vào định danh mà Google xoay
-không báo trước, nên nó *sẽ* hỏng, và ngày nó hỏng không được là ngày extension chết.
+Đường nhanh hỏng *theo kiểu chắc chắn chưa ghi gì* thì Mục đó tự chuyển sang Đường
+giao diện, Lượt chạy không dừng. Đây là ràng buộc chứ không phải tối ưu: Đường nhanh
+bám vào định danh mà Google xoay không báo trước, nên nó *sẽ* hỏng, và ngày nó hỏng
+không được là ngày extension chết.
+_Tránh_: hiểu Rơi xuống là "hỏng thì luôn chạy tiếp" — xem Không biết.
+
+**Không biết**:
+Backend đã thấy lệnh nhưng ta không đọc được kết quả. Không phải thất bại, cũng không
+phải thành công — và **không được Rơi xuống**, vì thêm Nguồn không idempotent: chạy lại
+Đường giao diện cho một lệnh có thể đã tới nơi là để lại một Nguồn trùng phải xoá tay.
+Mục đó dừng, và người dùng được bảo tự mở notebook kiểm.
+_Tránh_: gộp vào "lỗi" — lỗi thì thử lại được, Không biết thì không.
 
 ### Vận hành
 

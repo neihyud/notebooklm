@@ -141,6 +141,14 @@ So sánh alternatives + ghi rõ điều kiện đảo ngược trước khi vi�
      nào* (spy trên `NBLM_AUTOMATION`), không assert giá trị trả về — hai nhánh trả cùng hình
      dạng `{ok, error}` nên assert kết quả cho xanh giả.
      Bài học chung: **danh sách hoán vị của peer là bản đồ chỗ nó đã soi, không phải bản án.**
+  5. **Một hình dạng hở mà nghi thức hoán vị KHÔNG đóng được** (đo trên ticket 001-RPC, 2026-08-24).
+     Khi cả hai vế của cặp đều là *bản đồ ngoại sinh của chính ta* — `paramSlots.sources ↔
+     notebookId` (0↔1), `slots.url ↔ slots.youtubeUrl` (2↔7) — mọi assertion buộc phải đọc lại
+     chính bản đồ vừa bị hoán vị, nên hoán vị không sinh ra đỏ. Ghim con số vào test chỉ là chép
+     tay hằng số khoác áo test, và ràng buộc "không ghim id" cấm đúng việc đó.
+     Ở acceptance **đừng đòi peer bịt bằng test**. Đòi hai thứ khác: một oracle độc lập nói con số
+     đó đúng, và một cơ chế phát hiện lúc chạy khi nó sai. "Không đóng được bằng test" là câu trả
+     lời hợp lệ — im lặng thì không.
 
   Trạng thái đo thật 2026-08-23, **sau** ticket selector — trước đó cả bốn cặp dưới đều hoán vị mà suite vẫn xanh:
   5. `S.css.urlInput` ↔ `S.css.textArea` — **ĐÃ CÓ LƯỚI**. Lead tự hoán vị: **5 test đỏ**, gồm
