@@ -288,8 +288,33 @@ function loadYouTubePage({
 
   const store = {};
   const sent = [];        // mọi chrome.runtime.sendMessage, theo thứ tự
-  let respond = () => ({});
   let router = null;
+
+  /*
+   * Câu trả lời mặc định của background: "kho rỗng, mọi thứ thành công".
+   *
+   * Đây KHÔNG phải mô phỏng service worker — nó là trạng thái ban đầu thật: Sổ
+   * đã copy rỗng và Hàng đợi rỗng, nên cửa 2 không có gì để loại. Luật khoá thật
+   * được đo ở `copied-log.test.js`, chạy trên chính `service-worker.js`.
+   *
+   * Test nào cần một background cư xử khác thì gọi `reply()` và tự lo MỌI loại
+   * tin — kể cả `bundle-filter`. Cố tình không để harness lặng lẽ vá phần thiếu:
+   * một `reply()` trả `{added: 1}` cho mọi tin sẽ biến cửa 2 thành "loại sạch",
+   * và test sẽ đỏ ở chỗ không liên quan gì tới thứ nó đang đo.
+   */
+  const defaultReply = (message) => {
+    const type = message && message.type;
+    if (type === 'bundle-filter') {
+      return { keep: message.urls || [], dropped: [], counts: { copied: 0, queued: 0 } };
+    }
+    if (type === 'bundle-copied') return { added: (message.urls || []).length };
+    if (type === 'enqueue') {
+      const n = (message.items || []).length;
+      return { added: n, skipped: 0, total: n };
+    }
+    return {};
+  };
+  let respond = defaultReply;
 
   win.chrome = {
     runtime: {
@@ -381,6 +406,10 @@ function loadYouTubePage({
     calls,
     tick,
     /** Đặt câu trả lời của background cho lần sendMessage tiếp theo. */
+    /**
+     * Ghi đè HOÀN TOÀN câu trả lời của background — xem `defaultReply` ở trên để
+     * biết mình đang thay cái gì.
+     */
     reply: (fn) => (respond = typeof fn === 'function' ? fn : () => fn),
     /** Gửi một tin như background vẫn gửi; trả về đúng object content script đáp lại. */
     dispatch: (message) => new Promise((resolve) => router(message, {}, resolve)),

@@ -21,7 +21,7 @@ importScripts('/src/common/shared.js', '/src/youtube/srt.js');
 
 const {
   MSG, STATUS, PRIVACY, KIND, KEYS, DEFAULTS,
-  getSettings, getQueue, setQueue,
+  getSettings, getQueue, setQueue, getCopiedLog,
   uid, sleep, videoIdFrom, canonicalUrl, parseUrlList,
   docKey, urlLabel,
   buildSourceText, sourceTitle,
@@ -505,6 +505,110 @@ function normalize(raw) {
     privacy: raw.privacy || PRIVACY.UNKNOWN,
     hasCaptions: raw.hasCaptions,
   });
+}
+
+/* -------------------------------------------------------------------- */
+/* Sổ đã copy — cửa 2 của Đường trao tay                                 */
+/* -------------------------------------------------------------------- */
+
+/**
+ * Khoá của một URL trong Bó link, nói CÙNG ngôn ngữ với `itemKey()`.
+ *
+ * Phải cùng ngôn ngữ vì cửa 2 tra cả Sổ lẫn Hàng đợi — hai kho, một luật khoá.
+ * Đó cũng là lý do hàm này sống ở service worker chứ không ở `shared.js`:
+ * `itemKey()` là hàm cục bộ của file này, và chép nó sang chỗ khác là dựng đúng
+ * hình dạng "đường dữ liệu song song" mà repo đã dính một lần.
+ *
+ * Lưu ý về `videoIdFrom`: nó nhận cả id trần 11 ký tự, nên `bundleKey('javascripts')`
+ * ra `yt:javascripts`. Ở đây không thành lỗi vì đầu vào luôn là URL đầy đủ do
+ * chính `canonicalUrl`/`usableUrl` dựng ra — nhưng đừng mở hàm này cho text tự do
+ * (xem `docs/tickets/007-parseurllist-nuot-link.md`).
+ */
+function bundleKey(url) {
+  const videoId = videoIdFrom(url);
+  if (videoId) return `yt:${videoId}`;
+  return docKey(url);
+}
+
+/**
+ * Cửa 2 — khử trùng một Bó link trước khi nó tới clipboard.
+ *
+ * Tra HAI kho:
+ *   - Sổ đã copy: mọi dòng, không trừ gì.
+ *   - Hàng đợi: mọi Mục TRỪ `ERROR`.
+ *
+ * Ngoại lệ `ERROR` là một quyết định, không phải sao chép `enqueue()` cho tiện:
+ * một Mục `ERROR` nghĩa là Lượt chạy đã thử và không đưa được nó vào NotebookLM
+ * — mà đó chính là ca Đường trao tay sinh ra để cứu. Chặn nó ở đây là chặn đúng
+ * ca cần nhất. Đổi lại, người dùng có thể copy một link đã từng thất bại; giá đó
+ * rẻ hơn hẳn.
+ *
+ * `dropped` KHÔNG bị nuốt: nó quay về bề mặt kèm lý do, và bề mặt phải cho một
+ * cách bấm để copy lại cả những cái đã có. Im lặng bỏ link là đúng lỗi
+ * `sidebar.js` đã dính hai lần.
+ */
+async function filterBundle(urls) {
+  const [queue, copied] = await Promise.all([getQueue(), getCopiedLog()]);
+
+  const inLog = new Set(copied.map((row) => row.key).filter(Boolean));
+  const inQueue = new Set(
+    queue.filter((i) => i.status !== STATUS.ERROR).map(itemKey).filter(Boolean)
+  );
+
+  const keep = [];
+  const dropped = [];
+  const seen = new Set();
+
+  for (const url of urls || []) {
+    const key = bundleKey(url);
+    if (!key) continue;
+    if (seen.has(key)) continue;      // trùng ngay trong chính Bó này
+    seen.add(key);
+
+    if (inLog.has(key)) dropped.push({ url, why: 'copied' });
+    else if (inQueue.has(key)) dropped.push({ url, why: 'queued' });
+    else keep.push(url);
+  }
+
+  return {
+    keep,
+    dropped,
+    counts: {
+      copied: dropped.filter((d) => d.why === 'copied').length,
+      queued: dropped.filter((d) => d.why === 'queued').length,
+    },
+  };
+}
+
+/**
+ * Ghi Sổ — gọi SAU khi `writeText` đã thành công, không bao giờ trước.
+ *
+ * Thứ tự này bắt buộc: `writeText` từ chối được (trang không được focus), và ghi
+ * Sổ trước khi copy xong là để Sổ nói dối. Lần sau nó sẽ lọc mất đúng những link
+ * chưa bao giờ tới clipboard, và người dùng không có cách nào biết.
+ */
+async function recordCopied(urls, from) {
+  const log = await getCopiedLog();
+  const known = new Set(log.map((row) => row.key).filter(Boolean));
+  const at = Date.now();
+
+  let added = 0;
+  for (const url of urls || []) {
+    const key = bundleKey(url);
+    if (!key || known.has(key)) continue;
+    known.add(key);
+    log.push({ key, url, at, from: from || '' });
+    added++;
+  }
+  await chrome.storage.local.set({ [KEYS.COPIED]: log });
+  notifyPopup();
+  return { added, total: log.length };
+}
+
+async function clearCopied() {
+  await chrome.storage.local.remove(KEYS.COPIED);
+  notifyPopup();
+  return { ok: true };
 }
 
 async function enqueue(items) {
@@ -1382,6 +1486,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return;
         }
 
+        /*
+         * Cửa 2 của Đường trao tay. Bề mặt hỏi "những link này đã copy hoặc đã
+         * xếp hàng chưa"; service worker trả lời, KHÔNG ghi gì. Sổ chỉ được ghi
+         * ở `BUNDLE_COPIED` bên dưới, sau khi clipboard đã nhận thật.
+         */
+        case MSG.BUNDLE_FILTER:
+          sendResponse(await filterBundle(message.urls || []));
+          return;
+
+        case MSG.BUNDLE_COPIED:
+          sendResponse(await recordCopied(message.urls || [], message.from));
+          return;
+
+        case MSG.CLEAR_COPIED:
+          sendResponse(await clearCopied());
+          return;
+
         case MSG.OPEN_OPTIONS:
           chrome.runtime.openOptionsPage();
           sendResponse({ ok: true });
@@ -1541,7 +1662,10 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 // Xuất ra để test (và DevTools console) quan sát được phần chờ-ghi-xong-file;
 // đây là chỗ duy nhất trong service worker có kết quả không suy ra được từ storage.
-self.NBLM_SW_INTERNALS = { awaitDownloadComplete, saveFile, runQueue, DOWNLOAD_TIMEOUT_MS, ITEM_TIMEOUT_MS };
+self.NBLM_SW_INTERNALS = {
+  awaitDownloadComplete, saveFile, runQueue, DOWNLOAD_TIMEOUT_MS, ITEM_TIMEOUT_MS,
+  bundleKey, filterBundle, recordCopied, clearCopied, enqueue,
+};
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (helper.tabId === tabId) {

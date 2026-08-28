@@ -34,6 +34,10 @@
     DOCS_PANEL: 'docs-panel',     // mở bảng chọn link
     DOCS_FETCH: 'docs-fetch',     // tải URL khác bằng fetch rồi trích (không rời trang)
     DOCS_READ: 'docs-read',       // trích ngay từ DOM đang hiển thị
+    // Đường trao tay: bề mặt -> background -> bề mặt
+    BUNDLE_FILTER: 'bundle-filter',   // {urls} -> {keep, dropped} (cửa 2: khử trùng)
+    BUNDLE_COPIED: 'bundle-copied',   // báo NGƯỢC sau khi writeText xong -> ghi Sổ
+    CLEAR_COPIED: 'clear-copied',     // xoá Sổ đã copy
     // popup -> background
     OPEN_DOCS_PANEL: 'open-docs-panel',
     COLLECT_TABS: 'collect-tabs',             // gom mọi tab YouTube đang mở
@@ -69,6 +73,16 @@
     RUNNING: 'running',
     /** Bản chụp cấu trúc DOM khi extension lạc đường — xem getDomReports(). */
     DOM_REPORTS: 'domReports',
+    /**
+     * Sổ đã copy — xem getCopiedLog().
+     *
+     * `local`, không phải `sync`, và đó là ràng buộc chứ không phải sở thích:
+     * `sync` có hạn ngạch ~8KB mỗi item, nên Sổ sẽ chặn ở khoảng trăm dòng đầu
+     * rồi ghi hỏng IM LẶNG — trong khi theo thiết kế Sổ chỉ có lớn lên. Cả repo
+     * dùng `local` (0 chỗ gọi `sync`) và `unlimitedStorage` ở `manifest.json:9`
+     * chỉ áp cho `local`.
+     */
+    COPIED: 'copiedLog',
   };
 
   const DEFAULTS = {
@@ -190,6 +204,20 @@
 
   async function clearDomReports() {
     await chrome.storage.local.remove(KEYS.DOM_REPORTS);
+  }
+
+  /**
+   * Sổ đã copy: mỗi dòng là một URL đã thật sự tới clipboard.
+   *
+   * Câu nó trả lời là *"cái này copy rồi chưa"* — không phải "cái này đã vào
+   * NotebookLM chưa". Extension không biết người dùng có dán hay không, và dán
+   * rồi có vào hay không; Sổ ghi đúng cái nó chứng kiến được, không hơn.
+   *
+   * Chỉ service worker được GHI (xem `recordCopied`); mọi bề mặt khác đọc.
+   */
+  async function getCopiedLog() {
+    const got = await chrome.storage.local.get(KEYS.COPIED);
+    return Array.isArray(got[KEYS.COPIED]) ? got[KEYS.COPIED] : [];
   }
 
   async function getQueue() {
@@ -603,6 +631,7 @@
     MSG, STATUS, PRIVACY, KIND, KEYS, DEFAULTS,
     getSettings, setSettings, getQueue, setQueue,
     getDomReports, saveDomReport, clearDomReports,
+    getCopiedLog,
     videoIdFrom, canonicalUrl, parseUrlList,
     docKey, isHashRoute, urlLabel,
     BUNDLE, badgeRejects, bundleVerdict, mapWithLimit,

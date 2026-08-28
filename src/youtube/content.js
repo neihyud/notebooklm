@@ -99,6 +99,13 @@
   const BUNDLE_BREAKER = 3;
 
   /**
+   * Link bị cửa 2 loại ở lượt gần nhất — nguyên liệu cho "copy lại cả những cái
+   * đã có". Giữ ở đây chứ không hỏi lại service worker: danh sách phải là đúng
+   * cái người dùng vừa được báo, không phải một danh sách tính lại sau đó.
+   */
+  let lastDropped = [];
+
+  /**
    * Ba cửa, theo đúng thứ tự — và thứ tự này là nội dung chứ không phải cách xếp:
    *
    *   cửa 1  huy hiệu, miễn phí, CHỈ ĐƯỢC LOẠI
@@ -164,45 +171,82 @@
    * Ba lý do bị loại được đếm RIÊNG. "Đã copy 0 link" là câu vô nghĩa; "cả 12
    * link đều private" thì hành động được.
    */
-  async function handOff(candidates, { verb = 'Đã copy' } = {}) {
+  /**
+   * @param {boolean} opts.skipDedupe bỏ qua cửa 2 — dành cho nút "copy lại cả
+   *   những cái đã có". Nó KHÔNG bỏ qua cửa 3: danh sách của nút đó là `dropped`,
+   *   thứ chưa bao giờ đi qua cửa 3, và cửa 3 lại đẩy video bị loại sang Hàng đợi
+   *   mà cửa 2 thì tra Hàng đợi — nên đúng video private vừa bị chặn sẽ nằm trong
+   *   `dropped` ở lượt sau. Vòng lặp tự đóng nếu ai đó nới cái neo này.
+   */
+  async function handOff(candidates, { verb = 'Đã copy', from = '', skipDedupe = false } = {}) {
     const { urls, restricted, unknown, tripped } = await buildBundle(candidates);
     const leftover = restricted.concat(unknown);
 
-    if (!urls.length) {
+    // Cửa 2 — khử trùng. Chạy SAU cửa 3 vì chỉ link đã được cấp phép mới đáng
+    // đem đi tra, và service worker là chỗ duy nhất cầm luật khoá.
+    let keep = urls;
+    let dropped = [];
+    if (urls.length && !skipDedupe) {
+      const res = await send(MSG.BUNDLE_FILTER, { urls });
+      if (res && res.error) {
+        toast(`Không tra được Sổ đã copy: ${res.error}`, 'error');
+        return { copied: 0, error: res.error };
+      }
+      keep = (res && res.keep) || [];
+      dropped = (res && res.dropped) || [];
+    }
+    lastDropped = dropped.length ? dropped.map((d) => d.url) : [];
+
+    if (!keep.length) {
       const why = [];
       if (restricted.length) why.push(`${restricted.length} video private/unlisted`);
       if (unknown.length) why.push(`${unknown.length} video không hỏi được`);
+      if (dropped.length) why.push(`${dropped.length} link đã có trong Sổ hoặc Hàng đợi`);
       toast(
         why.length
-          ? `Không link nào vào được Bó: ${why.join(' · ')}. Tất cả đã vào Hàng đợi.`
+          ? `Không link nào vào được Bó: ${why.join(' · ')}.${dropped.length ? ' Bấm lại nút này lần nữa để copy cả những cái đã có.' : ' Tất cả đã vào Hàng đợi.'}`
           : 'Không có video nào để copy.',
         'warn'
       );
       if (leftover.length) await enqueueLeftover(leftover);
-      return { copied: 0, restricted: restricted.length, unknown: unknown.length };
+      return { copied: 0, restricted: restricted.length, unknown: unknown.length, dropped: dropped.length };
     }
 
+    const urlsToCopy = keep;
     try {
       // `await` xong mới được làm gì tiếp — đóng giao diện trước khi clipboard
       // ghi xong là mất trắng nội dung.
-      await navigator.clipboard.writeText(urls.join('\n'));
+      await navigator.clipboard.writeText(urlsToCopy.join('\n'));
     } catch (e) {
       // Clipboard API từ chối khi tài liệu không được focus. Nói ra đường thủ
       // công thay vì im lặng nuốt — người dùng đang đứng trước một cái nút vừa
       // bấm mà không có gì xảy ra.
       toast(`Không ghi được clipboard (${(e && e.message) || e}) — tất cả đã vào Hàng đợi.`, 'error');
+      // Sổ KHÔNG được ghi ở nhánh này. Clipboard chưa nhận gì cả.
+
       await enqueueLeftover(candidates.filter((c) => c && c.videoId));
       return { copied: 0, restricted: restricted.length, unknown: unknown.length, clipboardFailed: true };
     }
 
-    const parts = [`${verb} ${urls.length} link công khai`];
+    // Ghi Sổ SAU khi clipboard đã nhận thật — ghi trước là để Sổ nói dối, và lần
+    // sau nó lọc mất đúng những link chưa bao giờ tới clipboard.
+    await send(MSG.BUNDLE_COPIED, { urls: urlsToCopy, from: from || pageCtx.title || location.href });
+
+    const parts = [`${verb} ${urlsToCopy.length} link công khai`];
     if (restricted.length) parts.push(`${restricted.length} private/unlisted → Hàng đợi`);
     if (unknown.length) parts.push(`${unknown.length} không hỏi được → Hàng đợi`);
+    if (dropped.length) parts.push(`${dropped.length} bỏ vì đã có trong Sổ`);
     if (tripped) parts.push('đã dừng hỏi vì YouTube liên tục từ chối');
     toast(parts.join(' · '), 'ok');
 
     if (leftover.length) await enqueueLeftover(leftover);
-    return { copied: urls.length, restricted: restricted.length, unknown: unknown.length, tripped };
+    return {
+      copied: urlsToCopy.length,
+      restricted: restricted.length,
+      unknown: unknown.length,
+      dropped: dropped.length,
+      tripped,
+    };
   }
 
   /** Xếp hàng phần bị loại, im lặng — người dùng đã đọc con số ở toast của Bó rồi. */

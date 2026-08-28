@@ -38,6 +38,15 @@ const eq = (got, want, m) =>
  */
 const sentItems = (h, i = 0) => ((h.sent[i] && h.sent[i].items) || []);
 
+/*
+ * Từ mục 3 trở đi, một cú bấm copy gửi tới BA loại tin: `bundle-filter` (cửa 2),
+ * `bundle-copied` (ghi Sổ), và `enqueue` cho phần bị loại. Đọc `h.sent[0]` là
+ * đọc nhầm tin — lọc theo loại, đừng đếm theo thứ tự.
+ */
+const enq = (h) => h.sent.filter((m) => m.type === 'enqueue');
+const enqItems = (h, i = 0) => ((enq(h)[i] && enq(h)[i].items) || []);
+const msgs = (h, type) => h.sent.filter((m) => m.type === type);
+
 const meta = (over = {}) =>
   Object.assign(
     { title: 'Tiêu đề', channel: 'Kênh', durationSec: 90, privacy: 'public', hasCaptions: true, playable: true },
@@ -344,7 +353,7 @@ async function run() {
       '(a) video công khai phải vào clipboard dưới dạng watch?v= — dạng duy nhất có báo cáo chạy được');
     eq(asked[0].opts, { noFallback: true },
       '(a) cửa 3 phải tắt nhánh tải trang watch: một lượt hỏi hỏng không được thành một lượt tải HTML đầy đủ');
-    eq(h.sent, [], '(a) link đã vào clipboard thì KHÔNG xếp hàng nữa — Đường trao tay dừng ở đó');
+    eq(enq(h), [], '(a) link đã vào clipboard thì KHÔNG xếp hàng nữa — Đường trao tay dừng ở đó');
     ok(/1 link công khai/.test(h.toast()), `(a) phải nói đã copy mấy link — nhận: "${h.toast()}"`);
     h.close();
   }
@@ -360,14 +369,13 @@ async function run() {
       describe: async (id) => meta({ videoId: id, privacy: 'private' }),
       bridge: async () => ({ kind: 'other' }),
     });
-    h.reply(() => ({ added: 1 }));
     await h.tick(80);
     h.click('#nblm-copy-button');
     await h.tick(80);
 
     eq(h.clipboard.writes, [], '(a) video private KHÔNG được chạm clipboard');
-    eq(h.sent.length, 1, '(a) video private phải rơi về Hàng đợi');
-    eq(sentItems(h), [{ videoId: 'aaaaaaaaaaa', title: undefined, privacy: 'unknown' }],
+    eq(enq(h).length, 1, '(a) video private phải rơi về Hàng đợi');
+    eq(enqItems(h), [{ videoId: 'aaaaaaaaaaa', title: undefined, privacy: 'unknown' }],
       '(a) Mục rơi về Hàng đợi giữ nguyên videoId');
     ok(/private/.test(h.toast()), `(a) phải nói ra vì sao không copy được — nhận: "${h.toast()}"`);
     h.close();
@@ -380,13 +388,12 @@ async function run() {
       describe: async () => { throw new Error('InnerTube từ chối'); },
       bridge: async () => ({ kind: 'other' }),
     });
-    h.reply(() => ({ added: 1 }));
     await h.tick(80);
     h.click('#nblm-copy-button');
     await h.tick(80);
 
     eq(h.clipboard.writes, [], '(a) hỏi không được thì KHÔNG copy — fail-closed');
-    eq(h.sent.length, 1, '(a) hỏi không được thì rơi về Hàng đợi');
+    eq(enq(h).length, 1, '(a) hỏi không được thì rơi về Hàng đợi');
     ok(/không hỏi được/.test(h.toast()),
       `(a) "không hỏi được" phải tách khỏi "private" — hai hạng, hai cách xử lý. Nhận: "${h.toast()}"`);
     h.close();
@@ -408,7 +415,6 @@ async function run() {
       describe: async (id) => { asked.push(id); return meta({ videoId: id }); },
       bridge: async () => ({ kind: 'other' }),
     });
-    h.reply(() => ({ added: 1 }));
     await h.tick(80);
     h.$$('.nblm-pick input').forEach((b) => { b.checked = true; b.dispatchEvent(new h.win.Event('change')); });
 
@@ -420,8 +426,8 @@ async function run() {
       '(b) Bó link là URL trần, mỗi dòng một cái, không tiêu đề không dòng trống');
     eq(asked.sort(), ['vidpublic01', 'vidpublic02'],
       '(b) cửa 1 phải loại video có huy hiệu Private mà KHÔNG tốn một request nào');
-    eq(h.sent.length, 1, '(b) video bị loại phải rơi về Hàng đợi');
-    eq(sentItems(h).map((i) => i.videoId), ['vidprivat03'], '(b) chỉ video bị loại mới xếp hàng');
+    eq(enq(h).length, 1, '(b) video bị loại phải rơi về Hàng đợi');
+    eq(enqItems(h).map((i) => i.videoId), ['vidprivat03'], '(b) chỉ video bị loại mới xếp hàng');
     h.close();
   }
 
@@ -443,7 +449,6 @@ async function run() {
           ? { kind: 'playlist', playlistId: 'PL123', title: 'Playlist thử' }
           : { items: [{ videoId: 'vidfromapi9', title: 'Chỉ có trong playlist', privacy: 'unknown', accessible: true }] },
     });
-    h.reply(() => ({ added: 1 }));
     await h.tick(80);
 
     /* (b): tick đúng MỘT thẻ trên trang */
@@ -539,7 +544,6 @@ async function run() {
       describe: async (id) => meta({ videoId: id, privacy: 'unlisted' }),
       bridge: async () => ({ kind: 'other' }),
     });
-    h.reply(() => ({ added: 1 }));
     await h.tick(80);
     h.click('#nblm-copy-button');
     await h.tick(80);
@@ -557,14 +561,13 @@ async function run() {
       bridge: async () => ({ kind: 'other' }),
       writeText: async () => { throw new Error('Document is not focused'); },
     });
-    h.reply(() => ({ added: 1 }));
     await h.tick(80);
     h.click('#nblm-copy-button');
     await h.tick(80);
 
     ok(/Không ghi được clipboard/.test(h.toast()), `clipboard từ chối phải nói ra — nhận: "${h.toast()}"`);
-    eq(h.sent.length, 1, 'clipboard từ chối thì link phải rơi về Hàng đợi, không mất trắng');
-    eq(sentItems(h).map((i) => i.videoId), ['aaaaaaaaaaa'], 'đúng video vừa bấm phải được cứu');
+    eq(enq(h).length, 1, 'clipboard từ chối thì link phải rơi về Hàng đợi, không mất trắng');
+    eq(enqItems(h).map((i) => i.videoId), ['aaaaaaaaaaa'], 'đúng video vừa bấm phải được cứu');
     h.close();
   }
 
@@ -582,7 +585,6 @@ async function run() {
       describe: async () => { n++; throw new Error('429'); },
       bridge: async () => ({ kind: 'other' }),
     });
-    h.reply(() => ({ added: 1 }));
     await h.tick(80);
     h.$$('.nblm-pick input').forEach((b) => { b.checked = true; b.dispatchEvent(new h.win.Event('change')); });
     h.click('[data-act="copy"]');
@@ -590,7 +592,7 @@ async function run() {
 
     ok(n < 9, `cầu dao phải dừng hỏi trước khi chạy hết 9 video, đã hỏi ${n}`);
     eq(h.clipboard.writes, [], 'cầu dao nhả rồi thì không link nào vào clipboard');
-    eq(sentItems(h).length, 9, 'cả 9 video phải rơi về Hàng đợi, không mất cái nào');
+    eq(enqItems(h).length, 9, 'cả 9 video phải rơi về Hàng đợi, không mất cái nào');
     h.close();
   }
 
