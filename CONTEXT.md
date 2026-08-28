@@ -29,8 +29,9 @@ _Tránh_: phụ đề, caption, sub — "phụ đề" là thứ YouTube lưu, Tr
 ### Cách đưa vào
 
 **Dán link**:
-Đưa URL cho NotebookLM tự đi đọc. Chỉ dùng được khi NotebookLM vào được nội dung
-đó — tức là video công khai.
+Đưa URL cho NotebookLM tự đi đọc. Chỉ dùng được khi NotebookLM vào được nội dung đó: video
+công khai, hoặc trang tài liệu đã có sẵn thân bài trong HTML thô. Backend Google fetch ẩn danh
+và **không chạy JavaScript**, nên "vào được" là một câu hỏi đo được, không phải đoán.
 
 **Dán text**:
 Trích nội dung trên máy rồi dán thẳng vào NotebookLM. Bắt buộc với video private,
@@ -60,9 +61,11 @@ Extension gom link, ghi vào clipboard, rồi dừng. Người dùng tự dán v
 không biết họ có dán hay không, và dán rồi có vào hay không.
 _Tránh_: "đường tự dán" — "dán" trong glossary này đã là tên của *chính sách* (Dán link, Dán
 text); mượn lại cho tên đường là trộn đúng hai thứ mục trên vừa tách ra.
-Quan hệ với **Không biết**: một Bó link đã trao tay ở *vĩnh viễn* trong trạng thái đó. Khác
-nhau ở chỗ Không biết là một tai nạn hiếm của Extension đưa, còn ở đây nó là thiết kế — nên
-Đường trao tay không bao giờ đạt tới "xong", và không được vờ như có.
+Trạng thái cuối của một Bó link là **đã copy**, mãi mãi. Đừng gọi nó là **Không biết**: Không
+biết là trạng thái của một Mục mà backend *đã thấy lệnh* nhưng ta không đọc được kết quả — ở
+đây chưa lệnh nào được gửi đi cả. Hai thứ khác hẳn, và hệ quả cũng khác: Không biết thì người
+dùng được bảo tự mở notebook kiểm, còn "đã copy" thì không có gì để kiểm. Điểm chung duy nhất
+là Đường trao tay không bao giờ đạt tới "xong", và không được vờ như có.
 
 **Bó link**:
 Thứ nằm trong clipboard sau một lần trao tay: các URL trần, mỗi dòng một cái, không tiêu đề,
@@ -79,13 +82,15 @@ tới cùng; dòng trong Sổ đã copy kết thúc ngay lúc được ghi.
 
 **Đường giao diện**:
 Thao tác đúng như người dùng thật trên giao diện NotebookLM — mở hộp thoại, chọn loại,
-điền, bấm Chèn. Chậm, và vỡ khi Google đổi DOM. Là đường duy nhất đang có.
+điền, bấm Chèn. Chậm, và vỡ khi Google đổi DOM. Là đường duy nhất đang *chạy*, vì Đường
+nhanh còn tắt mặc định.
 _Tránh_: "automation" khi đang nói về lựa chọn đường — cả hai đường đều là tự động.
 
 **Đường nhanh**:
 Gọi thẳng backend NotebookLM bằng chính phiên đăng nhập của tab, không qua giao diện.
-Cả Dán link lẫn Dán text đều đi qua *một* lời gọi, chỉ khác tham số. Chưa có — xem
-`docs/tickets/001-notebooklm-rpc.md`.
+Cả Dán link lẫn Dán text đều đi qua *một* lời gọi, chỉ khác tham số. Đã có mã từ 2026-08-24
+(`src/notebooklm/rpc.js`, khai ở `manifest.json`) nhưng **tắt mặc định** (`rpcEnabled: false`)
+— xem `docs/tickets/001-notebooklm-rpc.md`.
 _Tránh_: "API" — NotebookLM bản consumer không có API công khai; đây là endpoint nội bộ,
 và gọi nó là API tạo cảm giác có hợp đồng, thứ không hề tồn tại.
 
