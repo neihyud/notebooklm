@@ -20,7 +20,7 @@ Vậy nên extension đổi hướng: **transcript được trích ngay trong tr
 
 ### Trang tài liệu hỏng vì cùng một lý do
 
-Dán link docs vào NotebookLM rất hay ra một nguồn **trống trơn hoặc chỉ có mỗi menu**. Cũng không phải chính sách: máy chủ Google fetch cái URL đó và **không chạy JavaScript**. Docusaurus, GitBook, docsify, VitePress… dựng thân bài ở phía client, nên thứ máy chủ nhận về chỉ là cái khung. Trang có SSR thì đỡ hơn, nhưng nguồn vẫn dính nguyên sidebar và footer lặp ở mọi trang.
+Dán link docs vào NotebookLM rất hay ra một nguồn **trống trơn hoặc chỉ có mỗi menu**. Cũng không phải chính sách: máy chủ Google fetch cái URL đó và **không chạy JavaScript**, nên trang nào dựng thân bài ở phía client thì thứ máy chủ nhận về chỉ là cái khung. Trang nào rơi vào diện đó là chuyện **đo từng trang, không suy từ tên bộ tạo docs**: đo 19 trang thật (2026-08-25) cho thấy Docusaurus và VitePress là bộ tạo trang tĩnh — HTML thô đã có đủ thân bài — còn docsify thì đúng là rỗng hoàn toàn. Trang có SSR thì đỡ hơn, nhưng nguồn vẫn dính nguyên sidebar và footer lặp ở mọi trang.
 
 Đường vòng giống hệt: **trích nội dung ngay trong trình duyệt bạn** — nơi trang đã render đầy đủ — rồi dán vào dưới dạng nguồn văn bản.
 
@@ -44,11 +44,11 @@ Yêu cầu: Chrome 111+ (dùng content script `world: "MAIN"`), và bạn đang 
 
 ## Cách dùng
 
-**Một video** — vào trang xem video, bấm nút **NotebookLM** cạnh nút Like/Share. Hoặc phím tắt `Alt+Shift+Y`.
+**Một video** — vào trang xem video, cạnh nút Like/Share có hai nút: **NotebookLM** xếp video vào hàng đợi, **Copy link** copy URL vào clipboard để bạn tự dán (xem *Đường trao tay* bên dưới). Phím tắt `Alt+Shift+Y` tự rẽ: video công khai đi đường Copy link, mọi trường hợp còn lại vào hàng đợi.
 
 **Nhiều video cùng lúc** — trên trang playlist / kênh / kết quả tìm kiếm / Watch Later, mỗi thumbnail có một checkbox ở góc trái. Chọn xong bấm **Import vào NotebookLM** ở thanh nổi dưới màn hình.
 
-**Toàn bộ playlist hoặc kênh** — trên trang playlist / kênh, thanh nổi có nút **Import toàn bộ**. Nút này *không* đọc DOM: nó gọi thẳng API nội bộ của YouTube và phân trang tới hết, nên lấy đủ playlist vài trăm video bất kể bạn đã cuộn tới đâu. Trước khi chạy sẽ hiện bảng xác nhận: bao nhiêu video, bao nhiêu cái là private của bạn, bao nhiêu cái bị bỏ vì không có quyền xem. Áp dụng được cho cả **Xem sau** (`WL`) và **Video đã thích** (`LL`).
+**Toàn bộ playlist hoặc kênh** — trên trang playlist / kênh, thanh nổi có nút **Import toàn bộ**. Nút này *không* đọc DOM: nó gọi thẳng API nội bộ của YouTube và phân trang tới hết, nên lấy đủ playlist vài trăm video bất kể bạn đã cuộn tới đâu. Trước khi chạy sẽ hiện bảng xác nhận: bao nhiêu video, bao nhiêu cái là private của bạn, bao nhiêu cái bị bỏ vì không có quyền xem. Bảng đó có ba lối ra: import cả mẻ, *Copy link công khai* (chỉ copy, không import — xem *Đường trao tay*), hoặc huỷ. Áp dụng được cho cả **Xem sau** (`WL`) và **Video đã thích** (`LL`).
 
 **Gom từ nhiều tab / cả trang** — trong popup: *Mọi tab YouTube đang mở*, hoặc *Mọi link YouTube trên trang này* (chạy được trên trang bất kỳ, không riêng YouTube — hữu ích khi quét một bài blog đầy link video).
 
@@ -64,7 +64,53 @@ Yêu cầu: Chrome 111+ (dùng content script `world: "MAIN"`), và bạn đang 
 
 Hàng đợi chạy tuần tự, lưu bền qua các lần khởi động lại, và xem/dừng/thử-lại được từ popup. Cả hai loại nguồn dùng chung một hàng đợi.
 
-**"Xong" nghĩa là đã kiểm chứng.** Import xong, extension đếm lại số **Nguồn** trong notebook và so với số đếm trước khi mở hộp thoại: tăng đúng 1 mới là xong. Không tăng — hộp thoại đóng mà nguồn không vào — thì mục báo lỗi kèm số trước/sau. Khi extension *không đọc được* danh sách Nguồn (Google đổi giao diện), mục hiện **"Xong — chưa xác minh được"** với chấm vàng rỗng thay vì chấm xanh: đã bấm xong nhưng không có gì đối chiếu, và nói thẳng ra thay vì im lặng. Tương tự với **Bản sao xuống đĩa**: chỉ ghi nhận là đã lưu khi Chrome xác nhận file nằm trên đĩa, download bị gián đoạn thì hiện lý do Chrome trả về. Và khi bản chép lời lấy từ panel YouTube **chạm trần cuộn** — video rất dài, danh sách vẫn còn dài ra khi hết ngân sách cuộn — mục cũng hiện *"Xong — chưa xác minh được"* kèm số dòng lấy được, thay vì im lặng nhận một transcript cụt đuôi.
+**"Xong" nghĩa là đã kiểm chứng.** Import xong, extension đếm lại số **Nguồn** trong notebook và so với số đếm trước khi mở hộp thoại: tăng đúng 1 mới là xong. Không tăng — hộp thoại đóng mà nguồn không vào — thì mục báo lỗi kèm số trước/sau. Khi extension *không đọc được* danh sách Nguồn (Google đổi giao diện), mục hiện **"Xong — chưa xác minh được"** với chấm vàng rỗng thay vì chấm xanh: đã bấm xong nhưng không có gì đối chiếu, và nói thẳng ra thay vì im lặng. Tương tự với **Bản sao xuống đĩa**: chỉ ghi nhận là đã lưu khi Chrome xác nhận file nằm trên đĩa, download bị gián đoạn thì hiện lý do Chrome trả về. Và khi bản chép lời lấy từ panel YouTube **chạm trần cuộn** — video rất dài, danh sách vẫn còn dài ra khi hết ngân sách cuộn — mục cũng hiện *"Xong — chưa xác minh được"* kèm số dòng lấy được, thay vì im lặng nhận một transcript cụt đuôi. Đường trao tay nằm **ngoài** khái niệm này: nó chỉ ghi clipboard rồi dừng, nên nó không bao giờ tự nhận "Xong" — cái đã vào notebook hay chưa thì bạn là người biết.
+
+---
+
+## Đường trao tay — extension gom link, bạn tự dán
+
+Có những nguồn NotebookLM **tự đọc được**: video YouTube công khai, trang docs mà HTML thô đã
+có sẵn thân bài. Với chúng, trích nội dung tại máy rồi dán text là làm thừa — và tốn một lượt
+hộp thoại cho **mỗi** link.
+
+Đường trao tay làm phần còn lại: extension gom những link đủ điều kiện vào clipboard rồi **dừng
+ở đó**. Bạn bấm *Thêm nguồn* → *Trang web* → `Ctrl+V` một lần cho cả bó. Extension không chèn
+hộ, không bấm hộ — đổi lại nó không có gì để hỏng khi Google đổi giao diện.
+
+Bốn chỗ bấm được:
+
+- Trang xem video: nút **Copy link**.
+- Thanh nổi khi tick nhiều video: nút **Copy N link**.
+- Bảng *Import toàn bộ*: nút **Copy link công khai**.
+- Bảng chọn link tài liệu: nút **Copy N link**.
+
+**Ba cửa, và không link nào lên clipboard mà chưa qua cả ba.** Huy hiệu trên thumbnail chỉ được
+**loại** (nó nói "private" thì tin, nói "công khai" thì chưa). Sổ đã copy và hàng đợi loại tiếp
+những cái trùng. Cửa cuối hỏi thẳng player response của YouTube, và chỉ nó mới được **nhận** —
+thiếu dữ liệu, hỏi không được, hay video không phát được đều rơi về hàng đợi chứ không đoán.
+Nghĩa là video private và unlisted của bạn **không bao giờ** ra khỏi máy dưới dạng URL, đúng
+cam kết ở đầu README; thứ chúng đi vẫn là đường trích transcript cục bộ.
+
+**Trang tài liệu phải qua một cửa đo riêng.** Không suy từ tên bộ tạo docs được, nên extension
+tự fetch HTML thô của từng trang đã tick rồi xem thân bài có sẵn trong đó không. Trang trượt cửa
+được **nêu tên** và bạn dùng nút *Thêm N trang* như cũ — nội dung trích tại máy. Phép fetch này
+**cố ý không mang cookie** (`credentials: 'omit'`), và đó là chuyện đúng/sai chứ không phải cẩn
+thận thừa: một trang nội bộ chỉ đọc được khi đã đăng nhập sẽ đo ra "có thân bài" trên máy bạn,
+rồi NotebookLM — fetch ẩn danh — nhận về trang đăng nhập và nuốt một nguồn rỗng.
+
+Copy xong, extension **nhảy sang tab notebook đích rồi thôi**. Chưa đặt notebook đích thì nó nói
+ra thay vì im lặng, vì lúc đó bạn đang cầm một clipboard mà không biết mang đi đâu.
+
+**Sổ đã copy** — mỗi link đã ra clipboard được ghi lại kèm thời điểm và chỗ gom được, và lượt
+sau sẽ bị loại để bạn không dựng hai nguồn trùng. Sổ nằm trong popup, ngay dưới hàng đợi, gập
+lại được, và xoá bằng nút *Xoá sổ* (hai nhịp, vì không hoàn tác được). Link bị loại vì trùng
+luôn **hiện ra số**, kèm cách bấm lại để copy cả những cái đã có — im lặng bỏ link là đúng lỗi
+mà extension này sinh ra để chữa.
+
+Cái giá, nói trước: nguồn dán từ link thì máy chủ Google cào **cả trang**, không cào riêng khối
+thân bài, nên nguồn sẽ dính cả menu điều hướng. Cửa đo trả lời câu "nguồn có **rỗng** không",
+không trả lời câu "nguồn có **sạch** không". Muốn sạch thì dùng đường trích tại máy.
 
 ---
 
@@ -91,7 +137,7 @@ Link bị loại: khác host, giao thức lạ, và **neo trong trang** — mụ
 
 **Trích nội dung** (`src/docs/extract.js`) chạy hai nấc:
 
-1. **`fetch` từ một tab cùng origin** — mặc định. Không tải lại trang nào nên import 80 trang tốn 80 request thay vì 80 lần dựng trang, và vì chạy trong content script nên fetch đi kèm cookie phiên: tài liệu nội bộ cần đăng nhập vẫn đọc được.
+1. **`fetch` từ một tab cùng origin** — mặc định. Không tải lại trang nào nên import 80 trang tốn 80 request thay vì 80 lần dựng trang, và vì chạy trong content script nên fetch đi kèm cookie phiên: tài liệu nội bộ cần đăng nhập vẫn đọc được. Đây là đường **trích nội dung**; cửa đo của Đường trao tay là một đường fetch khác hẳn và **cố ý không mang cookie** — xem mục dưới.
 2. **Mở tab ẩn đọc DOM đã render** — chỉ khi nấc 1 trả về nội dung mỏng bất thường (`docsMinChars`), dấu hiệu kinh điển của docs render bằng JS.
 
 Nấc 2 chờ **URL khớp rồi nội dung đứng yên** mới chốt. Với docs kiểu docsify, điều hướng `#/a → #/b` không tải lại trang: tab báo `complete` ngay trong khi DOM còn nguyên nội dung trang trước, đọc luôn là gán nhầm nội dung cũ cho URL mới — sai mà nhìn vẫn rất hợp lý.
@@ -246,6 +292,7 @@ tools/                            chạy ngoài extension — xem tools/README.m
 - Bảng chọn chỉ thấy **những gì sidebar đang hiện**. Sidebar thu gọn theo mục đang mở (khá phổ biến) thì phần chưa bung ra sẽ không có trong danh sách; bung mục đó ra rồi mở lại bảng.
 - Extension chỉ đi theo link **cùng host**. Docs trỏ sang subdomain khác (`api.example.com`) phải import riêng từ chính trang đó.
 - Nguồn dán tay là ảnh chụp tại một thời điểm — tài liệu cập nhật thì phải import lại.
+- **Đường trao tay chỉ ghi clipboard.** Nó không mở hộp thoại và không bấm hộ, nên nó cũng không biết bạn đã dán hay chưa — Sổ đã copy ghi "đã copy", không ghi "đã vào notebook".
 
 ---
 
@@ -253,7 +300,7 @@ tools/                            chạy ngoài extension — xem tools/README.m
 
 Sòng phẳng về chuyện này:
 
-- **Đã chạy test:** 339 test (`bash test/run.sh`) — trong đó 44 test chạy chính mã điều khiển giao diện NotebookLM (`src/notebooklm/automation.js`) qua DOM thật của hộp thoại "Thêm nguồn" đã chụp lại (`test/fixtures/`, dựng bằng jsdom). Phần còn lại kiểm các hàm thuần: bóc videoId (mọi định dạng URL), khử trùng lặp danh sách, bỏ dấu tiếng Việt, gộp transcript theo mốc thời gian, dựng nội dung nguồn, gộp override selector, chuẩn hoá URL tài liệu (kể cả phân biệt hash-route với neo trong trang), cắt nguồn quá dài, và bộ chuyển định dạng transcript (chỗ đáng ngờ nhất là suy ra mốc kết thúc cho SRT khi nguồn chỉ cho mốc bắt đầu). Cộng hai test soát tính toàn vẹn: manifest (mọi đường dẫn tồn tại, không file JS nào mồ côi, thứ tự nạp đúng chuỗi phụ thuộc, và **cả 3 mảng `SCRIPTS.*` trong service worker khớp từng dòng với `content_scripts`** — ràng buộc này đã sập một lần, comment ở hai đầu là chưa đủ) và cấu hình (mọi setting trong `DEFAULTS` đều có ô nhập, mọi id popup.js tham chiếu đều tồn tại trong HTML).
+- **Đã chạy test:** 1199 test (`bash test/run.sh`) — trong đó 301 test chạy trên DOM thật của hộp thoại "Thêm nguồn" đã chụp lại (`test/fixtures/`, dựng bằng jsdom), và 152 test nạp chính content script của YouTube và của trang tài liệu vào jsdom để kiểm cú bấm nào gửi tin gì. Phần còn lại kiểm các hàm thuần: bóc videoId (mọi định dạng URL), khử trùng lặp danh sách, bỏ dấu tiếng Việt, gộp transcript theo mốc thời gian, dựng nội dung nguồn, gộp override selector, chuẩn hoá URL tài liệu (kể cả phân biệt hash-route với neo trong trang), cắt nguồn quá dài, và bộ chuyển định dạng transcript (chỗ đáng ngờ nhất là suy ra mốc kết thúc cho SRT khi nguồn chỉ cho mốc bắt đầu). Cộng hai test soát tính toàn vẹn: manifest (mọi đường dẫn tồn tại, không file JS nào mồ côi, thứ tự nạp đúng chuỗi phụ thuộc, và **cả 3 mảng `SCRIPTS.*` trong service worker khớp từng dòng với `content_scripts`** — ràng buộc này đã sập một lần, comment ở hai đầu là chưa đủ) và cấu hình (mọi setting trong `DEFAULTS` đều có ô nhập, mọi id popup.js tham chiếu đều tồn tại trong HTML).
 
   Cộng một test thứ ba về **kỷ luật định tuyến tin nhắn** (xem dưới).
 
@@ -264,6 +311,7 @@ Sòng phẳng về chuyện này:
   **103 khối code trên 4 trang đều ra fence nhiều dòng đúng** — giả thuyết trung tâm của `markdown.js` (Prism/Shiki dựng mỗi dòng thành một phần tử riêng, không có ký tự `\n` nào) giữ được trên thực tế.
 
   Chính script này bắt được **hai lỗi thật** trong `sidebar.js` — xem mục dưới.
+- **Đường trao tay — đã test, và có ba chỗ chưa đo.** Ba cửa lọc link, thứ tự ghi clipboard rồi mới ghi Sổ, cửa đo HTML thô, và cú nhảy sang tab notebook đều có test chạy trên mã thật. **Chưa đo được ở đây**, vì cần một Chrome đã đăng nhập: (1) `Alt+Shift+Y` có còn ghi được clipboard sau khi vòng qua service worker không — đường code đã tự rơi về hàng đợi nếu không, nhưng chưa ai thấy nó xảy ra thật; (2) NotebookLM nhận tối đa bao nhiêu URL một lần dán; (3) hai hằng số điều tiết nhịp hỏi YouTube (4 lượt song song, ngắt sau 3 lần hỏng liên tiếp) là **chọn theo suy đoán**, chưa đo trên ngưỡng rate-limit thật.
 - **Chưa chạy được ở đây:** luồng end-to-end thật — trích transcript từ một video private, quét playlist qua InnerTube, và thao tác giao diện NotebookLM. Tất cả đều cần một trình duyệt đã đăng nhập, môi trường này không có.
 - **Không có test tự động:** `page-bridge.js` chạy trong ngữ cảnh trang (hook `fetch`, đọc `ytcfg`) nên không require được vào node — phần liệt kê playlist và `pageContext()` mới chỉ được soát bằng mắt và kiểm tra cú pháp.
 
