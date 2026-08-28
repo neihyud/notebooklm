@@ -231,4 +231,339 @@ function loadTranscriptPanel({ total = Infinity, page = 5 } = {}) {
   return { win, T: win.NBLM_TRANSCRIPT, stats, count: () => holder.children.length };
 }
 
-module.exports = { loadFixture, loadTranscriptPanel };
+/* ==================================================================== */
+/* content script trên trang YouTube — bề mặt (a), (b), (c)             */
+/* ==================================================================== */
+
+/**
+ * Nạp `src/youtube/content.js` THẬT vào jsdom, kèm một trang YouTube dựng tay.
+ *
+ * Cùng cảnh báo như `loadTranscriptPanel`, và đáng nhắc lại vì file này đụng
+ * nhiều selector hơn hẳn: repo KHÔNG có bản chụp trang YouTube, nên markup do
+ * tôi gõ. Harness này vì thế KHÔNG chứng nhận selector — nó chứng nhận *luồng
+ * điều khiển*: cú bấm nào gọi hàm nào, với đối số nào, và cái gì đi tới
+ * clipboard. `tools/verify-live.mjs` là chỗ duy nhất trả lời được selector.
+ *
+ * Bốn global mà `content.js` destructure ngay dòng đầu (`:13-16`) đều phải có
+ * mặt TRƯỚC khi nạp, nếu không file ném ngay lúc nạp: `NBLM` (thật, từ
+ * `shared.js`), `NBLM_TRANSCRIPT`, `NBLM_PANEL`, `NBLM_BRIDGE` (stub ghi lại
+ * lời gọi — chúng nói chuyện với YouTube thật, không mô phỏng được).
+ *
+ * @param {string}   opts.url        URL trang; quyết định `T.currentVideoId()` mặc định.
+ * @param {string}   opts.body       HTML đặt vào <body>.
+ * @param {object}   opts.settings   settings ghi vào storage trước khi nạp.
+ * @param {Function} opts.describe   thay cho `T.describe(videoId)`; ném thì content.js đi nhánh lỗi.
+ * @param {Function} opts.bridge     thay cho `B.call(kind, payload, timeout)`.
+ * @param {Function} opts.writeText  thay cho `navigator.clipboard.writeText`; ném để dựng ca từ chối.
+ */
+function loadYouTubePage({
+  url = 'https://www.youtube.com/watch?v=aaaaaaaaaaa',
+  body = '',
+  settings = null,
+  describe = null,
+  bridge = null,
+  writeText = null,
+} = {}) {
+  const dom = new JSDOM(`<!doctype html><html><body>${body}</body></html>`, {
+    runScripts: 'outside-only',
+    url,
+  });
+  const win = dom.window;
+
+  win.Element.prototype.getBoundingClientRect = function () {
+    return { width: 120, height: 40, top: 0, left: 0, right: 120, bottom: 40, x: 0, y: 0 };
+  };
+
+  /*
+   * Nhịp chờ của content.js rút xuống, GIỮ NGUYÊN ngữ nghĩa — cùng lý do như
+   * `sleep` ở hai harness trên. Ở đây nó bắt buộc chứ không phải cho nhanh:
+   * `scheduleScan` debounce 350ms và chạy lại sau *mọi* mutation, nên không rút
+   * thì mỗi lần test chèn một thẻ video là thêm một phần ba giây.
+   *
+   * Toast cũng bị rút theo (4200ms -> 20ms), nên đừng đọc toast qua class
+   * `nblm-toast--show`; đọc `textContent`, thứ không bị dọn khi hết giờ.
+   */
+  const realSetTimeout = win.setTimeout;
+  win.setTimeout = (fn, ms, ...rest) => realSetTimeout(fn, Math.min(Number(ms) || 0, 20), ...rest);
+
+  const store = {};
+  const sent = [];        // mọi chrome.runtime.sendMessage, theo thứ tự
+  let respond = () => ({});
+  let router = null;
+
+  win.chrome = {
+    runtime: {
+      onMessage: { addListener: (fn) => (router = fn) },
+      sendMessage: async (message) => {
+        sent.push(JSON.parse(JSON.stringify(message)));
+        return respond(message);
+      },
+      getURL: (p) => `chrome-extension://test/${p}`,
+    },
+    storage: {
+      local: {
+        get: async (key) => (key in store ? { [key]: store[key] } : {}),
+        set: async (obj) => Object.assign(store, JSON.parse(JSON.stringify(obj))),
+        remove: async (key) => { delete store[key]; },
+      },
+      onChanged: { addListener: (fn) => (win.__storageListener = fn) },
+    },
+  };
+
+  const load = (rel) => win.eval(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+  load('src/common/shared.js');
+  if (settings) store[win.NBLM.KEYS.SETTINGS] = JSON.parse(JSON.stringify(settings));
+
+  const realSleep = win.NBLM.sleep;
+  win.NBLM.sleep = (ms) => realSleep(Math.min(ms, 1));
+
+  /*
+   * Clipboard. jsdom không có `navigator.clipboard`, nên đây là stub — nhưng nó
+   * là stub CÓ CHỦ ĐÍCH chứ không phải chỗ trống lấp cho chạy: mọi assertion về
+   * Đường trao tay đọc `clipboard.writes`, và cái phải ghim là *cú bấm nào sinh
+   * ra chuỗi nào*, không phải giá trị trả về. Hai bề mặt trả cùng hình dạng mảng
+   * URL, nên assert kết quả sẽ xanh cả hai chiều hoán vị.
+   */
+  const clipboard = { writes: [] };
+  Object.defineProperty(win.navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      writeText: async (text) => {
+        if (writeText) return writeText(text);   // ca từ chối: stub tự ném
+        clipboard.writes.push(text);
+      },
+    },
+  });
+
+  const calls = { describe: [], bridge: [], panel: [] };
+
+  win.NBLM_TRANSCRIPT = {
+    currentVideoId: () => win.NBLM.videoIdFrom(win.location.href),
+    describe: async (videoId) => {
+      calls.describe.push(videoId);
+      if (!describe) throw new Error('harness: chưa cấu hình describe()');
+      return describe(videoId);
+    },
+    extract: async () => ({ segments: [] }),
+  };
+
+  let panelOpen = false;
+  win.NBLM_PANEL = {
+    isOpen: () => panelOpen,
+    open: (videoId, langs) => { panelOpen = true; calls.panel.push({ act: 'open', videoId, langs }); },
+    close: () => { panelOpen = false; calls.panel.push({ act: 'close' }); },
+    reset: () => calls.panel.push({ act: 'reset' }),
+  };
+
+  win.NBLM_BRIDGE = {
+    call: async (kind, payload, timeout) => {
+      calls.bridge.push({ kind, payload, timeout });
+      if (!bridge) throw new Error('harness: chưa cấu hình bridge()');
+      return bridge(kind, payload, timeout);
+    },
+  };
+
+  load('src/youtube/content.js');
+
+  /** Chờ hết một nhịp debounce + các promise đang treo. */
+  const tick = (ms = 60) => new Promise((r) => realSetTimeout(r, ms));
+
+  return {
+    win,
+    doc: win.document,
+    store,
+    sent,
+    clipboard,
+    calls,
+    tick,
+    /** Đặt câu trả lời của background cho lần sendMessage tiếp theo. */
+    reply: (fn) => (respond = typeof fn === 'function' ? fn : () => fn),
+    /** Gửi một tin như background vẫn gửi; trả về đúng object content script đáp lại. */
+    dispatch: (message) => new Promise((resolve) => router(message, {}, resolve)),
+    $: (sel) => win.document.querySelector(sel),
+    $$: (sel) => Array.from(win.document.querySelectorAll(sel)),
+    /** Nội dung toast gần nhất — đọc textContent, xem ghi chú về nhịp chờ ở trên. */
+    toast: () => {
+      const el = win.document.querySelector('.nblm-toast');
+      return el ? el.textContent : '';
+    },
+    /** Gỡ MutationObserver và mọi timer còn treo của trang này. */
+    close: () => win.close(),
+    click(sel) {
+      const el = typeof sel === 'string' ? win.document.querySelector(sel) : sel;
+      if (!el) throw new Error(`không tìm thấy phần tử để bấm: ${sel}`);
+      el.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+      return el;
+    },
+  };
+}
+
+/**
+ * Một thẻ video trong trang danh sách YouTube, đủ để `readItem()` đọc được.
+ *
+ * `badge` để rỗng nghĩa là **không có huy hiệu** — và đó là ca thường gặp nhất
+ * chứ không phải ca biên: YouTube không gắn huy hiệu nào cho video công khai,
+ * nên `privacyHint` ra `unknown`. Đừng đọc `unknown` ở đây thành "không công khai".
+ */
+function videoCard(videoId, title, badge = '') {
+  return `<ytd-video-renderer>
+    <a id="thumbnail" href="/watch?v=${videoId}"></a>
+    <a id="video-title" href="/watch?v=${videoId}" title="${title}">${title}</a>
+    ${badge ? `<ytd-badge-supported-renderer>${badge}</ytd-badge-supported-renderer>` : ''}
+  </ytd-video-renderer>`;
+}
+
+/** Hàng nút của trang watch — chỗ `ensureWatchButton()` chèn nút vào. */
+const WATCH_ROW = '<div id="top-level-buttons-computed"></div>';
+
+/* ==================================================================== */
+/* content script trên trang tài liệu — bề mặt (d)                       */
+/* ==================================================================== */
+
+/**
+ * Nạp `src/docs/content.js` THẬT vào jsdom, kèm một cây sidebar dựng sẵn.
+ *
+ * Khác hai harness YouTube ở một điểm đáng nói: bảng chọn dựng trong **shadow
+ * DOM**, nên `document.querySelector` không với tới nó. Đó không phải chi tiết
+ * cài đặt tuỳ tiện — trang tài liệu nào cũng có CSS hung hãn, để ngoài shadow là
+ * vỡ giao diện ngay trang đầu gặp phải. Test phải đi qua `panel()` bên dưới.
+ *
+ * `NBLM_DOCS_SIDEBAR` bị thay bằng stub trả thẳng cây đã dựng: `sidebar.js` thật
+ * đọc `getBoundingClientRect` + `window.innerWidth` để chấm điểm ứng viên, mà
+ * jsdom không có layout — dùng bản thật ở đây là đo một thứ luôn trả 0.
+ *
+ * @param {Array}  opts.tree     cây sidebar; `null` = không dò thấy sidebar nào.
+ * @param {object} opts.settings settings ghi vào storage trước khi nạp.
+ * @param {Function} opts.extract thay cho `NBLM_DOCS_EXTRACT.fromUrl/fromDocument`.
+ */
+function loadDocsPage({
+  url = 'https://docs.example.dev/guide/intro',
+  tree = null,
+  settings = null,
+  extract = null,
+} = {}) {
+  const dom = new JSDOM('<!doctype html><html><body><main><h1>Trang tài liệu</h1></main></body></html>', {
+    runScripts: 'outside-only',
+    url,
+  });
+  const win = dom.window;
+
+  win.Element.prototype.getBoundingClientRect = function () {
+    return { width: 200, height: 40, top: 0, left: 0, right: 200, bottom: 40, x: 0, y: 0 };
+  };
+
+  const realSetTimeout = win.setTimeout;
+  win.setTimeout = (fn, ms, ...rest) => realSetTimeout(fn, Math.min(Number(ms) || 0, 20), ...rest);
+
+  const store = {};
+  const sent = [];
+  let respond = () => ({});
+  let router = null;
+
+  win.chrome = {
+    runtime: {
+      onMessage: { addListener: (fn) => (router = fn) },
+      sendMessage: async (message) => {
+        sent.push(JSON.parse(JSON.stringify(message)));
+        return respond(message);
+      },
+      getURL: (p) => `chrome-extension://test/${p}`,
+    },
+    storage: {
+      local: {
+        get: async (key) => (key in store ? { [key]: store[key] } : {}),
+        set: async (obj) => Object.assign(store, JSON.parse(JSON.stringify(obj))),
+        remove: async (key) => { delete store[key]; },
+      },
+      onChanged: { addListener() {} },
+    },
+  };
+
+  const load = (rel) => win.eval(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+  load('src/common/shared.js');
+  if (settings) store[win.NBLM.KEYS.SETTINGS] = JSON.parse(JSON.stringify(settings));
+
+  const realSleep = win.NBLM.sleep;
+  win.NBLM.sleep = (ms) => realSleep(Math.min(ms, 1));
+
+  const clipboard = { writes: [] };
+  Object.defineProperty(win.navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: async (text) => { clipboard.writes.push(text); } },
+  });
+
+  const countUrls = (nodes) =>
+    nodes.reduce((n, node) => n + (node.url ? 1 : 0) + countUrls(node.children || []), 0);
+
+  win.NBLM_DOCS_SIDEBAR = {
+    detect: () => (tree ? { tree, count: countUrls(tree) } : null),
+  };
+
+  const calls = { extract: [] };
+  win.NBLM_DOCS_EXTRACT = {
+    fromUrl: async (u, opts) => {
+      calls.extract.push({ how: 'fromUrl', url: u, opts });
+      return extract ? extract(u, opts) : { title: 'Doc', markdown: '# Doc', chars: 100 };
+    },
+    fromDocument: (docArg, u, opts) => {
+      calls.extract.push({ how: 'fromDocument', url: u, opts });
+      return extract ? extract(u, opts) : { title: 'Doc', markdown: '# Doc', chars: 100 };
+    },
+  };
+
+  load('src/docs/content.js');
+
+  const tick = (ms = 60) => new Promise((r) => realSetTimeout(r, ms));
+  const shadow = () => {
+    const host = win.document.querySelector('#nblm-docs-root');
+    return host ? host.shadowRoot : null;
+  };
+
+  return {
+    win,
+    doc: win.document,
+    store,
+    sent,
+    clipboard,
+    calls,
+    tick,
+    reply: (fn) => (respond = typeof fn === 'function' ? fn : () => fn),
+    dispatch: (message) => new Promise((resolve) => router(message, {}, resolve)),
+    /** Bảng chọn nằm trong shadow DOM — mọi truy vấn giao diện phải qua đây. */
+    panel: (sel) => (shadow() ? shadow().querySelector(sel) : null),
+    panelAll: (sel) => (shadow() ? Array.from(shadow().querySelectorAll(sel)) : []),
+    launcher: () => win.document.querySelector('#nblm-docs-launcher'),
+    /*
+     * `docs/content.js:457` cài một `setInterval(1500)` dò lại sidebar suốt vòng
+     * đời trang. Trong trình duyệt đó là đúng — sidebar của SPA xuất hiện muộn.
+     * Trong test thì nó giữ event loop sống mãi, nên mỗi trang dựng ra phải được
+     * đóng lại; không đóng thì `node` treo sau khi mọi assertion đã chạy xong.
+     */
+    close: () => win.close(),
+    visible: () => {
+      const host = win.document.querySelector('#nblm-docs-root');
+      return !!host && host.style.display === 'block';
+    },
+    click(el) {
+      const node = typeof el === 'string' ? (shadow() && shadow().querySelector(el)) : el;
+      if (!node) throw new Error(`không tìm thấy phần tử để bấm: ${el}`);
+      node.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+      return node;
+    },
+  };
+}
+
+/** Một nút trong cây sidebar tài liệu. */
+function docNode(title, url, children = [], depth = 0) {
+  return { title, url, children, depth };
+}
+
+module.exports = {
+  loadFixture,
+  loadTranscriptPanel,
+  loadYouTubePage,
+  loadDocsPage,
+  videoCard,
+  docNode,
+  WATCH_ROW,
+};
