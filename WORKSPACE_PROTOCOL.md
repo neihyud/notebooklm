@@ -8,8 +8,9 @@ mục đó — không thêm gì. Bản đầy đủ ở `## Authority`; nếu ha
 1. **Lead tự quyết**: phân rã ticket, thứ tự thực thi, seam đặt ở đâu, nhận hay từ chối handback,
    khi nào cần review seat độc lập.
 2. **Phải hỏi bạn**: publish lên Chrome Web Store; thêm quyền mới vào `manifest.json`; gỡ đường
-   DOM automation; đổi cam kết bảo mật ở `README.md:19` và `README.md:107`; chạy thử nghiệm ghi
-   lên notebook không phải notebook nháp.
+   DOM automation; đổi **hai cam kết bảo mật trong `README.md`** — cam kết *"không có, và không
+   cần, bất kỳ khả năng nào để thay đổi chế độ hiển thị video"* và cam kết *"không đọc, không lưu
+   cookie nào"*; chạy thử nghiệm ghi lên notebook không phải notebook nháp.
 3. **Cấm kể cả khi Lead thấy hợp lý**: xin quyền `cookies`; lưu hay gửi cookie/token ra ngoài
    origin `notebooklm.google.com`; chạy lượt import hàng loạt lên tài khoản bạn như một bước
    "kiểm chứng".
@@ -68,7 +69,8 @@ chuyển lên `Authority`; không nói thì mục này cứ nằm đây như ghi
   - Bỏ đường DOM automation (`src/notebooklm/automation.js`) để chỉ còn RPC. Đường DOM là fallback
     duy nhất khi Google xoay rpc id; gỡ đi là mất lưới an toàn đã chạy tốt.
   - Đổi `manifest.json` sang xin `cookies` permission — không cần thiết cho fetch same-origin từ
-    content script, và một khi đã xin thì rất khó rút lại cam kết ở `README.md:107`.
+    content script, và một khi đã xin thì rất khó rút lại cam kết *"không đọc, không lưu cookie
+    nào"* trong `README.md`.
   - Đổi hình dạng dữ liệu Hàng đợi trong `chrome.storage` (`src/common/shared.js:93`): hàng đợi
     tồn tại qua các lần Chrome tắt service worker, nên dữ liệu cũ của owner sẽ gặp code mới.
 
@@ -84,11 +86,22 @@ chuyển lên `Authority`; không nói thì mục này cứ nằm đây như ghi
 - **Lead may decide**: phân rã ticket, thứ tự thực thi, seam đặt ở đâu, chấp nhận/từ chối handback,
   khi nào cần review seat độc lập.
 - **Human must decide**: publish lên Chrome Web Store hay không; thêm quyền mới vào `manifest.json`;
-  gỡ đường DOM automation; đổi cam kết bảo mật ở `README.md:19` và `README.md:107`; chạy thử nghiệm
-  ghi lên notebook không phải notebook nháp.
+  gỡ đường DOM automation; đổi **hai cam kết bảo mật trong `README.md`** — cam kết *"không có, và
+  không cần, bất kỳ khả năng nào để thay đổi chế độ hiển thị video"* và cam kết *"không đọc, không
+  lưu cookie nào"*; chạy thử nghiệm ghi lên notebook không phải notebook nháp.
 - **prohibited without explicit authority**: xin `cookies` permission; lưu trữ hay gửi cookie/token
   ra ngoài origin `notebooklm.google.com`; chạy lượt import hàng loạt lên tài khoản owner như một
   bước "kiểm chứng".
+
+> **Vì sao neo bằng câu trích chứ không bằng số dòng.** Ba chỗ trên từng ghi `README.md:107`.
+> Dòng đó trôi khi ticket 001 viết lại mục "Cơ chế đẩy vào NotebookLM": cam kết cookie chuyển
+> xuống `:119`, rồi `:165` sau ticket 006, còn `:107` thành một câu mô tả `batchexecute`. Ràng
+> buộc binding vì thế trỏ vào nhầm dòng suốt nhiều ticket, và ai sửa đúng dòng cam kết sẽ không
+> thấy mình cần hỏi ai — đúng chiều hỏng nguy hiểm nhất của một ràng buộc bảo mật. Câu trích trôi
+> theo README; số dòng thì không.
+>
+> Ghi chép lịch sử trong `docs/tickets/001-*` vẫn còn `README.md:107` và **cố ý để nguyên**:
+> chúng là biên bản của một ticket đã đóng, không phải ràng buộc đang chạy.
 
 ## Task classes
 
