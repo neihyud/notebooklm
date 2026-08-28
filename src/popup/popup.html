@@ -7,60 +7,146 @@
 </head>
 <body>
   <header class="head">
-    <h1>→ NotebookLM</h1>
+    <div class="head__brand">
+      <span class="head__icon" aria-hidden="true">⚡</span>
+      <h1 class="head__title">→ NotebookLM</h1>
+    </div>
     <button type="button" id="open-options" class="link-btn" title="Cài đặt">Cài đặt</button>
   </header>
 
   <section class="notebook">
-    <label for="notebook-url">Notebook đích</label>
+    <div class="notebook__header">
+      <label for="notebook-url" class="notebook__label">Notebook đích</label>
+      <button type="button" id="use-current" class="btn-text">Dùng tab hiện tại</button>
+    </div>
     <input type="url" id="notebook-url" placeholder="https://notebooklm.google.com/notebook/…" spellcheck="false">
-    <button type="button" id="use-current" class="btn btn--ghost">Dùng notebook ở tab hiện tại</button>
     <p class="hint" id="notebook-hint"></p>
   </section>
 
-  <section class="add">
-    <label for="bulk">Dán link YouTube (mỗi dòng một link)</label>
-    <textarea id="bulk" rows="3" placeholder="https://www.youtube.com/watch?v=…&#10;https://youtu.be/…" spellcheck="false"></textarea>
-    <div class="row">
-      <button type="button" id="add-bulk" class="btn btn--primary">Thêm vào hàng đợi</button>
-      <button type="button" id="add-current" class="btn btn--ghost">Thêm tab hiện tại</button>
-    </div>
-  </section>
+  <nav class="tabs" role="tablist" aria-label="Chuyển chế độ xem">
+    <button type="button" class="tab-btn is-active" id="tab-queue" role="tab" aria-selected="true" aria-controls="panel-queue" tabindex="0">
+      Hàng đợi <span class="tab-badge" id="tab-queue-badge" hidden>0</span>
+    </button>
+    <button type="button" class="tab-btn" id="tab-add" role="tab" aria-selected="false" aria-controls="panel-add" tabindex="-1">
+      + Thêm nguồn
+    </button>
+  </nav>
 
-  <section class="add">
-    <label>Thu gom hàng loạt</label>
-    <div class="row row--wrap">
-      <button type="button" id="import-playlist" class="btn btn--ghost">Toàn bộ playlist / kênh ở tab này</button>
-      <button type="button" id="collect-tabs" class="btn btn--ghost">Mọi tab YouTube đang mở</button>
-      <button type="button" id="collect-links" class="btn btn--ghost">Mọi link YouTube trên trang này</button>
-    </div>
-    <p class="hint" id="collect-hint">Quét playlist qua API nội bộ của YouTube nên lấy đủ cả danh sách vài trăm video, không phụ thuộc đã cuộn tới đâu.</p>
-  </section>
-
-  <section class="add">
-    <label>Trang tài liệu</label>
-    <button type="button" id="scan-docs" class="btn btn--ghost">Chọn link từ sidebar tab hiện tại…</button>
-    <p class="hint">Dò sidebar của trang tài liệu rồi mở bảng chọn ngay trong trang. Phím tắt <strong>Alt+Shift+D</strong>.</p>
-  </section>
-
-  <section class="queue">
-    <div class="queue__head">
-      <strong>Hàng đợi <span id="counts"></span></strong>
-      <div class="queue__actions">
-        <button type="button" id="run" class="btn btn--primary btn--sm">Chạy</button>
-        <button type="button" id="stop" class="btn btn--sm" hidden>Dừng</button>
-        <button type="button" id="retry" class="btn btn--sm">Thử lại lỗi</button>
-        <button type="button" id="clear-done" class="btn btn--sm">Xoá xong</button>
-        <button type="button" id="clear-all" class="btn btn--sm btn--danger">Xoá hết</button>
+  <main class="panels">
+    <!-- PANEL 1: HÀNG ĐỢI -->
+    <section class="tab-panel is-active queue" id="panel-queue" role="tabpanel" aria-labelledby="tab-queue">
+      <div class="queue__head" id="queue-head">
+        <!--
+          Chip đếm kiêm bộ lọc. Chúng thay cho chuỗi "— 3 chờ · 2 xong · 1 lỗi" cũ:
+          cùng một con số, nhưng bấm được để chỉ còn nhìn nhóm đang quan tâm.
+        -->
+        <div class="chips" id="counts" role="group" aria-label="Lọc hàng đợi theo trạng thái"></div>
+        <div class="queue__actions">
+          <button type="button" id="run" class="btn btn--primary btn--sm">Chạy</button>
+          <button type="button" id="stop" class="btn btn--sm" hidden>Dừng</button>
+          <!--
+            Thao tác không hoàn tác được KHÔNG đứng cạnh thao tác dùng nhiều nhất.
+            "Xoá hết" nằm sau một cú bấm mở menu, rồi vẫn phải qua bước xác nhận.
+          -->
+          <div class="menu">
+            <button type="button" id="queue-menu-btn" class="btn btn--sm btn--icon"
+                    aria-haspopup="true" aria-expanded="false" aria-controls="queue-menu"
+                    title="Thao tác khác" aria-label="Thao tác khác với hàng đợi">⋯</button>
+            <div class="menu__list" id="queue-menu" role="menu" hidden>
+              <button type="button" id="retry" class="menu__item" role="menuitem">Thử lại lỗi</button>
+              <button type="button" id="clear-done" class="menu__item" role="menuitem">Xoá mục đã xong</button>
+              <div class="menu__sep" role="separator"></div>
+              <button type="button" id="clear-all" class="menu__item menu__item--danger" role="menuitem">Xoá hết hàng đợi</button>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-    <ul id="list" class="list"></ul>
-    <p class="empty" id="empty">Hàng đợi trống. Bấm nút <strong>NotebookLM</strong> trên trang video, chọn nhiều video bằng checkbox trên trang danh sách YouTube, hoặc mở bảng chọn link trên một trang tài liệu.</p>
-  </section>
 
-  <footer class="foot">
-    <span class="badge badge--lock">Video private và trang tài liệu đều được trích nội dung ngay trên máy bạn — extension không bao giờ đổi chế độ hiển thị của video.</span>
-  </footer>
+      <div class="progress" id="progress" hidden>
+        <div class="progress__track">
+          <div class="progress__bar" id="progress-bar"></div>
+        </div>
+        <span class="progress__text" id="progress-text"></span>
+      </div>
+
+      <ul id="list" class="list"></ul>
+      <p class="list__more" id="list-more" hidden></p>
+
+      <div class="empty" id="empty">
+        <div class="empty__card">
+          <div class="empty__art" aria-hidden="true">
+            <span class="empty__art-line"></span>
+            <span class="empty__art-line"></span>
+            <span class="empty__art-line"></span>
+          </div>
+          <p class="empty__text">Hàng đợi đang trống</p>
+          <p class="empty__sub">Thêm link ở tab <strong>+ Thêm nguồn</strong>, rồi bấm Chạy.</p>
+          <button type="button" id="empty-add-btn" class="btn btn--primary btn--sm">+ Thêm nguồn vào hàng đợi</button>
+          <details class="empty__more">
+            <summary>Cách khác để thêm</summary>
+            <ul class="empty__ways">
+              <li>Bấm nút <strong>NotebookLM</strong> ngay trên trang video.</li>
+              <li>Chọn nhiều video bằng checkbox trên trang danh sách YouTube.</li>
+              <li>Trên trang tài liệu: <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>.</li>
+            </ul>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 2: THÊM NGUỒN -->
+    <section class="tab-panel" id="panel-add" role="tabpanel" aria-labelledby="tab-add" hidden>
+      <div class="add-card">
+        <div class="add-card__head">
+          <label for="bulk">Dán link YouTube (mỗi dòng một link)</label>
+          <span class="shortcut-tag">Ctrl+Enter</span>
+        </div>
+        <textarea id="bulk" rows="6" placeholder="https://www.youtube.com/watch?v=…&#10;https://youtu.be/…" spellcheck="false"></textarea>
+        <!--
+          Trần quét nằm trong Cài đặt, nhưng người dán link thì đang đứng ở đây.
+          Nói ra ngay dưới ô dán, chứ không để họ dán 500 link rồi mới biết bị cắt.
+        -->
+        <p class="hint" id="bulk-hint"></p>
+        <div class="row">
+          <button type="button" id="add-bulk" class="btn btn--primary" disabled>Thêm vào hàng đợi</button>
+          <button type="button" id="add-current" class="btn btn--ghost">Thêm tab hiện tại</button>
+        </div>
+      </div>
+
+      <div class="add-card">
+        <label>Thu gom hàng loạt</label>
+        <div class="stack">
+          <button type="button" id="import-playlist" class="btn btn--ghost btn--row">Toàn bộ playlist / kênh ở tab này</button>
+          <button type="button" id="collect-tabs" class="btn btn--ghost btn--row">Mọi tab YouTube đang mở</button>
+          <button type="button" id="collect-links" class="btn btn--ghost btn--row">Mọi link YouTube trên trang này</button>
+        </div>
+        <p class="hint" id="collect-hint">Quét playlist qua API nội bộ của YouTube nên lấy đủ cả danh sách vài trăm video, không phụ thuộc đã cuộn tới đâu.</p>
+      </div>
+
+      <div class="add-card">
+        <div class="add-card__head">
+          <label>Trang tài liệu</label>
+          <span class="shortcut-tag">Alt+Shift+D</span>
+        </div>
+        <button type="button" id="scan-docs" class="btn btn--ghost w-100">Chọn link từ sidebar tab hiện tại…</button>
+        <p class="hint">Dò sidebar của trang tài liệu rồi mở bảng chọn ngay trong trang.</p>
+      </div>
+
+      <!--
+        NotebookLM tự nó chỉ nhận link công khai và không chạy JavaScript khi fetch.
+        Extension tồn tại để vượt đúng hai giới hạn đó, nên chỗ dán link phải nói
+        thẳng điều đó ra — thay vì một câu trấn an nằm mãi dưới chân popup.
+      -->
+      <div class="add-card add-card--note">
+        <p class="note">
+          <span class="note__mark" aria-hidden="true">🔒</span>
+          Video <strong>private</strong> và trang dựng bằng JavaScript đều được trích nội dung
+          ngay trên máy bạn — thứ NotebookLM không tự đọc được. Extension không bao giờ đổi
+          chế độ hiển thị của video.
+        </p>
+      </div>
+    </section>
+  </main>
 
   <script src="../common/shared.js"></script>
   <script src="popup.js"></script>

@@ -84,32 +84,83 @@
     },
   };
 
+  /* Mỗi ô JSON có dòng báo lỗi của riêng nó — hai ô, hai chỗ đọc kết quả. */
+  const JSON_STATUS = { selectorOverrides: 'jsonStatus', rpcOverrides: 'rpcJsonStatus' };
+
+  /* ------------------------------------------------------------------ */
+  /* theo dõi thay đổi chưa lưu                                          */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * So sánh giá trị THÔ của ô nhập, không qua read(): ô JSON đang gõ dở vẫn phải
+   * đếm được là "đã đổi", chứ không ném lỗi parse giữa lúc đếm.
+   */
+  const rawOf = (el) => (el.type === 'checkbox' ? String(el.checked) : el.value);
+
+  let baseline = {};
+
+  function snapshot() {
+    const s = {};
+    for (const key of Object.keys(FIELDS)) s[key] = rawOf(FIELDS[key].el());
+    return s;
+  }
+
+  function dirtyKeys() {
+    return Object.keys(FIELDS).filter((key) => rawOf(FIELDS[key].el()) !== baseline[key]);
+  }
+
+  function updateDirty() {
+    const n = dirtyKeys().length;
+    const bar = $('savebar');
+    bar.hidden = n === 0;
+    // Nói rõ phạm vi: một nút Lưu cho cả ba tab, không phải chỉ tab đang mở.
+    $('dirtyCount').textContent = n
+      ? `${n} thay đổi chưa lưu (trên cả ba tab)`
+      : '';
+    $('save').disabled = n === 0;
+  }
+
   async function load() {
     const settings = await getSettings();
     for (const [key, field] of Object.entries(FIELDS)) field.write(field.el(), settings[key]);
+    baseline = snapshot();
+    updateDirty();
   }
 
   async function save() {
-    const status = $('jsonStatus');
     const patch = {};
     for (const [key, field] of Object.entries(FIELDS)) {
       try {
         patch[key] = field.read(field.el());
       } catch (e) {
-        // Gọi tên đúng ô đang hỏng: có HAI ô JSON trên trang này, mà dòng báo
-        // lỗi thì chỉ nằm dưới một ô. Câu chữ cố định sẽ chỉ owner đi sửa ô kia.
+        // Gọi tên đúng ô đang hỏng, VÀ mở đúng tab chứa nó: dòng báo lỗi nằm dưới
+        // một ô cụ thể, mà ô đó có thể đang nằm trong tab người dùng không mở.
+        const statusId = JSON_STATUS[key];
+        const status = statusId ? $(statusId) : $('jsonStatus');
         status.textContent = `JSON ở ô "${key}" không hợp lệ: ${(e && e.message) || e}`;
         status.classList.add('error');
+        showTabOf(field.el());
+        field.el().focus();
         return;
       }
     }
-    status.textContent = '';
-    status.classList.remove('error');
+    clearJsonStatus('selectorOverrides');
+    clearJsonStatus('rpcOverrides');
     await setSettings(patch);
+
+    baseline = snapshot();
+    updateDirty();
 
     const saved = $('saved');
     saved.hidden = false;
     setTimeout(() => (saved.hidden = true), 2000);
+  }
+
+  function clearJsonStatus(key) {
+    const status = $(JSON_STATUS[key]);
+    if (!status) return;
+    status.textContent = '';
+    status.classList.remove('error');
   }
 
   /* ------------------------------------------------------------------ */
@@ -152,30 +203,124 @@
     await loadDomReports();
   });
 
+  /* ------------------------------------------------------------------ */
+  /* thanh Lưu                                                           */
+  /* ------------------------------------------------------------------ */
+
   $('save').addEventListener('click', save);
+
+  $('discard').addEventListener('click', async () => {
+    // "Bỏ thay đổi" chỉ trả về giá trị ĐANG LƯU, không đụng tới mặc định.
+    await load();
+    clearJsonStatus('selectorOverrides');
+    clearJsonStatus('rpcOverrides');
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      if (!$('save').disabled) save();
+    }
+    if (e.key === 'Escape') resetBtn();
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* vùng nguy hiểm                                                      */
+  /* ------------------------------------------------------------------ */
+
+  let resetTimer = null;
+  function resetBtn() {
+    if (resetTimer) clearTimeout(resetTimer);
+    resetTimer = null;
+    const btn = $('reset');
+    btn.textContent = 'Khôi phục mặc định';
+    btn.classList.remove('is-confirming');
+  }
+
   $('reset').addEventListener('click', async () => {
+    const btn = $('reset');
+    if (!resetTimer) {
+      btn.textContent = 'Chắc chắn khôi phục?';
+      btn.classList.add('is-confirming');
+      resetTimer = setTimeout(resetBtn, 4000);
+      return;
+    }
+    resetBtn();
     await setSettings(Object.assign({}, DEFAULTS));
     await load();
   });
 
-  // Kiểm tra JSON ngay khi gõ, đỡ phải bấm Lưu mới biết sai.
-  $('selectorOverrides').addEventListener('input', (e) => {
-    const status = $('jsonStatus');
-    const raw = e.target.value.trim();
-    if (!raw) {
-      status.textContent = '';
-      status.classList.remove('error');
-      return;
-    }
-    try {
-      JSON.parse(raw);
-      status.textContent = 'JSON hợp lệ.';
-      status.classList.remove('error');
-    } catch (err) {
-      status.textContent = `JSON không hợp lệ: ${err.message}`;
-      status.classList.add('error');
-    }
+  /* ------------------------------------------------------------------ */
+  /* kiểm tra JSON ngay khi gõ                                           */
+  /* ------------------------------------------------------------------ */
+
+  for (const key of Object.keys(JSON_STATUS)) {
+    FIELDS[key].el().addEventListener('input', (e) => {
+      const status = $(JSON_STATUS[key]);
+      const raw = e.target.value.trim();
+      if (!raw) {
+        status.textContent = '';
+        status.classList.remove('error');
+        return;
+      }
+      try {
+        JSON.parse(raw);
+        status.textContent = 'JSON hợp lệ.';
+        status.classList.remove('error');
+      } catch (err) {
+        status.textContent = `JSON không hợp lệ: ${err.message}`;
+        status.classList.add('error');
+      }
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* điều hướng tab                                                      */
+  /* ------------------------------------------------------------------ */
+
+  const tabButtons = [...document.querySelectorAll('.opt-tab')];
+  const tabPanels = [...document.querySelectorAll('.opt-panel')];
+
+  function showTab(btn) {
+    tabButtons.forEach((b) => {
+      const active = b === btn;
+      b.classList.toggle('is-active', active);
+      b.setAttribute('aria-selected', String(active));
+      b.tabIndex = active ? 0 : -1;
+    });
+    const targetId = btn.getAttribute('data-target');
+    tabPanels.forEach((panel) => {
+      panel.hidden = panel.id !== targetId;
+    });
+  }
+
+  /** Đưa người dùng tới đúng tab chứa một ô nhập (dùng khi báo lỗi lúc Lưu). */
+  function showTabOf(el) {
+    const panel = el.closest('.opt-panel');
+    if (!panel) return;
+    const btn = tabButtons.find((b) => b.getAttribute('data-target') === panel.id);
+    if (btn) showTab(btn);
+  }
+
+  tabButtons.forEach((btn, i) => {
+    btn.addEventListener('click', () => showTab(btn));
+    btn.addEventListener('keydown', (e) => {
+      const last = tabButtons.length - 1;
+      let next = null;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = i === last ? 0 : i + 1;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = i === 0 ? last : i - 1;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = last;
+      if (next === null) return;
+      e.preventDefault();
+      showTab(tabButtons[next]);
+      tabButtons[next].focus();
+    });
   });
+
+  /* Mọi ô nhập đều có thể làm trang "bẩn" — bắt ở tầng document, không gắn tay. */
+  document.addEventListener('input', updateDirty);
+  document.addEventListener('change', updateDirty);
 
   load();
   loadDomReports();

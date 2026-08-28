@@ -1,106 +1,386 @@
 :root {
   --bg: #ffffff;
+  --bg-subtle: #f8f9fa;
+  --surface: #ffffff;
   --fg: #1f1f1f;
   --muted: #5f6368;
   --line: #e3e3e3;
+  --line-subtle: #eeeeee;
   --blue: #1a73e8;
+  --blue-hover: #1765cc;
+  --blue-surface: rgba(26, 115, 232, 0.08);
   --green: #188038;
+  --green-surface: rgba(24, 128, 56, 0.1);
   --red: #c5221f;
+  --red-surface: rgba(197, 34, 31, 0.1);
+  --amber: #b06000;
+  --amber-surface: rgba(176, 96, 0, 0.1);
+  --shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+  --radius: 8px;
+  --radius-sm: 6px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #1f1f1f;
+    --bg-subtle: #292a2d;
+    --surface: #242528;
     --fg: #e8eaed;
     --muted: #9aa0a6;
     --line: #3c4043;
+    --line-subtle: #303134;
     --blue: #8ab4f8;
+    --blue-hover: #aecbfa;
+    --blue-surface: rgba(138, 180, 248, 0.12);
     --green: #81c995;
+    --green-surface: rgba(129, 201, 149, 0.12);
     --red: #f28b82;
+    --red-surface: rgba(242, 139, 130, 0.12);
+    --amber: #fdd663;
+    --amber-surface: rgba(253, 214, 99, 0.12);
+    --shadow: 0 -2px 12px rgba(0, 0, 0, 0.45);
   }
 }
 
 * { box-sizing: border-box; }
 
+/*
+ * `hidden` phải thắng mọi `display` đặt theo class.
+ * Không có dòng này thì `.btn { display: inline-flex }` đè lên `[hidden]` của
+ * trình duyệt, và nút Dừng đứng cạnh nút Chạy suốt cả lúc hàng đợi đang nghỉ.
+ */
+[hidden] { display: none !important; }
+
+
 body {
   margin: 0;
-  padding: 32px 20px 64px;
+  padding: 32px 20px 96px;
   background: var(--bg);
   color: var(--fg);
-  font-family: "Google Sans", "Roboto", system-ui, sans-serif;
-  font-size: 14px;
+  font-family: "Google Sans", "Roboto", system-ui, -apple-system, sans-serif;
+  font-size: 13.5px;
   line-height: 1.55;
 }
 
-main { max-width: 680px; margin: 0 auto; }
+main {
+  max-width: 760px;
+  margin: 0 auto;
+}
 
-h1 { margin: 0 0 4px; font-size: 20px; }
-h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+/* Header */
+.opt-header {
+  margin-bottom: 24px;
+}
 
-.lead {
-  margin: 0 0 24px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: rgba(24, 128, 56, .1);
-  color: var(--fg);
+.opt-header__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--blue-surface);
+  color: var(--blue);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.opt-header__desc {
+  margin: 0;
+  color: var(--muted);
   font-size: 13px;
 }
+
+/* Tabs */
+.opt-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 20px;
+  background: var(--bg);
+}
+
+.opt-tab {
+  position: relative;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.opt-tab:hover {
+  color: var(--fg);
+  background: var(--bg-subtle);
+}
+
+.opt-tab:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+
+.opt-tab.is-active {
+  color: var(--blue);
+  font-weight: 600;
+}
+
+.opt-tab.is-active::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--blue);
+  border-radius: 2px 2px 0 0;
+}
+
+/* Panels */
+.opt-panel {
+  display: block;
+}
+
+.opt-panel:focus {
+  outline: none;
+}
+
 
 section {
   padding: 20px 0;
   border-top: 1px solid var(--line);
 }
 
-label {
+.opt-panel > section:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+
+h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/*
+ * Một dòng cài đặt = tên + mô tả bên trái, ô điều khiển bên phải.
+ * Trước đây nhãn, ô nhập và ghi chú xếp chồng cùng một cỡ chữ, nên đọc trang dài
+ * là phải đọc từng dòng; giờ mắt quét cột trái, chỉ dừng ở dòng cần đổi.
+ */
+.field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 280px);
+  align-items: start;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.field:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.field__label label {
   display: block;
-  margin: 14px 0 6px;
+  margin: 0;
+  color: var(--fg);
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.field__desc {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.field__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.field__control--end {
+  justify-content: flex-end;
+}
+
+.field__control--narrow input[type="number"] {
+  max-width: 120px;
+}
+
+.unit {
+  flex: 0 0 auto;
   color: var(--muted);
   font-size: 12px;
 }
 
-label.check {
-  display: flex;
+/*
+ * Dòng bật/tắt: công tắc, không phải ô đánh dấu.
+ * Cột phải rộng 280px nên ô 16px nằm mãi mép phải vừa khó thấy vừa khó trúng;
+ * công tắc 36×20 đọc được trạng thái từ xa và có vùng bấm gấp đôi.
+ * Vẫn là <input type="checkbox"> — nhãn, bàn phím và trình đọc màn hình không đổi.
+ */
+.field--toggle .field__control {
   align-items: flex-start;
-  gap: 8px;
-  color: var(--fg);
-  font-size: 13px;
+  padding-top: 1px;
 }
 
-label.check input { margin-top: 3px; accent-color: var(--blue); }
+.field--toggle input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border: none;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 0.15s ease;
+}
+
+.field--toggle input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+
+.field--toggle input[type="checkbox"]:checked {
+  background: var(--blue);
+}
+
+.field--toggle input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field--toggle input[type="checkbox"],
+  .field--toggle input[type="checkbox"]::after {
+    transition: none;
+  }
+}
+
+/*
+ * Ở nền tối, núm trắng trông giống "đang bật" ở CẢ hai trạng thái — chỉ còn vị trí
+ * phân biệt. Cho núm đổi màu theo trạng thái để bật/tắt khác nhau ở hai dấu hiệu.
+ */
+@media (prefers-color-scheme: dark) {
+  .field--toggle input[type="checkbox"]::after {
+    background: var(--muted);
+    box-shadow: none;
+  }
+  .field--toggle input[type="checkbox"]:checked::after {
+    background: #202124;
+  }
+}
+
+/* Ô JSON dài thì chiếm trọn bề ngang, cột phải không đủ chỗ đọc */
+.field--wide {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.field--wide .field__control {
+  display: block;
+}
+
+label {
+  display: block;
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
 
 input[type="url"], input[type="text"], input[type="number"], select, textarea {
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 11px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: transparent;
+  border-radius: var(--radius);
+  background: var(--bg);
   color: var(--fg);
   font-family: inherit;
   font-size: 13px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-textarea { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; resize: vertical; }
+textarea {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  resize: vertical;
+}
 
-input:focus, select:focus, textarea:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--blue-surface);
+}
 
-.hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.hint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
 
 .hint.locked {
   margin-top: 12px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   border-left: 3px solid var(--green);
-  background: rgba(24, 128, 56, .08);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--green-surface);
   color: var(--fg);
 }
 
 .tag {
   display: inline-block;
-  padding: 1px 7px;
+  padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(127, 127, 127, .18);
+  background: rgba(127, 127, 127, 0.16);
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 400;
+  font-size: 10.5px;
+  font-weight: 500;
   vertical-align: middle;
 }
 
@@ -108,42 +388,171 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--blue); outl
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 24px;
+  margin-top: 16px;
 }
 
 .btn {
-  padding: 9px 16px;
+  padding: 8px 16px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: transparent;
+  border-radius: var(--radius);
+  background: var(--surface);
   color: var(--fg);
   font-family: inherit;
   font-size: 13px;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-.btn:hover { background: rgba(127, 127, 127, .12); }
-.btn--primary { border-color: transparent; background: var(--blue); color: #fff; font-weight: 500; }
+.btn:hover:not([disabled]) {
+  background: var(--bg-subtle);
+  border-color: var(--muted);
+}
 
-@media (prefers-color-scheme: dark) { .btn--primary { color: #202124; } }
+.btn:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
 
-.saved { color: var(--green); font-size: 13px; }
-.error { color: var(--red); }
+.btn--primary {
+  border-color: transparent;
+  background: var(--blue);
+  color: #fff;
+  font-weight: 500;
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn--primary { color: #202124; }
+}
+
+.btn--primary:hover:not([disabled]) {
+  background: var(--blue-hover);
+  border-color: transparent;
+  filter: brightness(1.06);
+}
+
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn--danger {
+  border-color: var(--red);
+  color: var(--red);
+  background: transparent;
+}
+
+.btn--danger:hover:not([disabled]) {
+  background: var(--red-surface);
+  border-color: var(--red);
+}
+
+.btn--danger.is-confirming {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn--danger.is-confirming { color: #202124; }
+}
+
+/* Vùng nguy hiểm */
+.danger {
+  margin-top: 8px;
+  padding: 16px;
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  background: var(--red-surface);
+}
+
+.danger h2 {
+  color: var(--red);
+  margin-bottom: 10px;
+}
+
+.danger__title {
+  margin: 0;
+  color: var(--fg);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.danger__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* Thanh Lưu dính đáy */
+.savebar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+
+.savebar__inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12px 20px;
+}
+
+.savebar__text {
+  color: var(--amber);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.savebar__actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.saved {
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.error {
+  color: var(--red);
+}
 
 .report {
   max-height: 340px;
-  margin: 0;
-  padding: 10px 12px;
+  margin: 12px 0 0;
+  padding: 12px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
   color: var(--fg);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.btn[disabled] { opacity: .5; cursor: default; }
-.btn[disabled]:hover { background: transparent; }
+/* Màn hẹp: hai cột gộp lại thành một, control xuống dòng dưới nhãn */
+@media (max-width: 640px) {
+  .field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .field__control--end {
+    justify-content: flex-start;
+  }
+}

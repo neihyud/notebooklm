@@ -11,6 +11,7 @@
     notebookHint: $('notebook-hint'),
     useCurrent: $('use-current'),
     bulk: $('bulk'),
+    bulkHint: $('bulk-hint'),
     addBulk: $('add-bulk'),
     addCurrent: $('add-current'),
     scanDocs: $('scan-docs'),
@@ -18,31 +19,185 @@
     collectTabs: $('collect-tabs'),
     collectLinks: $('collect-links'),
     collectHint: $('collect-hint'),
+    queueHead: $('queue-head'),
     list: $('list'),
+    listMore: $('list-more'),
     empty: $('empty'),
     counts: $('counts'),
+    progress: $('progress'),
+    progressBar: $('progress-bar'),
+    progressText: $('progress-text'),
     run: $('run'),
     stop: $('stop'),
     retry: $('retry'),
     clearDone: $('clear-done'),
     clearAll: $('clear-all'),
+    queueMenuBtn: $('queue-menu-btn'),
+    queueMenu: $('queue-menu'),
     openOptions: $('open-options'),
+    tabQueue: $('tab-queue'),
+    tabAdd: $('tab-add'),
+    tabQueueBadge: $('tab-queue-badge'),
+    panelQueue: $('panel-queue'),
+    panelAdd: $('panel-add'),
+    emptyAddBtn: $('empty-add-btn'),
   };
 
-  const send = (type, payload) => chrome.runtime.sendMessage(Object.assign({ type }, payload || {}));
+  /** Gửi message lên background với cơ chế bắt lỗi mất kết nối service worker. */
+  const send = async (type, payload) => {
+    try {
+      return await chrome.runtime.sendMessage(Object.assign({ type }, payload || {}));
+    } catch (err) {
+      console.warn('[NBLM popup]', type, err);
+      if (els.notebookHint) {
+        els.notebookHint.textContent = 'Mất kết nối với service worker. Hãy mở lại popup.';
+        els.notebookHint.classList.add('error');
+      }
+      return { error: err.message };
+    }
+  };
+
+  /** Khoá chống bấm liên tiếp (double click) khi async request đang chạy. */
+  let isActionPending = false;
+  async function withActionLock(fn) {
+    if (isActionPending) return;
+    isActionPending = true;
+    try {
+      await fn();
+    } finally {
+      isActionPending = false;
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* điều hướng tab                                                    */
+  /* ---------------------------------------------------------------- */
+
+  function switchTab(target) {
+    resetClearAllBtn();
+    closeQueueMenu();
+    const isQueue = target === 'queue';
+    // Roving tabindex: chỉ tab đang chọn nhận được phím Tab, hai mũi tên đi
+    // giữa hai tab — đúng hợp đồng của role="tablist".
+    if (els.tabQueue) {
+      els.tabQueue.classList.toggle('is-active', isQueue);
+      els.tabQueue.setAttribute('aria-selected', String(isQueue));
+      els.tabQueue.tabIndex = isQueue ? 0 : -1;
+    }
+    if (els.tabAdd) {
+      els.tabAdd.classList.toggle('is-active', !isQueue);
+      els.tabAdd.setAttribute('aria-selected', String(!isQueue));
+      els.tabAdd.tabIndex = isQueue ? -1 : 0;
+    }
+    if (els.panelQueue) els.panelQueue.hidden = !isQueue;
+    if (els.panelAdd) els.panelAdd.hidden = isQueue;
+  }
+
+  function handleTabKeydown(e) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      switchTab('add');
+      if (els.tabAdd) els.tabAdd.focus();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      switchTab('queue');
+      if (els.tabQueue) els.tabQueue.focus();
+    }
+  }
+
+  if (els.tabQueue) {
+    els.tabQueue.addEventListener('click', () => switchTab('queue'));
+    els.tabQueue.addEventListener('keydown', handleTabKeydown);
+  }
+  if (els.tabAdd) {
+    els.tabAdd.addEventListener('click', () => switchTab('add'));
+    els.tabAdd.addEventListener('keydown', handleTabKeydown);
+  }
+  if (els.emptyAddBtn) {
+    els.emptyAddBtn.addEventListener('click', () => {
+      switchTab('add');
+      if (els.bulk) els.bulk.focus();
+    });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* menu thao tác hàng đợi                                            */
+  /* ---------------------------------------------------------------- */
+
+  function closeQueueMenu() {
+    if (!els.queueMenu) return;
+    els.queueMenu.hidden = true;
+    if (els.queueMenuBtn) els.queueMenuBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleQueueMenu() {
+    if (!els.queueMenu) return;
+    const willOpen = els.queueMenu.hidden;
+    if (!willOpen) {
+      closeQueueMenu();
+      return;
+    }
+    resetClearAllBtn();
+    els.queueMenu.hidden = false;
+    if (els.queueMenuBtn) els.queueMenuBtn.setAttribute('aria-expanded', 'true');
+    const first = els.queueMenu.querySelector('.menu__item:not([disabled])');
+    if (first) first.focus();
+  }
+
+  if (els.queueMenuBtn) {
+    els.queueMenuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleQueueMenu();
+    });
+  }
+  if (els.queueMenu) {
+    els.queueMenu.addEventListener('click', (e) => e.stopPropagation());
+  }
+  document.addEventListener('click', () => closeQueueMenu());
+
+  /* ---------------------------------------------------------------- */
+  /* bảo vệ thao tác xoá (2-step confirm)                             */
+  /* ---------------------------------------------------------------- */
+
+  let clearAllTimer = null;
+  function resetClearAllBtn() {
+    if (clearAllTimer) clearTimeout(clearAllTimer);
+    clearAllTimer = null;
+    if (els.clearAll) {
+      els.clearAll.textContent = 'Xoá hết hàng đợi';
+      els.clearAll.classList.remove('is-confirming');
+    }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      resetClearAllBtn();
+      if (els.queueMenu && !els.queueMenu.hidden) {
+        closeQueueMenu();
+        if (els.queueMenuBtn) els.queueMenuBtn.focus();
+      }
+    }
+  });
 
   /* ---------------------------------------------------------------- */
   /* render                                                            */
   /* ---------------------------------------------------------------- */
 
-  const STATUS_TEXT = {
-    [STATUS.PENDING]: 'Chờ',
-    [STATUS.EXTRACTING]: 'Đang trích nội dung…',
-    [STATUS.IMPORTING]: 'Đang thêm vào NotebookLM…',
-    [STATUS.DONE]: 'Xong',
-    [STATUS.ERROR]: 'Lỗi',
-    [STATUS.SKIPPED]: 'Bỏ qua',
+  /**
+   * Nhãn ngắn trên thẻ trạng thái. Cố ý ngắn: nó là thứ được quét bằng mắt,
+   * còn lý do dài thì đã có dòng riêng bên dưới.
+   */
+  const PILL = {
+    [STATUS.PENDING]: { text: 'Chờ', cls: 'pill--idle' },
+    [STATUS.EXTRACTING]: { text: 'Đang trích', cls: 'pill--busy' },
+    [STATUS.IMPORTING]: { text: 'Đang thêm', cls: 'pill--busy' },
+    [STATUS.DONE]: { text: 'Xong', cls: 'pill--done' },
+    [STATUS.ERROR]: { text: 'Lỗi', cls: 'pill--error' },
+    [STATUS.SKIPPED]: { text: 'Bỏ qua', cls: 'pill--idle' },
   };
+
+  /** Trần số dòng dựng ra DOM. Phần dôi ra được NÓI RA, không im lặng cắt. */
+  const MAX_RENDER = 200;
 
   const isDoc = (item) => item.kind === KIND.DOCS;
 
@@ -68,9 +223,159 @@
    */
   const isUnverified = (item) => item.status === STATUS.DONE && item.verified === false;
 
+  /**
+   * "Đã vào" và "chưa biết có vào không" là hai kết quả khác nhau, nên chúng là
+   * hai thẻ khác màu chứ không phải một chữ "Xong" kèm hậu tố lọt giữa metadata.
+   * Toàn bộ ticket này tồn tại vì trước đó chúng trông giống hệt nhau.
+   */
+  function pillOf(item) {
+    if (isUnverified(item)) return { text: 'Chưa xác minh', cls: 'pill--warn' };
+    return PILL[item.status] || { text: item.status, cls: 'pill--idle' };
+  }
+
   function itemTitle(item) {
     if (item.title) return item.title;
     return isDoc(item) ? urlLabel(item.url) : item.videoId;
+  }
+
+  /* Bộ lọc theo trạng thái. Mặc định 'all' — người mở popup thấy đúng hàng đợi. */
+  let filter = 'all';
+  const FILTERS = {
+    all: () => true,
+    pending: (i) => i.status === STATUS.PENDING || i.status === STATUS.EXTRACTING || i.status === STATUS.IMPORTING,
+    done: (i) => i.status === STATUS.DONE,
+    error: (i) => i.status === STATUS.ERROR,
+  };
+
+  function renderChips(counts, total) {
+    if (!els.counts) return;
+    const specs = [
+      { key: 'all', label: 'Tất cả', n: total, cls: '' },
+      { key: 'pending', label: 'chờ', n: counts.pending, cls: 'chip--idle' },
+      { key: 'done', label: 'xong', n: counts.done, cls: 'chip--done' },
+      { key: 'error', label: 'lỗi', n: counts.error, cls: 'chip--error' },
+    ];
+    els.counts.replaceChildren(
+      ...specs
+        .filter((s) => s.key === 'all' || s.n > 0)
+        .map((s) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = `chip ${s.cls}${filter === s.key ? ' is-active' : ''}`.trim();
+          b.dataset.filter = s.key;
+          b.setAttribute('aria-pressed', String(filter === s.key));
+          const num = document.createElement('span');
+          num.className = 'chip__n';
+          num.textContent = String(s.n);
+          b.append(num, document.createTextNode(' ' + s.label));
+          b.addEventListener('click', () => {
+            filter = filter === s.key ? 'all' : s.key;
+            refresh();
+          });
+          return b;
+        })
+    );
+    els.counts.hidden = total === 0;
+  }
+
+  function renderProgress(counts, total, running) {
+    if (!els.progress) return;
+    const settled = counts.done + counts.error + counts.skipped;
+    if (!running || total === 0) {
+      els.progress.hidden = true;
+      return;
+    }
+    els.progress.hidden = false;
+    const pct = total ? Math.round((settled / total) * 100) : 0;
+    els.progressBar.style.width = `${pct}%`;
+    els.progressText.textContent = `${settled}/${total}`;
+  }
+
+  function buildItem(item) {
+    const li = document.createElement('li');
+    li.className = 'item';
+    li.dataset.status = item.status;
+    if (item.status === STATUS.DONE && typeof item.verified === 'boolean') {
+      li.dataset.verified = String(item.verified);
+    }
+
+    const body = document.createElement('div');
+    body.className = 'item__body';
+
+    const head = document.createElement('div');
+    head.className = 'item__head';
+
+    const title = itemTitle(item);
+    const link = document.createElement('a');
+    link.className = 'item__title';
+    link.href = item.url || canonicalUrl(item.videoId);
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    link.textContent = title;
+    link.title = title;
+
+    const pill = pillOf(item);
+    const badge = document.createElement('span');
+    badge.className = `item__status pill ${pill.cls}`;
+    badge.textContent = pill.text;
+
+    head.append(link, badge);
+    body.appendChild(head);
+
+    // Metadata thuần: không còn gánh trạng thái, nên nó được phép mờ đi.
+    const meta = document.createElement('div');
+    meta.className = 'item__meta';
+    meta.innerHTML = tagHtml(item);
+    const parts = [];
+    if (item.site) parts.push(item.site);
+    if (item.durationSec) parts.push(fmtTime(item.durationSec));
+    const mode = modeText(item);
+    if (mode) parts.push(mode);
+    if (item.textLength) parts.push(`${Math.round(item.textLength / 1000)}k ký tự`);
+    if (parts.length) meta.append(parts.join(' · '));
+    if (meta.innerHTML || parts.length) body.appendChild(meta);
+
+    if (item.error) {
+      const err = document.createElement('div');
+      err.className = 'item__error';
+      err.textContent = item.error;
+      body.appendChild(err);
+    }
+
+    if (isUnverified(item)) {
+      const warn = document.createElement('div');
+      warn.className = 'item__unverified';
+      warn.textContent =
+        item.unverified || 'Không đối chiếu được kết quả nên chưa xác minh được nguồn đã vào hay chưa.';
+      body.appendChild(warn);
+    }
+
+    // Bản sao xuống đĩa hỏng là một chuyện KHÁC với Nguồn chưa xác minh
+    // được, nên nó có dòng riêng: Nguồn vẫn có thể đã vào hoàn hảo trong
+    // khi ~/Downloads không có gì. Gộp chung một dòng là người đọc mất khả
+    // năng biết cái nào hỏng.
+    if (item.copyError) {
+      const warn = document.createElement('div');
+      warn.className = 'item__copy-error';
+      warn.textContent = `Bản sao xuống đĩa: ${item.copyError}`;
+      body.appendChild(warn);
+    }
+
+    const remove = document.createElement('button');
+    remove.className = 'item__remove';
+    remove.type = 'button';
+    remove.title = 'Xoá khỏi hàng đợi';
+    remove.setAttribute('aria-label', `Xoá ${title} khỏi hàng đợi`);
+    remove.textContent = '×';
+    remove.addEventListener('click', async () => {
+      await withActionLock(async () => {
+        await send(MSG.REMOVE, { id: item.id });
+        await refresh();
+      });
+    });
+
+    li.append(body, remove);
+    return li;
   }
 
   function render(state) {
@@ -83,111 +388,104 @@
       ? ''
       : 'Chưa đặt notebook đích — extension sẽ dùng tab NotebookLM nào đang mở sẵn.';
 
-    const counts = queue.reduce((acc, i) => {
+    const raw = queue.reduce((acc, i) => {
       acc[i.status] = (acc[i.status] || 0) + 1;
       return acc;
     }, {});
-    const pending = (counts[STATUS.PENDING] || 0) + (counts[STATUS.EXTRACTING] || 0) + (counts[STATUS.IMPORTING] || 0);
-    els.counts.textContent = queue.length
-      ? `— ${pending} chờ · ${counts[STATUS.DONE] || 0} xong · ${counts[STATUS.ERROR] || 0} lỗi`
-      : '';
+    const counts = {
+      pending: (raw[STATUS.PENDING] || 0) + (raw[STATUS.EXTRACTING] || 0) + (raw[STATUS.IMPORTING] || 0),
+      done: raw[STATUS.DONE] || 0,
+      error: raw[STATUS.ERROR] || 0,
+      skipped: raw[STATUS.SKIPPED] || 0,
+    };
+
+    renderChips(counts, queue.length);
+    renderProgress(counts, queue.length, running);
+
+    if (els.tabQueueBadge) {
+      if (counts.pending > 0) {
+        els.tabQueueBadge.textContent = String(counts.pending);
+        els.tabQueueBadge.hidden = false;
+      } else {
+        els.tabQueueBadge.hidden = true;
+      }
+    }
 
     els.run.hidden = running;
     els.stop.hidden = !running;
-    els.run.disabled = !pending;
-    els.retry.disabled = !(counts[STATUS.ERROR] || 0);
-    els.clearDone.disabled = !(counts[STATUS.DONE] || 0);
+    els.run.disabled = !counts.pending;
+    els.retry.disabled = !counts.error;
+    els.clearDone.disabled = !counts.done;
     els.clearAll.disabled = !queue.length;
+    els.queueMenuBtn.disabled = !queue.length;
+    if (!queue.length) closeQueueMenu();
     els.empty.hidden = queue.length > 0;
+    // Hàng đợi trống thì thanh công cụ chỉ còn hai nút mờ không bấm được —
+    // thẻ trống bên dưới đã có lối đi riêng, nên cất nó đi.
+    els.queueHead.hidden = queue.length === 0;
 
-    els.list.replaceChildren(
-      ...queue
-        .slice()
-        .reverse()
-        .map((item) => {
-          const li = document.createElement('li');
-          li.className = 'item';
-          li.dataset.status = item.status;
-          if (item.status === STATUS.DONE && typeof item.verified === 'boolean') {
-            li.dataset.verified = String(item.verified);
-          }
+    const shown = queue.slice().reverse().filter(FILTERS[filter] || FILTERS.all);
+    els.list.replaceChildren(...shown.slice(0, MAX_RENDER).map(buildItem));
 
-          const dot = document.createElement('span');
-          dot.className = 'item__dot';
-
-          const body = document.createElement('div');
-          body.className = 'item__body';
-
-          const link = document.createElement('a');
-          link.className = 'item__title';
-          link.href = item.url || canonicalUrl(item.videoId);
-          link.target = '_blank';
-          link.rel = 'noreferrer';
-          link.textContent = itemTitle(item);
-          body.appendChild(link);
-
-          const meta = document.createElement('div');
-          meta.className = 'item__meta';
-          meta.innerHTML = tagHtml(item);
-          // Chữ này cố ý nằm ngay cạnh "Xong" chứ không phải một biểu tượng nhỏ:
-          // "đã vào" và "chưa biết có vào không" là hai kết quả khác nhau, và
-          // toàn bộ ticket này tồn tại vì trước đó chúng trông giống hệt nhau.
-          const parts = [
-            isUnverified(item) ? `${STATUS_TEXT[STATUS.DONE]} — chưa xác minh được` : STATUS_TEXT[item.status] || item.status,
-          ];
-          if (item.site) parts.push(item.site);
-          if (item.durationSec) parts.push(fmtTime(item.durationSec));
-          const mode = modeText(item);
-          if (mode) parts.push(mode);
-          if (item.textLength) parts.push(`${Math.round(item.textLength / 1000)}k ký tự`);
-          meta.append(parts.join(' · '));
-          body.appendChild(meta);
-
-          if (item.error) {
-            const err = document.createElement('div');
-            err.className = 'item__error';
-            err.textContent = item.error;
-            body.appendChild(err);
-          }
-
-          if (isUnverified(item)) {
-            const warn = document.createElement('div');
-            warn.className = 'item__unverified';
-            warn.textContent =
-              item.unverified || 'Không đối chiếu được kết quả nên chưa xác minh được nguồn đã vào hay chưa.';
-            body.appendChild(warn);
-          }
-
-          // Bản sao xuống đĩa hỏng là một chuyện KHÁC với Nguồn chưa xác minh
-          // được, nên nó có dòng riêng: Nguồn vẫn có thể đã vào hoàn hảo trong
-          // khi ~/Downloads không có gì. Gộp chung một dòng là người đọc mất khả
-          // năng biết cái nào hỏng.
-          if (item.copyError) {
-            const warn = document.createElement('div');
-            warn.className = 'item__copy-error';
-            warn.textContent = `Bản sao xuống đĩa: ${item.copyError}`;
-            body.appendChild(warn);
-          }
-
-          const remove = document.createElement('button');
-          remove.className = 'item__remove';
-          remove.type = 'button';
-          remove.title = 'Xoá khỏi hàng đợi';
-          remove.textContent = '×';
-          remove.addEventListener('click', async () => {
-            await send(MSG.REMOVE, { id: item.id });
-            refresh();
-          });
-
-          li.append(dot, body, remove);
-          return li;
-        })
-    );
+    // Trần dựng DOM phải nhìn thấy được: một danh sách bị cắt im lặng đọc y hệt
+    // một danh sách đã hiện đủ.
+    if (shown.length > MAX_RENDER) {
+      els.listMore.hidden = false;
+      els.listMore.textContent = `Còn ${shown.length - MAX_RENDER} mục nữa không hiển thị — hàng đợi vẫn xử lý đủ.`;
+    } else if (queue.length && !shown.length) {
+      els.listMore.hidden = false;
+      els.listMore.textContent = 'Không có mục nào khớp bộ lọc đang chọn.';
+    } else {
+      els.listMore.hidden = true;
+    }
   }
 
   async function refresh() {
     const state = await send(MSG.GET_STATE);
     if (state && state.queue) render(state);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* ngữ cảnh tab hiện tại                                             */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Ba nút thu gom đều thao tác trên tab đang mở. Trước đây phải bấm mới biết
+   * tab đó có dùng được không; giờ trả lời trước khi bấm.
+   */
+  async function updateTabContext() {
+    let url = '';
+    let ytTabs = 0;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      url = (tab && tab.url) || '';
+      const all = await chrome.tabs.query({ url: 'https://www.youtube.com/*' });
+      ytTabs = (all || []).length;
+    } catch (_) {
+      /* không đọc được tab thì để nút mở, người dùng bấm sẽ nhận lỗi cụ thể */
+    }
+
+    const isWeb = /^https?:/i.test(url);
+    const isYouTube = /^https:\/\/(www\.)?youtube\.com\//i.test(url);
+    const isListPage = isYouTube && /[?&]list=|\/(channel\/|c\/|user\/|@)/i.test(url);
+
+    setCtx(els.importPlaylist, isListPage, isYouTube
+      ? 'Tab hiện tại là YouTube nhưng không phải playlist hay trang kênh.'
+      : 'Mở một playlist hoặc trang kênh YouTube rồi bấm lại.');
+    setCtx(els.collectTabs, ytTabs > 0, 'Không có tab YouTube nào đang mở.');
+    setCtx(els.collectLinks, isWeb, 'Tab hiện tại không phải trang web đọc được.');
+    setCtx(els.scanDocs, isWeb, 'Tab hiện tại không phải trang web đọc được.');
+    setCtx(els.addCurrent, isWeb, 'Tab hiện tại không phải trang web đọc được.');
+
+    if (els.collectTabs && ytTabs > 0) {
+      els.collectTabs.textContent = `Mọi tab YouTube đang mở (${ytTabs})`;
+    }
+  }
+
+  function setCtx(btn, usable, why) {
+    if (!btn) return;
+    btn.disabled = !usable;
+    btn.title = usable ? '' : why;
   }
 
   /* ---------------------------------------------------------------- */
@@ -200,17 +498,64 @@
   });
 
   els.useCurrent.addEventListener('click', async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const url = (tab && tab.url) || '';
-    if (!/^https:\/\/notebooklm\.google\.com\/notebook\//.test(url)) {
-      els.notebookHint.textContent = 'Tab hiện tại không phải một notebook. Hãy mở notebook đích rồi bấm lại.';
+    await withActionLock(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const url = (tab && tab.url) || '';
+      if (!/^https:\/\/notebooklm\.google\.com\/notebook\//.test(url)) {
+        els.notebookHint.textContent = 'Tab hiện tại không phải một notebook. Hãy mở notebook đích rồi bấm lại.';
+        return;
+      }
+      const clean = url.split('?')[0].split('#')[0];
+      els.notebookUrl.value = clean;
+      await globalThis.NBLM.setSettings({ notebookUrl: clean });
+      refresh();
+    });
+  });
+
+  els.bulk.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      els.addBulk.click();
+    }
+  });
+
+  /**
+   * Nhãn nút đếm theo đúng số link đọc được, chứ không phải số dòng đã gõ:
+   * dán 30 dòng mà chỉ 12 dòng là link YouTube thì con số phải nói ra điều đó.
+   */
+  let bulkCap = 0;
+  async function loadBulkCap() {
+    try {
+      const s = await globalThis.NBLM.getSettings();
+      bulkCap = Number(s && s.maxBulkVideos) || 0;
+    } catch (_) {
+      bulkCap = 0;
+    }
+    updateBulkCount();
+  }
+
+  function updateBulkCount() {
+    if (!els.addBulk) return;
+    const n = parseUrlList(els.bulk.value).length;
+    els.addBulk.textContent = n ? `Thêm ${n} link vào hàng đợi` : 'Thêm vào hàng đợi';
+    els.addBulk.disabled = n === 0;
+
+    if (!els.bulkHint) return;
+    const capText = bulkCap ? `Trần quét hàng loạt hiện đặt ở ${bulkCap} video (đổi trong Cài đặt).` : '';
+    const lines = els.bulk.value.split('\n').filter((l) => l.trim()).length;
+    if (n === 0) {
+      els.bulkHint.textContent = lines
+        ? `Không đọc được link YouTube nào trong ${lines} dòng đã dán. ${capText}`.trim()
+        : capText;
+      els.bulkHint.classList.toggle('error', lines > 0);
       return;
     }
-    const clean = url.split('?')[0].split('#')[0];
-    els.notebookUrl.value = clean;
-    await globalThis.NBLM.setSettings({ notebookUrl: clean });
-    refresh();
-  });
+    els.bulkHint.classList.remove('error');
+    const bo = lines > n ? ` · bỏ qua ${lines - n} dòng không phải link YouTube` : '';
+    els.bulkHint.textContent = `${n} link đọc được${bo}. ${capText}`.trim();
+  }
+
+  els.bulk.addEventListener('input', updateBulkCount);
 
   els.addBulk.addEventListener('click', async () => {
     const ids = parseUrlList(els.bulk.value);
@@ -218,28 +563,35 @@
       els.bulk.focus();
       return;
     }
-    await send(MSG.ENQUEUE, { items: ids.map((videoId) => ({ videoId })), autoRun: false });
-    els.bulk.value = '';
-    refresh();
+    await withActionLock(async () => {
+      await send(MSG.ENQUEUE, { items: ids.map((videoId) => ({ videoId })), autoRun: false });
+      els.bulk.value = '';
+      updateBulkCount();
+      switchTab('queue');
+      refresh();
+    });
   });
 
   // "Thêm tab hiện tại" phục vụ cả hai loại nguồn: là video thì đi đường video,
   // còn lại coi như một trang tài liệu.
   els.addCurrent.addEventListener('click', async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const url = (tab && tab.url) || '';
-    const videoId = videoIdFrom(url);
+    await withActionLock(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const url = (tab && tab.url) || '';
+      const videoId = videoIdFrom(url);
 
-    if (!videoId && !/^https?:/.test(url)) {
-      els.notebookHint.textContent = 'Tab hiện tại không phải trang web đọc được.';
-      return;
-    }
-    const item = videoId
-      ? { videoId }
-      : { kind: KIND.DOCS, url, title: (tab && tab.title) || '', site: hostOf(url) };
+      if (!videoId && !/^https?:/.test(url)) {
+        els.notebookHint.textContent = 'Tab hiện tại không phải trang web đọc được.';
+        return;
+      }
+      const item = videoId
+        ? { videoId }
+        : { kind: KIND.DOCS, url, title: (tab && tab.title) || '', site: hostOf(url) };
 
-    await send(MSG.ENQUEUE, { items: [item], autoRun: false });
-    refresh();
+      await send(MSG.ENQUEUE, { items: [item], autoRun: false });
+      switchTab('queue');
+      refresh();
+    });
   });
 
   els.scanDocs.addEventListener('click', async () => {
@@ -277,9 +629,13 @@
       if (res.truncated) bits.push('đã chạm trần quét');
       els.collectHint.textContent = bits.join(' · ') + '.';
       refresh();
+      if ((res.added || 0) > 0) {
+        switchTab('queue');
+      }
     } finally {
       button.textContent = original;
-      buttons.forEach((b) => (b.disabled = false));
+      // Trả nút về đúng trạng thái theo ngữ cảnh tab, không bật lại tất cả.
+      await updateTabContext();
     }
   }
 
@@ -301,11 +657,43 @@
     }
   }
 
-  els.run.addEventListener('click', () => send(MSG.RUN).then(refresh));
-  els.stop.addEventListener('click', () => send(MSG.STOP).then(refresh));
-  els.retry.addEventListener('click', () => send(MSG.RETRY, {}).then(refresh));
-  els.clearDone.addEventListener('click', () => send(MSG.CLEAR_DONE).then(refresh));
-  els.clearAll.addEventListener('click', () => send(MSG.CLEAR_ALL).then(refresh));
+  els.run.addEventListener('click', () => withActionLock(async () => {
+    await send(MSG.RUN);
+    refresh();
+  }));
+
+  els.stop.addEventListener('click', () => withActionLock(async () => {
+    await send(MSG.STOP);
+    refresh();
+  }));
+
+  els.retry.addEventListener('click', () => withActionLock(async () => {
+    closeQueueMenu();
+    await send(MSG.RETRY, {});
+    refresh();
+  }));
+
+  els.clearDone.addEventListener('click', () => withActionLock(async () => {
+    closeQueueMenu();
+    await send(MSG.CLEAR_DONE);
+    refresh();
+  }));
+
+  els.clearAll.addEventListener('click', async () => {
+    if (!clearAllTimer) {
+      els.clearAll.textContent = 'Chắc chắn xoá?';
+      els.clearAll.classList.add('is-confirming');
+      clearAllTimer = setTimeout(resetClearAllBtn, 3500);
+      return;
+    }
+    resetClearAllBtn();
+    closeQueueMenu();
+    await withActionLock(async () => {
+      await send(MSG.CLEAR_ALL);
+      refresh();
+    });
+  });
+
   els.openOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
 
   chrome.runtime.onMessage.addListener((message) => {
@@ -315,4 +703,6 @@
   // Trạng thái đổi trong lúc popup mở (ví dụ đang chạy hàng đợi).
   setInterval(refresh, 1500);
   refresh();
+  updateTabContext();
+  loadBulkCap();
 })();

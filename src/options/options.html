@@ -7,193 +7,373 @@
 </head>
 <body>
 <main>
-  <h1>YouTube &amp; Tài liệu → NotebookLM</h1>
-
-  <p class="lead">
-    Video <strong>private của bạn</strong> không thể import bằng URL, vì máy chủ NotebookLM
-    tải video mà không kèm phiên đăng nhập của bạn. Extension giải quyết bằng cách trích
-    transcript <strong>ngay trong trình duyệt bạn</strong> rồi dán vào notebook dưới dạng nguồn
-    văn bản. Chế độ hiển thị của video <strong>không bao giờ bị thay đổi</strong>.
-  </p>
-
-  <p class="lead">
-    <strong>Trang tài liệu</strong> hỏng vì đúng lý do đó, chỉ khác hình thức: máy chủ NotebookLM
-    tải link nhưng <strong>không chạy JavaScript</strong>, nên docs dựng client-side trả về khung
-    rỗng — nguồn tạo ra không có chữ nào. Vì vậy mặc định của phần này cũng là trích nội dung
-    ngay trên máy rồi dán vào.
-  </p>
-
-  <section>
-    <h2>Notebook đích</h2>
-    <label for="notebookUrl">URL notebook</label>
-    <input type="url" id="notebookUrl" placeholder="https://notebooklm.google.com/notebook/xxxxxxxx" spellcheck="false">
-    <p class="hint">Để trống thì extension dùng tab NotebookLM nào đang mở sẵn.</p>
-  </section>
-
-  <section>
-    <h2>Transcript</h2>
-
-    <label for="preferredLangs">Ngôn ngữ phụ đề ưu tiên (cách nhau bằng dấu phẩy)</label>
-    <input type="text" id="preferredLangs" placeholder="vi, en" spellcheck="false">
-
-    <label class="check"><input type="checkbox" id="includeTimestamps"> Chèn timestamp vào transcript</label>
-    <p class="hint">Giúp NotebookLM trích dẫn đúng mốc thời gian trong video.</p>
-
-    <label for="groupSeconds">Gộp transcript thành đoạn mỗi … giây (0 = giữ từng dòng)</label>
-    <input type="number" id="groupSeconds" min="0" max="300" step="5">
-  </section>
-
-  <section>
-    <h2>Chiến lược import</h2>
-
-    <label for="unlistedMode">Video unlisted</label>
-    <select id="unlistedMode">
-      <option value="url-then-transcript">Thử link trước, hỏng thì trích transcript (khuyến nghị)</option>
-      <option value="url">Chỉ dùng link</option>
-      <option value="transcript">Luôn trích transcript</option>
-    </select>
-
-    <label class="check"><input type="checkbox" id="publicFallbackToTranscript"> Video public: nếu NotebookLM từ chối link thì trích transcript cục bộ</label>
-
-    <p class="hint locked">
-      Video private luôn đi đường transcript — không có tuỳ chọn nào đổi được điều này, và
-      extension không có khả năng chỉnh chế độ hiển thị video.
+  <header class="opt-header">
+    <div class="opt-header__title">
+      <h1>Cài đặt</h1>
+      <span class="badge">YouTube &amp; Tài liệu → NotebookLM</span>
+    </div>
+    <p class="opt-header__desc">
+      Tùy chỉnh ngôn ngữ transcript, chiến lược trích xuất tài liệu, bản sao tải về và cấu hình nâng cao.
     </p>
+  </header>
 
-    <label for="delayMs">Nghỉ giữa hai lần import (ms)</label>
-    <input type="number" id="delayMs" min="300" max="10000" step="100">
+  <!--
+    Mỗi tab nối với panel của nó bằng aria-controls / aria-labelledby, và chỉ tab
+    đang chọn nằm trong thứ tự Tab (roving tabindex) — hợp đồng của role="tablist".
+  -->
+  <nav class="opt-tabs" role="tablist" aria-label="Nhóm cài đặt">
+    <button type="button" class="opt-tab is-active" id="tab-basic" role="tab" aria-selected="true"
+            aria-controls="panel-basic" data-target="panel-basic" tabindex="0">Cơ bản</button>
+    <button type="button" class="opt-tab" id="tab-strategy" role="tab" aria-selected="false"
+            aria-controls="panel-strategy" data-target="panel-strategy" tabindex="-1">Chiến lược import</button>
+    <button type="button" class="opt-tab" id="tab-advanced" role="tab" aria-selected="false"
+            aria-controls="panel-advanced" data-target="panel-advanced" tabindex="-1">Nâng cao &amp; Gỡ lỗi</button>
+  </nav>
 
-    <label class="check"><input type="checkbox" id="autoCloseTabs"> Tự đóng tab YouTube mà extension mở để trích transcript</label>
-    <label class="check"><input type="checkbox" id="bulkSelectUI"> Hiện checkbox chọn hàng loạt trên trang danh sách YouTube</label>
+  <!-- TAB 1: CƠ BẢN -->
+  <div class="opt-panel is-active" id="panel-basic" role="tabpanel" aria-labelledby="tab-basic" tabindex="0">
+    <section>
+      <h2>Notebook đích</h2>
 
-    <label for="maxBulkVideos">Trần số video khi quét toàn bộ playlist / kênh</label>
-    <input type="number" id="maxBulkVideos" min="1" max="5000" step="50">
-    <p class="hint">Kênh lớn có hàng nghìn video, mà một notebook chỉ chứa được 300 nguồn — quét sạch chỉ tổ mất thời gian rồi tắc ở hàng đợi.</p>
-  </section>
+      <div class="field">
+        <div class="field__label">
+          <label for="notebookUrl">URL notebook</label>
+          <p class="field__desc">Để trống thì extension tự động dùng tab NotebookLM đang mở sẵn.</p>
+        </div>
+        <div class="field__control">
+          <input type="url" id="notebookUrl" placeholder="https://notebooklm.google.com/notebook/xxxxxxxx" spellcheck="false">
+        </div>
+      </div>
+    </section>
 
-  <section>
-    <h2>Bản sao xuống đĩa</h2>
+    <section>
+      <h2>Transcript</h2>
 
-    <label class="check"><input type="checkbox" id="saveTranscriptCopy"> Lưu thêm một bản transcript vào Downloads cho mỗi video</label>
-    <p class="hint">
-      Làm ngay trong Lượt chạy, cùng lúc với việc thêm Nguồn — không phải một lượt chạy riêng và
-      không đòi bấm gì giữa chừng. Bản sao là <em>phụ phẩm</em>: ghi hỏng thì Mục vẫn được thêm vào
-      NotebookLM bình thường, lý do hỏng hiện ngay trên dòng của Mục trong popup.
-    </p>
+      <div class="field">
+        <div class="field__label">
+          <label for="preferredLangs">Ngôn ngữ phụ đề ưu tiên</label>
+          <p class="field__desc">Cách nhau bằng dấu phẩy; thứ tự trong danh sách chính là thứ tự ưu tiên.</p>
+        </div>
+        <div class="field__control">
+          <input type="text" id="preferredLangs" placeholder="vi, en" spellcheck="false">
+        </div>
+      </div>
 
-    <label for="downloadFormat">Định dạng file</label>
-    <select id="downloadFormat">
-      <option value="txt">.txt — có timestamp, dễ đọc</option>
-      <option value="srt">.srt — phụ đề, nạp được vào trình phát</option>
-      <option value="vtt">.vtt — phụ đề chuẩn web</option>
-      <option value="md">.md — Markdown, timestamp là link nhảy tới đúng giây</option>
-    </select>
+      <div class="field field--toggle">
+        <div class="field__label">
+          <label for="includeTimestamps">Chèn timestamp vào transcript</label>
+          <p class="field__desc">Giúp NotebookLM trích dẫn đúng mốc thời gian trong video.</p>
+        </div>
+        <div class="field__control field__control--end">
+          <input type="checkbox" id="includeTimestamps">
+        </div>
+      </div>
 
-    <label for="downloadSubfolder">Thư mục con trong Downloads</label>
-    <input type="text" id="downloadSubfolder" spellcheck="false">
-    <p class="hint">Để trống thì lưu thẳng vào Downloads.</p>
-  </section>
+      <div class="field">
+        <div class="field__label">
+          <label for="groupSeconds">Gộp transcript thành đoạn</label>
+          <p class="field__desc">Số giây mỗi đoạn. Đặt 0 để giữ nguyên từng dòng phụ đề.</p>
+        </div>
+        <div class="field__control field__control--narrow">
+          <input type="number" id="groupSeconds" min="0" max="300" step="5">
+          <span class="unit">giây</span>
+        </div>
+      </div>
+    </section>
 
-  <section>
-    <h2>Trang tài liệu</h2>
+    <section>
+      <h2>Bản sao xuống đĩa</h2>
 
-    <label class="check"><input type="checkbox" id="docsLauncher"> Hiện nút mở bảng chọn khi dò thấy sidebar tài liệu</label>
-    <p class="hint">Tắt đi thì vẫn mở được bằng phím tắt <strong>Alt+Shift+D</strong>, popup, hoặc menu chuột phải.</p>
+      <div class="field field--toggle">
+        <div class="field__label">
+          <label for="saveTranscriptCopy">Lưu thêm một bản transcript vào Downloads</label>
+          <p class="field__desc">
+            Thực hiện đồng thời trong Lượt chạy. Nếu ghi file thất bại, Nguồn vẫn được thêm vào
+            NotebookLM bình thường.
+          </p>
+        </div>
+        <div class="field__control field__control--end">
+          <input type="checkbox" id="saveTranscriptCopy">
+        </div>
+      </div>
 
-    <label for="docsMode">Cách đưa một trang vào NotebookLM</label>
-    <select id="docsMode">
-      <option value="text">Luôn trích nội dung rồi dán (khuyến nghị)</option>
-      <option value="text-then-url">Dán nội dung, hỏng thì thử link</option>
-      <option value="url-then-text">Thử link trước, hỏng thì dán nội dung</option>
-      <option value="url">Chỉ dùng link</option>
-    </select>
-    <p class="hint">
-      Link chỉ dùng được với docs render sẵn ở phía máy chủ. Với Docusaurus, GitBook, docsify
-      và phần lớn docs hiện đại, NotebookLM nhận về trang trống.
-    </p>
+      <div class="field">
+        <div class="field__label">
+          <label for="downloadFormat">Định dạng file</label>
+        </div>
+        <div class="field__control">
+          <select id="downloadFormat">
+            <option value="txt">.txt (có timestamp, dễ đọc)</option>
+            <option value="srt">.srt (phụ đề chuẩn cho trình phát video)</option>
+            <option value="vtt">.vtt (phụ đề chuẩn web)</option>
+            <option value="md">.md (Markdown, timestamp kèm link nhảy tới giây)</option>
+          </select>
+        </div>
+      </div>
 
-    <label class="check"><input type="checkbox" id="docsKeepLinks"> Giữ link dạng <code>[chữ](url)</code> trong nội dung trích</label>
-    <label class="check"><input type="checkbox" id="docsKeepImages"> Giữ ảnh dạng <code>![alt](url)</code></label>
+      <div class="field">
+        <div class="field__label">
+          <label for="downloadSubfolder">Thư mục con trong Downloads</label>
+          <p class="field__desc">Để trống để lưu trực tiếp vào thư mục Downloads.</p>
+        </div>
+        <div class="field__control">
+          <input type="text" id="downloadSubfolder" spellcheck="false">
+        </div>
+      </div>
+    </section>
+  </div>
 
-    <label for="docsMaxChars">Cắt nguồn dài hơn … ký tự (0 = không cắt)</label>
-    <input type="number" id="docsMaxChars" min="0" max="2000000" step="10000">
+  <!-- TAB 2: CHIẾN LƯỢC IMPORT -->
+  <div class="opt-panel" id="panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" tabindex="0" hidden>
+    <section>
+      <h2>Video YouTube</h2>
 
-    <label for="docsMinChars">Ngưỡng coi là “trang rỗng” — dưới ngần này ký tự thì mở tab ẩn đọc lại</label>
-    <input type="number" id="docsMinChars" min="0" max="20000" step="100">
-    <p class="hint">
-      Đặt quá cao thì trang ngắn hợp lệ cũng bị tải lại (chậm); quá thấp thì docs render bằng JS
-      lọt lưới và tạo ra nguồn rỗng.
-    </p>
-  </section>
+      <div class="field">
+        <div class="field__label">
+          <label for="unlistedMode">Video unlisted</label>
+          <p class="field__desc">Video public luôn đi đường link, video private luôn được trích transcript.</p>
+        </div>
+        <div class="field__control">
+          <select id="unlistedMode">
+            <option value="url-then-transcript">Thử link trước, hỏng thì trích transcript (khuyến nghị)</option>
+            <option value="url">Chỉ dùng link</option>
+            <option value="transcript">Luôn trích transcript</option>
+          </select>
+        </div>
+      </div>
 
-  <section>
-    <h2>Ghi đè selector NotebookLM <span class="tag">nâng cao</span></h2>
-    <p class="hint">
-      Google đổi giao diện NotebookLM khá thường xuyên. Nếu extension báo “Không tìm thấy nút
-      Thêm nguồn”, hãy thêm nhãn nút đang hiển thị vào đây. Nhãn viết thường, <em>không dấu</em>.
-      Các mảng sẽ được gộp thêm vào danh sách mặc định.
-    </p>
-    <textarea id="selectorOverrides" rows="10" spellcheck="false" placeholder='{
+      <div class="field field--toggle">
+        <div class="field__label">
+          <label for="publicFallbackToTranscript">Video public: trích transcript khi NotebookLM từ chối link</label>
+          <p class="field__desc">Chỉ chạy sau khi đường link đã thất bại thật, không chạy trước.</p>
+        </div>
+        <div class="field__control field__control--end">
+          <input type="checkbox" id="publicFallbackToTranscript">
+        </div>
+      </div>
+
+      <p class="hint locked">
+        Video private luôn được trích transcript ngay trong trình duyệt của bạn; extension không thay đổi quyền riêng tư của video.
+      </p>
+
+      <div class="field">
+        <div class="field__label">
+          <label for="delayMs">Nghỉ giữa hai lần import</label>
+          <p class="field__desc">Nghỉ càng ngắn càng nhanh, nhưng NotebookLM dễ chặn nhịp hơn.</p>
+        </div>
+        <div class="field__control field__control--narrow">
+          <input type="number" id="delayMs" min="300" max="10000" step="100">
+          <span class="unit">ms</span>
+        </div>
+      </div>
+
+      <div class="field field--toggle">
+        <div class="field__label">
+          <label for="autoCloseTabs">Tự đóng tab YouTube extension mở để trích transcript</label>
+        </div>
+        <div class="field__control field__control--end">
+          <input type="checkbox" id="autoCloseTabs">
+        </div>
+      </div>
+
+      <div class="field field--toggle">
+        <div class="field__label">
+          <label for="bulkSelectUI">Hiện checkbox chọn hàng loạt trên trang danh sách YouTube</label>
+        </div>
+        <div class="field__control field__control--end">
+          <input type="checkbox" id="bulkSelectUI">
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field__label">
+          <label for="maxBulkVideos">Trần số video mỗi lần quét playlist / kênh</label>
+          <p class="field__desc">
+            Giới hạn để tránh vượt trần 300 Nguồn của một notebook. Con số này cũng hiện ngay
+            dưới ô dán link trong popup.
+          </p>
+        </div>
+        <div class="field__control field__control--narrow">
+          <input type="number" id="maxBulkVideos" min="1" max="5000" step="50">
+          <span class="unit">video</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Trang tài liệu</h2>
+
+      <div class="field field--toggle">
+        <div class="field__label">
+          <label for="docsLauncher">Hiện nút mở bảng chọn khi dò thấy sidebar tài liệu</label>
+          <p class="field__desc">Có thể mở nhanh bất kỳ lúc nào bằng <strong>Alt+Shift+D</strong> hoặc menu chuột phải.</p>
+        </div>
+        <div class="field__control field__control--end">
+          <input type="checkbox" id="docsLauncher">
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field__label">
+          <label for="docsMode">Cách đưa một trang vào NotebookLM</label>
+          <p class="field__desc">
+            Link chỉ dùng được với tài liệu render phía máy chủ. Với tài liệu dựng bằng JS
+            (Docusaurus, GitBook, docsify), nên trích nội dung.
+          </p>
+        </div>
+        <div class="field__control">
+          <select id="docsMode">
+            <option value="text">Luôn trích nội dung rồi dán (khuyến nghị)</option>
+            <option value="text-then-url">Dán nội dung, hỏng thì thử link</option>
+            <option value="url-then-text">Thử link trước, hỏng thì dán nội dung</option>
+            <option value="url">Chỉ dùng link</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field field--toggle">
+        <div class="field__label">
+          <label for="docsKeepLinks">Giữ link dạng <code>[chữ](url)</code> trong nội dung trích</label>
+        </div>
+        <div class="field__control field__control--end">
+          <input type="checkbox" id="docsKeepLinks">
+        </div>
+      </div>
+
+      <div class="field field--toggle">
+        <div class="field__label">
+          <label for="docsKeepImages">Giữ ảnh dạng <code>![alt](url)</code></label>
+        </div>
+        <div class="field__control field__control--end">
+          <input type="checkbox" id="docsKeepImages">
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field__label">
+          <label for="docsMaxChars">Cắt nguồn dài quá</label>
+          <p class="field__desc">Đặt 0 để không cắt.</p>
+        </div>
+        <div class="field__control field__control--narrow">
+          <input type="number" id="docsMaxChars" min="0" max="2000000" step="10000">
+          <span class="unit">ký tự</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field__label">
+          <label for="docsMinChars">Ngưỡng coi là “trang rỗng”</label>
+          <p class="field__desc">Dưới số ký tự này thì extension mở tab ẩn để đọc lại trang.</p>
+        </div>
+        <div class="field__control field__control--narrow">
+          <input type="number" id="docsMinChars" min="0" max="20000" step="100">
+          <span class="unit">ký tự</span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- TAB 3: NÂNG CAO & GỠ LỖI -->
+  <div class="opt-panel" id="panel-advanced" role="tabpanel" aria-labelledby="tab-advanced" tabindex="0" hidden>
+    <section>
+      <h2>Đường RPC thêm Nguồn <span class="tag">thử nghiệm</span></h2>
+      <p class="hint">
+        Gọi trực tiếp backend NotebookLM (<code>batchexecute</code>) từ tab đã đăng nhập để tăng tốc độ import.
+      </p>
+
+      <div class="field field--toggle">
+        <div class="field__label">
+          <label for="rpcEnabled">Thử đường RPC trước</label>
+          <p class="field__desc">Hỏng thì tự động chuyển sang đường bấm giao diện.</p>
+        </div>
+        <div class="field__control field__control--end">
+          <input type="checkbox" id="rpcEnabled">
+        </div>
+      </div>
+
+      <div class="field field--wide">
+        <div class="field__label">
+          <label for="rpcOverrides">Ghi đè RPC ID / đường dẫn / vị trí payload</label>
+        </div>
+        <div class="field__control">
+          <textarea id="rpcOverrides" rows="6" spellcheck="false" placeholder='{
+  "addSourceIds": ["id-doc-tu-probe"],
+  "paths": ["/_/LabsTailwindUi/data/batchexecute"],
+  "slots": { "url": 2, "youtubeUrl": 7 }
+}'></textarea>
+          <p class="hint" id="rpcJsonStatus"></p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Ghi đè selector NotebookLM <span class="tag">nâng cao</span></h2>
+      <p class="hint">
+        Thêm nhãn nút mới khi Google thay đổi giao diện NotebookLM (viết thường, không dấu).
+      </p>
+
+      <div class="field field--wide">
+        <div class="field__label">
+          <label for="selectorOverrides">Selector overrides (JSON)</label>
+        </div>
+        <div class="field__control">
+          <textarea id="selectorOverrides" rows="6" spellcheck="false" placeholder='{
   "addSource": ["them nguon moi"],
   "pasteChip": ["van ban thuan"],
   "submit": ["luu"]
 }'></textarea>
-    <p class="hint" id="jsonStatus"></p>
-  </section>
+          <p class="hint" id="jsonStatus"></p>
+        </div>
+      </div>
+    </section>
 
-  <section>
-    <h2>Đường RPC thêm Nguồn <span class="tag">thử nghiệm</span></h2>
-    <p class="hint">
-      Thay vì bấm qua hộp thoại, extension gọi thẳng backend NotebookLM (<code>batchexecute</code>)
-      từ chính tab đã đăng nhập của bạn. Nhanh hơn nhiều, nhưng <strong>rpc id và hình dạng
-      request là thứ Google đổi không báo trước</strong> — hỏng thì extension tự quay lại đường
-      bấm giao diện, bạn chỉ thấy chậm hơn.
-    </p>
-    <p class="hint">
-      <strong>Chỉ bật sau khi đã đo trên một notebook nháp.</strong> Chạy
-      <code>node tools/probe-notebooklm.mjs</code>, dán các giá trị đo được vào ô dưới, rồi mới bật.
-      Bật khi hình dạng request còn sai có thể tạo ra một Nguồn rác phải xoá tay.
-    </p>
-    <label class="check"><input type="checkbox" id="rpcEnabled"> Thử đường RPC trước, hỏng thì rơi xuống đường bấm giao diện</label>
-    <p class="hint">
-      Ghi đè rpc id / đường gọi / vị trí trong payload. Mảng được <em>gộp thêm</em> vào danh sách
-      mặc định và giá trị bạn thêm được thử trước, nên id cũ vẫn nằm đó làm dự phòng.
-    </p>
-    <textarea id="rpcOverrides" rows="8" spellcheck="false" placeholder='{
-  "addSourceIds": ["id-moi-doc-tu-probe"],
-  "paths": ["/_/LabsTailwindUi/data/batchexecute"],
-  "slots": { "url": 2, "youtubeUrl": 7 }
-}'></textarea>
-  </section>
+    <section>
+      <h2>Bản chụp cấu trúc DOM <span class="tag">gỡ lỗi</span></h2>
+      <p class="hint">
+        Khi extension không tìm thấy selector, cấu trúc vùng đang thao tác sẽ được tự động ghi lại để hỗ trợ sửa lỗi nhanh.
+      </p>
+      <p class="hint locked">
+        Bản chụp chỉ chứa cấu trúc thẻ và thuộc tính, không ghi nhận nội dung cá nhân hay tiêu đề notebook.
+      </p>
+      <pre id="domReports" class="report"></pre>
+      <div class="actions">
+        <button type="button" id="copyDomReports" class="btn" disabled>Sao chép</button>
+        <button type="button" id="clearDomReports" class="btn" disabled>Xoá bản chụp</button>
+        <span class="hint" id="domReportsStatus"></span>
+      </div>
+    </section>
 
-  <section>
-    <h2>Bản chụp cấu trúc DOM <span class="tag">gỡ lỗi</span></h2>
-    <p class="hint">
-      Khi extension <strong>không tìm được</strong> ô nhập, nút xác nhận, hay danh sách Nguồn trong
-      giao diện NotebookLM, nó tự ghi lại <em>cấu trúc</em> của vùng đang nhìn: tên thẻ, class,
-      <code>formcontrolname</code>, <code>placeholder</code> và nhãn nút. Gửi đoạn dưới đây kèm báo
-      lỗi thì sửa selector nhanh hơn hẳn — mà không phải chụp màn hình notebook.
-    </p>
-    <p class="hint locked">
-      Bản chụp <strong>chỉ có cấu trúc</strong>. Nội dung bạn gõ vào ô nhập, nội dung các Nguồn và
-      tiêu đề notebook đều không được ghi lại — hãy tự đọc qua trước khi gửi đi.
-    </p>
-    <pre id="domReports" class="report"></pre>
-    <div class="actions">
-      <!-- Tắt sẵn: bật lên là việc của loadDomReports() sau khi đã đọc storage.
-           Bấm được trước lúc đó thì chép ra một ô còn rỗng mà vẫn báo "đã sao chép". -->
-      <button type="button" id="copyDomReports" class="btn" disabled>Sao chép</button>
-      <button type="button" id="clearDomReports" class="btn" disabled>Xoá bản chụp</button>
-      <span class="hint" id="domReportsStatus"></span>
-    </div>
-  </section>
-
-  <div class="actions">
-    <button type="button" id="save" class="btn btn--primary">Lưu</button>
-    <button type="button" id="reset" class="btn">Khôi phục mặc định</button>
-    <span id="saved" class="saved" hidden>Đã lưu</span>
+    <!--
+      Khôi phục mặc định xoá sạch cả rpcOverrides lẫn selectorOverrides — thứ tốn
+      công dò ra nhất trong trang này. Nó không đứng cạnh nút Lưu, và vẫn phải qua
+      một bước xác nhận.
+    -->
+    <section class="danger">
+      <h2>Vùng nguy hiểm</h2>
+      <div class="danger__row">
+        <div class="field__label">
+          <p class="danger__title">Khôi phục toàn bộ cài đặt về mặc định</p>
+          <p class="field__desc">
+            Xoá cả ghi đè RPC và ghi đè selector đang có. Không hoàn tác được.
+          </p>
+        </div>
+        <button type="button" id="reset" class="btn btn--danger">Khôi phục mặc định</button>
+      </div>
+    </section>
   </div>
 </main>
+
+<!-- Thanh Lưu dính đáy: đổi ở tab nào cũng thấy, và nói rõ nó lưu cả ba tab. -->
+<div class="savebar" id="savebar" hidden>
+  <div class="savebar__inner">
+    <span class="savebar__text" id="dirtyCount"></span>
+    <span id="saved" class="saved" hidden>Đã lưu cài đặt</span>
+    <div class="savebar__actions">
+      <button type="button" id="discard" class="btn">Bỏ thay đổi</button>
+      <button type="button" id="save" class="btn btn--primary">Lưu cài đặt</button>
+    </div>
+  </div>
+</div>
 
 <script src="../common/shared.js"></script>
 <script src="options.js"></script>

@@ -31,7 +31,11 @@ for (const key of keys) {
 // Nút điều khiển và vùng hiển thị: không phải setting nên không có key trong
 // DEFAULTS — nhưng vẫn phải tồn tại trong HTML, vì options.js gọi thẳng
 // `$(id).addEventListener` không guard.
-const DIEU_KHIEN = ['save', 'reset', 'saved', 'jsonStatus', 'domReports', 'domReportsStatus', 'copyDomReports', 'clearDomReports'];
+const DIEU_KHIEN = [
+  'save', 'discard', 'reset', 'saved', 'savebar', 'dirtyCount',
+  'jsonStatus', 'rpcJsonStatus',
+  'domReports', 'domReportsStatus', 'copyDomReports', 'clearDomReports',
+];
 for (const id of DIEU_KHIEN) {
   ok(optionsHtml.includes(`id="${id}"`), `options.html thiếu phần tử điều khiển id="${id}"`);
 }
