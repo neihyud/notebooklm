@@ -262,16 +262,28 @@
   /* 4. Metadata video                                                    */
   /* ------------------------------------------------------------------ */
 
-  async function getPlayerResponse(videoId) {
+  /**
+   * @param {boolean} opts.noFallback tắt nhánh tải nguyên trang watch khi
+   *   `innertube('player')` hỏng.
+   *
+   *   Nhánh đó đúng khi hỏi MỘT video: nó cứu được ca InnerTube từ chối. Nhưng
+   *   nó tải nguyên trang watch, nên hỏi 200 video là 200 lượt tải HTML đầy đủ —
+   *   một cái giá không ai nhìn thấy ở chỗ nó phát sinh. Người gọi hàng loạt bật
+   *   cờ này và coi lỗi là "không biết", tức Hàng đợi; fail-closed, không
+   *   fail-open.
+   */
+  async function getPlayerResponse(videoId, { noFallback = false } = {}) {
     const live = window.ytInitialPlayerResponse;
     if (live && live.videoDetails && live.videoDetails.videoId === videoId) return live;
 
     try {
       const viaRpc = await innertube('player', { videoId });
       if (viaRpc && viaRpc.videoDetails) return viaRpc;
-    } catch (_) {
+    } catch (e) {
+      if (noFallback) throw e;
       /* rơi xuống cách tải HTML */
     }
+    if (noFallback) throw new Error('Không hỏi được player response qua InnerTube');
     const { player } = await fetchWatchPage(videoId);
     if (!player) throw new Error('Không đọc được dữ liệu player của video');
     return player;
@@ -545,10 +557,10 @@
   /* ------------------------------------------------------------------ */
 
   const handlers = {
-    async meta({ videoId }) {
+    async meta({ videoId, noFallback }) {
       const id = videoId || currentVideoId();
       if (!id) throw new Error('Không xác định được videoId');
-      return metaFrom(await getPlayerResponse(id));
+      return metaFrom(await getPlayerResponse(id, { noFallback: !!noFallback }));
     },
 
     async transcript({ videoId, langs }) {

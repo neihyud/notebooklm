@@ -253,6 +253,107 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* Bó link — ai được vào clipboard                                      */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Ba hạng của một video đứng trước Bó link. Chúng đi thẳng vào câu người dùng
+   * đọc ở bảng xác nhận, nên đừng gộp `RESTRICTED` với `UNKNOWN`: một bên là
+   * *đã đo và trượt*, bên kia là *không đo được*. Người dùng xử lý hai ca đó
+   * khác nhau — ca thứ nhất là đúng thiết kế, ca thứ hai là dấu hiệu hỏng.
+   */
+  const BUNDLE = {
+    ACCEPT: 'accept',         // vào clipboard
+    RESTRICTED: 'restricted', // private/unlisted -> Hàng đợi
+    UNKNOWN: 'unknown',       // không hỏi được   -> Hàng đợi
+  };
+
+  /**
+   * Cửa 1 — huy hiệu trên thẻ video. CHỈ ĐƯỢC LOẠI, không bao giờ được nhận.
+   *
+   * Huy hiệu miễn phí (đọc sẵn từ DOM/JSON) nhưng nó *vắng mặt* với video công
+   * khai, nên `unknown` ở đây nghĩa là "chưa hỏi ai cả", không phải "không công
+   * khai". Cho nó quyền nhận là dựng lại đúng lỗi ADR 0001 đã bác: lọc theo huy
+   * hiệu dương thì mọi video công khai đều rớt.
+   *
+   * Nó cũng đọc trượt có hệ thống: owner để YouTube tiếng Đức thì nhãn là
+   * `Privat`/`Nicht gelistet`, cả hai bộ regex trong repo đều không khớp và trả
+   * `unknown`. Vì vậy loại-được là lãi, không loại được thì phải hỏi tiếp.
+   */
+  function badgeRejects({ privacy, accessible } = {}) {
+    if (accessible === false) return true;  // private của người khác, hoặc đã xoá
+    return privacy === PRIVACY.PRIVATE || privacy === PRIVACY.UNLISTED;
+  }
+
+  /**
+   * Cửa 3 — vị ngữ DUY NHẤT cấp phép một video vào Bó link.
+   *
+   * Một URL vào Bó khi và chỉ khi, trong cùng cú bấm đó, một lượt hỏi player
+   * response trả về và thoả CẢ BA: id khớp cái mình vừa hỏi, privacy là public,
+   * và video phát được. Mọi ca khác đi Hàng đợi.
+   *
+   * Vì sao phải đủ ba chứ không phải mỗi điều kiện privacy: `metaFrom` mở bằng
+   * `let privacy = 'public'` (`src/youtube/page-bridge.js:292`) — đó là
+   * fall-through, KHÔNG phải một phép đo. `metaFrom({})` trả về
+   * `{ videoId: null, privacy: 'public', playable: true }`. Nghĩa là một lượt hỏi
+   * trả về rỗng sẽ tự xưng là công khai; chỉ điều kiện `videoId` khớp mới bắt
+   * được nó.
+   *
+   * Đây là chốt duy nhất giữ cho `README.md:15` còn đúng trên đường này — Bó link
+   * bỏ hẳn service worker ra ngoài, nên `resolveMeta`/`planFor` không đi theo.
+   * Fail-closed: thiếu dữ kiện là `UNKNOWN`, không phải `ACCEPT`.
+   *
+   * @returns {{verdict: string, why: string}} `why` là chuỗi chẩn đoán, không phải câu cho người đọc.
+   */
+  function bundleVerdict(videoId, meta) {
+    if (!videoId) return { verdict: BUNDLE.UNKNOWN, why: 'thiếu videoId' };
+    if (!meta) return { verdict: BUNDLE.UNKNOWN, why: 'không hỏi được player response' };
+    if (meta.videoId !== videoId) {
+      return { verdict: BUNDLE.UNKNOWN, why: `player response trả về video khác (${meta.videoId || 'rỗng'})` };
+    }
+    if (meta.privacy === PRIVACY.PRIVATE || meta.privacy === PRIVACY.UNLISTED) {
+      return { verdict: BUNDLE.RESTRICTED, why: meta.privacy };
+    }
+    if (meta.privacy !== PRIVACY.PUBLIC) {
+      return { verdict: BUNDLE.UNKNOWN, why: `privacy không đọc được (${meta.privacy || 'rỗng'})` };
+    }
+    if (meta.playable !== true) {
+      return { verdict: BUNDLE.UNKNOWN, why: meta.reason || 'video không phát được' };
+    }
+    return { verdict: BUNDLE.ACCEPT, why: 'public' };
+  }
+
+  /**
+   * Chạy `fn` trên từng phần tử với trần đồng thời, giữ nguyên thứ tự kết quả.
+   *
+   * Cần vì hai chỗ của Đường trao tay đều bắn request hàng loạt — cửa 3 hỏi
+   * player response từng video, cửa đo docs fetch từng trang — trong khi toàn bộ
+   * code hiện có chạy tuần tự với `sleep(1200)` giữa hai Mục. Bắn 200 request một
+   * lúc vào một host là hành vi mới hoàn toàn, và rate limit của YouTube là rủi ro
+   * đã ghi trong `WORKSPACE_PROTOCOL.md`.
+   *
+   * `fn` KHÔNG được ném: nó phải tự gói lỗi thành kết quả. Một lượt hỏng giữa
+   * chừng không được giết cả lô — đó là ca thường gặp, không phải ca biên.
+   */
+  async function mapWithLimit(items, limit, fn) {
+    const list = Array.from(items || []);
+    const out = new Array(list.length);
+    const width = Math.max(1, Math.min(Number(limit) || 1, list.length));
+    let next = 0;
+
+    await Promise.all(
+      Array.from({ length: width }, async () => {
+        for (;;) {
+          const i = next++;
+          if (i >= list.length) return;
+          out[i] = await fn(list[i], i);
+        }
+      })
+    );
+    return out;
+  }
+
+  /* ------------------------------------------------------------------ */
   /* url tài liệu                                                        */
   /* ------------------------------------------------------------------ */
 
@@ -504,6 +605,7 @@
     getDomReports, saveDomReport, clearDomReports,
     videoIdFrom, canonicalUrl, parseUrlList,
     docKey, isHashRoute, urlLabel,
+    BUNDLE, badgeRejects, bundleVerdict, mapWithLimit,
     uid, sleep, fmtTime, norm, waitFor,
     buildSourceText, renderSegments, privacyLabel, sourceTitle,
     toDataUrl, downloadName,

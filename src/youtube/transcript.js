@@ -277,8 +277,17 @@
   /* điều phối                                                           */
   /* ------------------------------------------------------------------ */
 
-  async function describe(videoId) {
-    return root.NBLM_BRIDGE.call('meta', { videoId: videoId || currentVideoId() }, 30000);
+  /**
+   * @param {boolean} opts.noFallback xem `getPlayerResponse` trong `page-bridge.js`
+   *   — người gọi hàng loạt tắt nhánh tải trang watch để một lượt hỏi hỏng không
+   *   biến thành một lượt tải HTML đầy đủ.
+   */
+  async function describe(videoId, { noFallback = false } = {}) {
+    return root.NBLM_BRIDGE.call(
+      'meta',
+      { videoId: videoId || currentVideoId(), noFallback },
+      30000
+    );
   }
 
   /**
