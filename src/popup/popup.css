@@ -571,6 +571,95 @@ textarea {
   .menu__item--danger.is-confirming { color: #202124; }
 }
 
+/* Sổ đã copy */
+.copied {
+  margin: 10px 0 0;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.copied__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  list-style: none;
+  user-select: none;
+}
+
+/* Tam giác mặc định của <details> lệch hẳn với phần còn lại của popup. */
+.copied__summary::-webkit-details-marker { display: none; }
+
+.copied__summary::before {
+  content: '▸';
+  font-size: 10px;
+  transition: transform 0.12s ease;
+}
+
+.copied[open] > .copied__summary::before { transform: rotate(90deg); }
+
+.copied__count {
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+.copied__list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.copied__row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.copied__url {
+  color: var(--fg);
+  font-size: 12px;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copied__url:hover { text-decoration: underline; }
+
+.copied__meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.copied__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.copied__clear { color: var(--red); }
+
+.copied__clear:hover:not(:disabled) { background: var(--red-surface); }
+
+.copied__clear.is-confirming {
+  background: var(--red);
+  color: #fff;
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .copied__clear.is-confirming { color: #202124; }
+}
+
 /* Queue Item List */
 .list {
   list-style: none;

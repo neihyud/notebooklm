@@ -32,7 +32,7 @@ function renderPopup(queue, opts = {}) {
       sendMessage: async (msg) => {
         sent.push(msg.type);
         return msg.type === 'get-state'
-          ? { queue, settings: { notebookUrl: '' }, running: !!opts.running }
+          ? { queue, settings: { notebookUrl: '' }, running: !!opts.running, copied: opts.copied }
           : {};
       },
       onMessage: { addListener() {} },
@@ -267,6 +267,93 @@ const V = (id, over) => Object.assign({ id, videoId: id.padEnd(11, 'x'), title: 
     const more = win.document.getElementById('list-more');
     eq(more.hidden, false, 'phần dôi ra phải có dòng thông báo');
     ok(/50/.test(more.textContent), `dòng đó phải nói đúng còn bao nhiêu, nhận: ${JSON.stringify(more.textContent)}`);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Sổ đã copy: khu gập trong tab Hàng đợi                             */
+  /* ---------------------------------------------------------------- */
+
+  /* Chưa copy gì: khu này không có gì để nói, và "Xoá sổ" không có gì để xoá. */
+  {
+    const win = renderPopup([]);
+    await settle();
+    ok(win.document.getElementById('copied').hidden, 'Sổ rỗng thì khu Sổ phải ẩn hẳn');
+  }
+
+  /*
+   * Sổ nằm trong tab Hàng đợi, KHÔNG ở Cài đặt và không ở tab "+ Thêm nguồn":
+   * câu hỏi nó trả lời — "cái này copy rồi chưa" — luôn xuất hiện ngay cạnh
+   * hàng đợi.
+   */
+  {
+    const win = renderPopup([], {
+      copied: {
+        total: 2,
+        rows: [
+          { url: 'https://a.dev/docs/x', at: 1735689600000, from: 'a.dev' },
+          { url: 'https://www.youtube.com/watch?v=aaaaaaaaaaa', at: 1735689000000, from: 'playlist X' },
+        ],
+      },
+    });
+    await settle();
+    const box = win.document.getElementById('copied');
+    ok(!box.hidden, 'có dòng thì khu Sổ phải hiện');
+    ok(box.closest('#panel-queue') !== null, 'Sổ phải nằm trong tab Hàng đợi, không phải tab Thêm nguồn');
+    eq(win.document.getElementById('copied-count').textContent, '2', 'phải hiện số dòng của Sổ');
+
+    const rows = Array.from(win.document.querySelectorAll('#copied-list .copied__row'));
+    eq(rows.length, 2, 'mỗi dòng Sổ một mục');
+    /*
+     * Ghim từng CHỖ, không đọc textContent cả dòng: URL và "gom từ đâu" nằm
+     * chung một dòng, nên hoán vị hai chuỗi ấy vẫn cho ra một dòng đọc hợp lý.
+     */
+    eq(rows[0].querySelector('.copied__url').getAttribute('href'), 'https://a.dev/docs/x',
+      'URL phải mở được — Sổ nói "đã copy cái này", câu hỏi kế tiếp luôn là "cái nào"');
+    ok(/playlist X/.test(rows[1].querySelector('.copied__meta').textContent),
+      'phải nói ra link được gom từ đâu');
+    ok(win.document.getElementById('copied-more').hidden,
+      'hiện đủ thì không được nói là còn dòng ẩn');
+  }
+
+  /*
+   * Sổ lớn hơn lát cắt service worker gửi. Đây là hoán vị đắt nhất của khối
+   * này: đếm bằng `rows.length` cho ra "50" trong khi Sổ đang lọc 120 link, và
+   * con số ấy sai đúng vào lúc người dùng cần nó.
+   */
+  {
+    const rows = Array.from({ length: 50 }, (_, i) => ({ url: `https://a.dev/p/${i}`, at: 1735689600000, from: 'a.dev' }));
+    const win = renderPopup([], { copied: { total: 120, rows } });
+    await settle();
+    eq(win.document.getElementById('copied-count').textContent, '120',
+      'con số phải là tổng THẬT của Sổ, không phải số dòng đang hiện');
+    const more = win.document.getElementById('copied-more');
+    ok(!more.hidden, 'danh sách bị cắt phải tự khai — bị cắt im lặng đọc y hệt đã hiện đủ');
+    ok(/70/.test(more.textContent) && /120/.test(more.textContent),
+      `phải nói rõ còn bao nhiêu dòng ẩn và Sổ vẫn lọc đủ bao nhiêu — nhận: "${more.textContent}"`);
+  }
+
+  /*
+   * Xoá sổ dùng đúng nghi thức hai nhịp của "Xoá hết hàng đợi". Sổ giữ mãi theo
+   * thiết kế, nên một cú bấm nhầm làm mọi link đã copy có thể vào notebook lần
+   * thứ hai, và không có đường lấy lại.
+   */
+  {
+    const win = renderPopup([], {
+      copied: { total: 1, rows: [{ url: 'https://a.dev/docs/x', at: 1735689600000, from: 'a.dev' }] },
+    });
+    await settle();
+    const btn = win.document.getElementById('clear-copied');
+    win.__sent.length = 0;
+
+    click(win, btn);
+    await settle();
+    ok(!win.__sent.includes('clear-copied'), 'cú bấm ĐẦU không được xoá gì — Sổ không hoàn tác được');
+    ok(/Chắc chắn/.test(btn.textContent), `cú bấm đầu phải đổi thành lời hỏi lại — nhận: "${btn.textContent}"`);
+
+    click(win, btn);
+    await settle();
+    ok(win.__sent.includes('clear-copied'), 'cú bấm THỨ HAI mới thật sự xoá Sổ');
+    eq(btn.textContent, 'Xoá sổ', 'xoá xong nút phải trở lại nhãn thường');
   }
 
   console.log(`${pass} pass, ${fail} fail`);

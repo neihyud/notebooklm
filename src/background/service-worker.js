@@ -699,6 +699,9 @@ async function recordCopied(urls, from) {
   return { added, total: log.length };
 }
 
+/** Số dòng Sổ gửi kèm mỗi lượt GET_STATE — xem ghi chú ở đó. */
+const COPIED_PAGE = 50;
+
 async function clearCopied() {
   await chrome.storage.local.remove(KEYS.COPIED);
   notifyPopup();
@@ -1510,12 +1513,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
 
         case MSG.GET_STATE: {
-          const [queue, settings, running] = await Promise.all([
+          const [queue, settings, running, copiedLog] = await Promise.all([
             getQueue(),
             getSettings(),
             chrome.storage.local.get(KEYS.RUNNING),
+            getCopiedLog(),
           ]);
-          sendResponse({ queue, settings, running: !!running[KEYS.RUNNING] || !!runner });
+          /*
+           * Sổ đã copy giữ MÃI theo thiết kế, còn popup thì hỏi lại 1500ms một
+           * lần. Gửi cả Sổ qua mỗi lượt là bắt một cấu trúc chỉ-lớn-lên đi qua
+           * đường sendMessage vô hạn lần. Gửi `total` thật kèm một lát cắt, và
+           * để popup tự nói ra rằng nó đang cắt — trần dựng DOM bị giấu đọc y
+           * hệt một danh sách đã hiện đủ.
+           */
+          sendResponse({
+            queue,
+            settings,
+            running: !!running[KEYS.RUNNING] || !!runner,
+            copied: { total: copiedLog.length, rows: copiedLog.slice(-COPIED_PAGE).reverse() },
+          });
           return;
         }
 

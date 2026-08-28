@@ -22,13 +22,15 @@ const eq = (got, want, m) =>
 
 const noopEvent = () => ({ addListener() {}, removeListener() {} });
 const store = new Map();
+/* Router tin nhắn của service worker — cần nó để hỏi GET_STATE đúng đường popup hỏi. */
+let router = null;
 
 /* Service worker gắn mọi thứ vào `self`; trong node thì `self` là `global`. */
 global.self = global;
 global.importScripts = (...files) => files.forEach((f) => require(path.join(ROOT, f)));
 global.chrome = {
   runtime: {
-    onMessage: noopEvent(),
+    onMessage: { addListener(fn) { router = fn; }, removeListener() {} },
     onInstalled: noopEvent(),
     onStartup: noopEvent(),
     getManifest: () => ({ version: '0.0.0-test' }),
@@ -67,6 +69,8 @@ const SW = global.NBLM_SW_INTERNALS;
 const N = global.NBLM;
 
 const YT = (id) => `https://www.youtube.com/watch?v=${id}`;
+/** Hỏi service worker đúng như popup hỏi, không gọi tắt vào hàm nội bộ. */
+const ask = (message) => new Promise((resolve) => router(message, {}, resolve));
 const reset = async () => { store.clear(); };
 const log = () => store.get('copiedLog') || [];
 
@@ -269,6 +273,42 @@ const log = () => store.get('copiedLog') || [];
 
     global.fetch = async (url) => ({ ok: false, status: 403, url, headers: { get: () => '' }, text: async () => '' });
     eq((await SW.fetchRawHtml('https://a.dev/x')).error, 'HTTP 403', 'HTTP lỗi phải nói rõ mã');
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Sổ đi tới popup: tổng thật, và một lát cắt tự khai là lát cắt      */
+  /* ---------------------------------------------------------------- */
+
+  ok(typeof router === 'function', 'phải bắt được router tin nhắn để hỏi GET_STATE đúng đường popup hỏi');
+
+  await reset();
+  await SW.recordCopied([YT('aaaaaaaaaaa'), YT('bbbbbbbbbbb'), YT('ccccccccccc')], 'playlist X');
+  {
+    const st = await ask({ type: 'get-state' });
+    eq(st.copied.total, 3, 'GET_STATE phải kèm Sổ — popup không cầm luật khoá, nó chỉ hiển thị');
+    /*
+     * Mới nhất đứng đầu. Không phải chuyện thẩm mỹ: Sổ giữ MÃI, nên xếp cũ-trước
+     * là dồn đúng thứ người dùng vừa làm xuống cuối một danh sách chỉ có dài ra.
+     */
+    eq(st.copied.rows.map((r) => r.url), [YT('ccccccccccc'), YT('bbbbbbbbbbb'), YT('aaaaaaaaaaa')],
+      'dòng mới nhất phải đứng đầu');
+    eq(st.copied.rows[0].from, 'playlist X', 'mỗi dòng phải mang theo chỗ nó được gom từ đó');
+    ok(typeof st.copied.rows[0].at === 'number', 'mỗi dòng phải có thời điểm copy');
+  }
+
+  /*
+   * Sổ lớn hơn lát cắt. `total` và `rows.length` cố ý KHÁC nhau ở đây, và đó là
+   * chỗ dễ hỏng nhất: popup đếm bằng `rows.length` thì con số nói dối đúng vào
+   * lúc Sổ đã lớn — tức đúng lúc người ta cần con số đó.
+   */
+  await reset();
+  await SW.recordCopied(Array.from({ length: 120 }, (_, i) => `https://a.dev/p/${i}`), 'trang lớn');
+  {
+    const st = await ask({ type: 'get-state' });
+    eq(st.copied.total, 120, '`total` phải là tổng THẬT của Sổ, không phải độ dài lát cắt');
+    ok(st.copied.rows.length < st.copied.total,
+      'Sổ chỉ có lớn lên và popup hỏi lại mỗi 1500ms — không được gửi cả Sổ qua mỗi lượt');
+    eq(st.copied.rows[0].url, 'https://a.dev/p/119', 'lát cắt phải cắt từ đầu MỚI, không phải đầu cũ');
   }
 
   console.log(`\n${pass} pass, ${fail} fail`);

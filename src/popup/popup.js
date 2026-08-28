@@ -41,6 +41,11 @@
     panelQueue: $('panel-queue'),
     panelAdd: $('panel-add'),
     emptyAddBtn: $('empty-add-btn'),
+    copied: $('copied'),
+    copiedCount: $('copied-count'),
+    copiedList: $('copied-list'),
+    copiedMore: $('copied-more'),
+    clearCopied: $('clear-copied'),
   };
 
   /** Gửi message lên background với cơ chế bắt lỗi mất kết nối service worker. */
@@ -75,6 +80,7 @@
 
   function switchTab(target) {
     resetClearAllBtn();
+    resetClearCopiedBtn();
     closeQueueMenu();
     const isQueue = target === 'queue';
     // Roving tabindex: chỉ tab đang chọn nhận được phím Tab, hai mũi tên đi
@@ -438,7 +444,96 @@
     } else {
       els.listMore.hidden = true;
     }
+
+    renderCopied(state.copied);
   }
+
+  /* ---------------------------------------------------------------- */
+  /* Sổ đã copy                                                        */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * @param {{total: number, rows: Array<{url, at, from}>}} copied service worker
+   *   gửi `total` THẬT kèm một lát cắt — xem ghi chú ở `case MSG.GET_STATE`.
+   *   Đừng suy `total` ra từ `rows.length`: hai số đó cố ý khác nhau, và lấy
+   *   nhầm là con số đếm nói dối đúng lúc Sổ đã lớn.
+   */
+  function renderCopied(copied) {
+    const total = (copied && copied.total) || 0;
+    const rows = (copied && copied.rows) || [];
+
+    els.copied.hidden = total === 0;
+    if (total === 0) {
+      els.copiedList.replaceChildren();
+      // Đóng lại: mở sẵn một khu rỗng thì lần sau nó bung ra giữa hàng đợi.
+      els.copied.open = false;
+      resetClearCopiedBtn();
+      return;
+    }
+
+    els.copiedCount.textContent = String(total);
+    els.copiedList.replaceChildren(...rows.map(buildCopiedRow));
+
+    if (total > rows.length) {
+      els.copiedMore.hidden = false;
+      els.copiedMore.textContent = `Còn ${total - rows.length} dòng cũ hơn không hiển thị — Sổ vẫn lọc đủ cả ${total}.`;
+    } else {
+      els.copiedMore.hidden = true;
+    }
+  }
+
+  function buildCopiedRow(row) {
+    const li = document.createElement('li');
+    li.className = 'copied__row';
+
+    // Link mở được: Sổ nói "đã copy cái này rồi", và câu hỏi kế tiếp gần như
+    // luôn là "cái nào?". Bắt người dùng đọc URL thô để tự trả lời là bắt sai.
+    const a = document.createElement('a');
+    a.className = 'copied__url';
+    a.href = row.url || '';
+    a.target = '_blank';
+    a.rel = 'noreferrer';
+    a.textContent = urlLabel(row.url || '');
+    a.title = row.url || '';
+
+    const meta = document.createElement('span');
+    meta.className = 'copied__meta';
+    // `from` là chỗ gom được (playlist/kênh/trang). Rỗng thì bỏ hẳn, đừng in
+    // dấu · lẻ loi.
+    meta.textContent = [row.at ? fmtTime(row.at) : '', row.from || ''].filter(Boolean).join(' · ');
+
+    li.append(a, meta);
+    return li;
+  }
+
+  /*
+   * Xoá sổ dùng đúng nghi thức hai nhịp của "Xoá hết hàng đợi": Sổ giữ mãi
+   * theo thiết kế, nên một cú bấm nhầm ở đây làm mọi link đã copy có thể vào
+   * notebook lần thứ hai mà không cách nào lấy lại.
+   */
+  let clearCopiedTimer = null;
+  function resetClearCopiedBtn() {
+    if (clearCopiedTimer) clearTimeout(clearCopiedTimer);
+    clearCopiedTimer = null;
+    if (els.clearCopied) {
+      els.clearCopied.textContent = 'Xoá sổ';
+      els.clearCopied.classList.remove('is-confirming');
+    }
+  }
+
+  els.clearCopied.addEventListener('click', async () => {
+    if (!clearCopiedTimer) {
+      els.clearCopied.textContent = 'Chắc chắn xoá sổ?';
+      els.clearCopied.classList.add('is-confirming');
+      clearCopiedTimer = setTimeout(resetClearCopiedBtn, 3500);
+      return;
+    }
+    resetClearCopiedBtn();
+    await withActionLock(async () => {
+      await send(MSG.CLEAR_COPIED);
+      refresh();
+    });
+  });
 
   async function refresh() {
     const state = await send(MSG.GET_STATE);

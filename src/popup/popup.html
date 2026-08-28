@@ -92,6 +92,26 @@
           </details>
         </div>
       </div>
+
+      <!--
+        Sổ đã copy. Nằm trong tab Hàng đợi chứ không ở Cài đặt: câu hỏi nó trả
+        lời — "cái này copy rồi chưa" — luôn xuất hiện ngay cạnh hàng đợi, không
+        phải trong lúc chỉnh cấu hình.
+
+        `<details>` đóng sẵn, và ẩn hẳn khi Sổ rỗng: trước cú copy đầu tiên thì
+        nó không có gì để nói, còn "Xoá sổ" lúc đó cũng không có gì để xoá.
+      -->
+      <details class="copied" id="copied" hidden>
+        <summary class="copied__summary">
+          <span>Sổ đã copy</span>
+          <span class="copied__count" id="copied-count">0</span>
+        </summary>
+        <ul class="copied__list" id="copied-list"></ul>
+        <p class="list__more" id="copied-more" hidden></p>
+        <div class="copied__actions">
+          <button type="button" id="clear-copied" class="btn btn--sm copied__clear">Xoá sổ</button>
+        </div>
+      </details>
     </section>
 
     <!-- PANEL 2: THÊM NGUỒN -->
