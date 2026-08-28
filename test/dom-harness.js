@@ -490,8 +490,22 @@ function loadDocsPage({
 
   const store = {};
   const sent = [];
-  let respond = () => ({});
   let router = null;
+
+  /* Xem `defaultReply` của `loadYouTubePage` — cùng luật: kho rỗng, mọi thứ thành công. */
+  let respond = (message) => {
+    const type = message && message.type;
+    if (type === 'bundle-filter') {
+      return { keep: message.urls || [], dropped: [], counts: { copied: 0, queued: 0 } };
+    }
+    if (type === 'bundle-copied') return { added: (message.urls || []).length };
+    if (type === 'enqueue') {
+      const n = (message.items || []).length;
+      return { added: n, skipped: 0, total: n };
+    }
+    if (type === 'docs-raw-fetch') return { error: 'harness: chưa cấu hình docs-raw-fetch' };
+    return {};
+  };
 
   win.chrome = {
     runtime: {
@@ -532,17 +546,34 @@ function loadDocsPage({
     detect: () => (tree ? { tree, count: countUrls(tree) } : null),
   };
 
+  /*
+   * `extract.js` nạp THẬT, không stub — khác hẳn `sidebar.js` ở trên, và khác vì
+   * một lý do đo được: `sidebar.js` chấm điểm bằng `getBoundingClientRect` +
+   * `window.innerWidth`, thứ jsdom không có, nên bản thật ở đó luôn trả 0. Còn
+   * `extract.js` chỉ đọc cấu trúc DOM và đếm chữ — jsdom làm đúng cả hai.
+   *
+   * Đấy là điều kiện để cửa đo được kiểm THẬT: `how` và `chars` phải do
+   * `pickRoot`/`score` thật sinh ra từ HTML thật. Stub hai giá trị đó là tự chấm
+   * điểm bài của mình.
+   */
   const calls = { extract: [] };
-  win.NBLM_DOCS_EXTRACT = {
-    fromUrl: async (u, opts) => {
-      calls.extract.push({ how: 'fromUrl', url: u, opts });
-      return extract ? extract(u, opts) : { title: 'Doc', markdown: '# Doc', chars: 100 };
-    },
-    fromDocument: (docArg, u, opts) => {
-      calls.extract.push({ how: 'fromDocument', url: u, opts });
-      return extract ? extract(u, opts) : { title: 'Doc', markdown: '# Doc', chars: 100 };
-    },
-  };
+  load('src/docs/markdown.js');   // extract.js đọc NBLM_DOCS_MARKDOWN ngay lúc chạy
+  load('src/docs/extract.js');
+
+  if (extract) {
+    // Chỉ hai đường ĐI QUA MẠNG mới thay được; `fromHtml` giữ nguyên bản thật.
+    const real = win.NBLM_DOCS_EXTRACT;
+    win.NBLM_DOCS_EXTRACT = Object.assign({}, real, {
+      fromUrl: async (u, opts) => {
+        calls.extract.push({ how: 'fromUrl', url: u, opts });
+        return extract(u, opts);
+      },
+      fromDocument: (docArg, u, opts) => {
+        calls.extract.push({ how: 'fromDocument', url: u, opts });
+        return extract(u, opts);
+      },
+    });
+  }
 
   load('src/docs/content.js');
 
@@ -566,6 +597,11 @@ function loadDocsPage({
     panel: (sel) => (shadow() ? shadow().querySelector(sel) : null),
     panelAll: (sel) => (shadow() ? Array.from(shadow().querySelectorAll(sel)) : []),
     launcher: () => win.document.querySelector('#nblm-docs-launcher'),
+    /** Câu `flash()` gần nhất. Toast nằm ngoài <body>, trên documentElement. */
+    flash: () => {
+      const el = win.document.querySelector('#nblm-docs-toast');
+      return el ? el.textContent : '';
+    },
     /*
      * `docs/content.js:457` cài một `setInterval(1500)` dò lại sidebar suốt vòng
      * đời trang. Trong trình duyệt đó là đúng — sidebar của SPA xuất hiện muộn.

@@ -508,6 +508,54 @@ function normalize(raw) {
 }
 
 /* -------------------------------------------------------------------- */
+/* Cửa đo HTML thô — NotebookLM có đọc nổi trang này không               */
+/* -------------------------------------------------------------------- */
+
+/** Trần thời gian cho một lượt fetch của cửa đo. Toàn bộ code cũ chạy tuần tự
+ *  và KHÔNG có một `AbortController` nào — bắn 30 fetch vào một host là hành vi
+ *  mới hoàn toàn, nên nó phải có hạn của riêng nó. */
+const PROBE_TIMEOUT_MS = 12000;
+
+/**
+ * Tải HTML thô của một URL, **ẩn danh**, đúng như máy chủ Google sẽ tải nó.
+ *
+ * `credentials: 'omit'` được GÕ RA chứ không dựa vào mặc định, và đây là chỗ
+ * dễ sai nhất của cả ticket. Mặc định của `fetch` là `same-origin`, nghe thì đã
+ * an toàn — nhưng doc chính thức của Chrome ghi thêm một luật riêng cho
+ * extension: *"Requests from an extension to a third-party are treated as
+ * same-site if the extension has host permissions for the third-party. This
+ * means SameSite=Strict cookies can be sent."*
+ * (`developer.chrome.com/docs/extensions/develop/concepts/storage-and-cookies`,
+ * đọc 2026-08-25). Repo này có host permission cho MỌI http/https
+ * (`manifest.json:22-23`), nên câu đó phủ đúng mọi URL đi qua đây.
+ *
+ * Không có `'omit'` thì cửa đo hỏng theo chiều nguy hiểm nhất: một trang nội bộ
+ * chỉ đọc được khi đã đăng nhập sẽ đo ra "có thân bài" trên máy owner, rồi
+ * NotebookLM — fetch ẩn danh — nhận về trang đăng nhập và nuốt một Nguồn rỗng.
+ * Cửa đo nói dối theo chiều BẬT là tệ hơn không có cửa đo.
+ *
+ * Cố ý KHÔNG tái dùng `EX.fromUrl` (`src/docs/extract.js:227`): nó fetch với
+ * `credentials: 'include'`, và ở đó điều đó ĐÚNG — nó phục vụ Dán text, vốn đọc
+ * nội dung ngay trên máy người dùng nên tài liệu nội bộ đọc được mới là tính
+ * năng (`README.md:94` bán nó ra ngoài đúng như vậy). Hai việc khác nhau, hai
+ * đường fetch khác nhau.
+ */
+async function fetchRawHtml(url) {
+  try {
+    const res = await fetch(url, {
+      credentials: 'omit',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    if (!res.ok) return { url, error: `HTTP ${res.status}` };
+    const type = res.headers.get('content-type') || '';
+    return { url, finalUrl: res.url || url, type, html: await res.text() };
+  } catch (e) {
+    return { url, error: (e && e.message) || String(e) };
+  }
+}
+
+/* -------------------------------------------------------------------- */
 /* Sổ đã copy — cửa 2 của Đường trao tay                                 */
 /* -------------------------------------------------------------------- */
 
@@ -1503,6 +1551,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           sendResponse(await clearCopied());
           return;
 
+        case MSG.DOCS_RAW_FETCH:
+          sendResponse(await fetchRawHtml(message.url));
+          return;
+
         case MSG.OPEN_OPTIONS:
           chrome.runtime.openOptionsPage();
           sendResponse({ ok: true });
@@ -1665,6 +1717,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 self.NBLM_SW_INTERNALS = {
   awaitDownloadComplete, saveFile, runQueue, DOWNLOAD_TIMEOUT_MS, ITEM_TIMEOUT_MS,
   bundleKey, filterBundle, recordCopied, clearCopied, enqueue,
+  fetchRawHtml, PROBE_TIMEOUT_MS,
 };
 
 chrome.tabs.onRemoved.addListener((tabId) => {

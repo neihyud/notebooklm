@@ -223,6 +223,54 @@ const log = () => store.get('copiedLog') || [];
     eq(log(), [], 'URL không lấy được khoá thì không vào Sổ');
   }
 
+  /* ---------------------------------------------------------------- */
+  /* cửa đo: fetch phải ẨN DANH                                        */
+  /* ---------------------------------------------------------------- */
+
+  /*
+   * Ghim ở đây chứ không ở `docs-panel.test.js`, và đó là chỗ duy nhất ghim
+   * được: phía tab tài liệu, service worker là một stub, nên hoán vị
+   * `'omit'` -> `'include'` xanh cả hai chiều ở đó (đo 2026-08-28). Thứ quyết
+   * định nằm ở đây, nên assertion cũng phải ở đây.
+   *
+   * Vì sao nó đáng một test riêng: mặc định của `fetch` là `same-origin`, nghe
+   * thì đã an toàn — nhưng doc chính thức của Chrome nói request từ extension
+   * tới bên thứ ba được coi là *same-site* khi extension có host permission, đủ
+   * để cả `SameSite=Strict` đi kèm. Repo này có host permission cho MỌI
+   * http/https. Không gõ `'omit'` ra thì một trang nội bộ chỉ đọc được khi đã
+   * đăng nhập sẽ đo ra "có thân bài" trên máy owner, rồi NotebookLM — fetch ẩn
+   * danh — nhận về trang đăng nhập và nuốt một Nguồn rỗng.
+   */
+  {
+    const seen = [];
+    global.fetch = async (url, init) => {
+      seen.push({ url, init });
+      return {
+        ok: true,
+        url,
+        headers: { get: () => 'text/html' },
+        text: async () => '<html><body>ok</body></html>',
+      };
+    };
+
+    const res = await SW.fetchRawHtml('https://intranet.example/docs/x');
+    eq(seen.length, 1, 'cửa đo phải fetch đúng một lần');
+    eq(seen[0].init.credentials, 'omit',
+      'fetch của cửa đo PHẢI gõ credentials:"omit" — mặc định same-origin vẫn gửi cookie khi extension có host permission');
+    eq(seen[0].init.redirect, 'follow', 'phải theo redirect như máy chủ Google sẽ theo');
+    ok(seen[0].init.signal, 'phải có AbortSignal riêng — toàn bộ code cũ chạy tuần tự và không có AbortController nào');
+    eq(res.html, '<html><body>ok</body></html>', 'trả về HTML thô để tab tài liệu tự parse');
+
+    /* Lỗi mạng gói thành kết quả, không ném — một lượt hỏng không được giết cả lô. */
+    global.fetch = async () => { throw new Error('ECONNREFUSED'); };
+    const bad = await SW.fetchRawHtml('https://a.dev/x');
+    eq(bad.error, 'ECONNREFUSED', 'fetch hỏng phải trả về lỗi, không ném');
+    ok(!bad.html, 'fetch hỏng thì không có html');
+
+    global.fetch = async (url) => ({ ok: false, status: 403, url, headers: { get: () => '' }, text: async () => '' });
+    eq((await SW.fetchRawHtml('https://a.dev/x')).error, 'HTTP 403', 'HTTP lỗi phải nói rõ mã');
+  }
+
   console.log(`\n${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
 })();

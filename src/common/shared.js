@@ -34,6 +34,7 @@
     DOCS_PANEL: 'docs-panel',     // mở bảng chọn link
     DOCS_FETCH: 'docs-fetch',     // tải URL khác bằng fetch rồi trích (không rời trang)
     DOCS_READ: 'docs-read',       // trích ngay từ DOM đang hiển thị
+    DOCS_RAW_FETCH: 'docs-raw-fetch', // tab -> background: fetch ẨN DANH, trả HTML thô
     // Đường trao tay: bề mặt -> background -> bề mặt
     BUNDLE_FILTER: 'bundle-filter',   // {urls} -> {keep, dropped} (cửa 2: khử trùng)
     BUNDLE_COPIED: 'bundle-copied',   // báo NGƯỢC sau khi writeText xong -> ghi Sổ

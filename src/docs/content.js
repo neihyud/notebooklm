@@ -12,7 +12,7 @@
 ;(function () {
   'use strict';
 
-  const { MSG, KIND, DEFAULTS, KEYS, getSettings, urlLabel, sleep } = globalThis.NBLM;
+  const { MSG, KIND, DEFAULTS, KEYS, getSettings, urlLabel, sleep, mapWithLimit } = globalThis.NBLM;
   const SB = globalThis.NBLM_DOCS_SIDEBAR;
   const EX = globalThis.NBLM_DOCS_EXTRACT;
 
@@ -85,6 +85,114 @@
 
   function hyphenate(name) {
     return name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+  }
+
+  /* -------------------------------------------------------------------- */
+  /* Cửa đo — NotebookLM có đọc nổi trang này không                        */
+  /* -------------------------------------------------------------------- */
+
+  /** Trần đồng thời cho cửa đo. Xem `mapWithLimit` và ràng buộc 7 của ticket 006. */
+  const PROBE_LIMIT = 4;
+
+  /**
+   * Ngưỡng ký tự của vế thứ hai.
+   *
+   * Đo 2026-08-25 trên 19 trang thật, fetch ẩn danh + `fromDocument` trong jsdom:
+   *   - chặn dưới: sáu trang vỏ JS thật, năm bộ tạo khác nhau (docsify ×2,
+   *     Angular Material, swagger-ui, ng-bootstrap, Vite SPA) — `chars` đúng
+   *     bằng **0**, không phải "gần 0".
+   *   - chặn trên: trang SSR nhỏ nhất vẫn có chữ mà rơi `fallback` là
+   *     `example.com` với **113** ký tự.
+   * Cửa sổ an toàn là `1 ≤ N ≤ 113`; chọn 100 để lệch về phía cao.
+   *
+   * Lệch về phía nào là có lý do: hai lỗi KHÔNG cân nhau. TẮT nhầm thì trang được
+   * nêu tên và người dùng đi đường Dán text — vốn là mặc định. BẬT nhầm thì
+   * NotebookLM lặng lẽ nuốt một Nguồn rỗng, đúng cái bug extension này sinh ra để chữa.
+   *
+   * Đừng mượn `docsMinChars: 600` (`src/common/shared.js`): nó phục vụ quyết định
+   * khác — "trang này rỗng quá, mở tab ẩn đọc lại". Hai quyết định thì không dùng
+   * chung một ngưỡng.
+   */
+  const PROBE_MIN_CHARS = 100;
+
+  /**
+   * Trang này có thân bài trong HTML thô không?
+   *
+   * Chữ ký của "vỏ JS rỗng" là `how === 'fallback'` KÈM `chars` gần 0, không
+   * phải mỗi `chars`: `chars` là độ dài Markdown *sau* khi dọn `JUNK_SELECTORS`,
+   * nên `chars` thấp gộp hai nguyên nhân khác hẳn nhau làm một.
+   *
+   * Vế `chars` gần như không làm việc — trên 19 trang đo được, `how ===
+   * 'fallback'` một mình đã tách đúng 17/17 trang docs. Nhưng đừng bỏ: nó cứu
+   * đúng hai ca, `example.com` (113 ký tự, `score` DƯƠNG +110, rơi `fallback`
+   * chỉ vì 110 < floor 200) và `info.cern.ch` (212 ký tự, `score` ÂM -25,5 vì
+   * gần như toàn link). Cả hai server-render thật, có chữ thật. Gate chỉ xét
+   * `how` sẽ TẮT nhầm cả hai.
+   */
+  function passesProbe(doc) {
+    if (!doc) return false;
+    return doc.how !== 'fallback' || Number(doc.chars || 0) >= PROBE_MIN_CHARS;
+  }
+
+  /**
+   * Đo từng URL đã tick, và CHỈ lúc bấm nút copy.
+   *
+   * Không đo lúc mở bảng: `flatten()` duyệt hết cây sidebar và không có trần
+   * nào — một site Docusaurus cỡ vừa là 200+ dòng, tức 200 lượt fetch cho một cú
+   * bấm chưa xảy ra. Vì vậy nút copy LUÔN bật; trả tiền sau khi bấm.
+   *
+   * Parse ở đây, trong tab tài liệu, chứ không ở service worker: `DOMParser`
+   * KHÔNG tồn tại trong MV3 service worker (doc chính thức của Chrome, và
+   * `chrome.offscreen` có hẳn một `reason` tên `DOM_PARSER` — reason đó không tồn
+   * tại nếu service worker tự parse được). Đường offscreen chạy được nhưng đắt
+   * thật: repo chỉ có MỘT offscreen document, và document hiện tại tạo với
+   * `reasons: ['BLOBS']` cho đường tải file — đường nào tạo trước thì chốt luôn
+   * `reasons`. Tab tài liệu thì đang mở sẵn và có `DOMParser`. Ít bộ phận chuyển
+   * động nhất.
+   */
+  async function probeUrls(urls, onProgress) {
+    let done = 0;
+    return mapWithLimit(urls, PROBE_LIMIT, async (url) => {
+      const res = await chrome.runtime.sendMessage({ type: MSG.DOCS_RAW_FETCH, url }).catch((e) => ({
+        error: (e && e.message) || String(e),
+      }));
+
+      let verdict;
+      if (!res || res.error) {
+        // Không đo được thì KHÔNG đoán. Fail-closed: trang rơi về Dán text.
+        verdict = { url, ok: false, why: (res && res.error) || 'không tải được' };
+      } else if (/text\/(plain|markdown)|application\/(json|yaml)/i.test(res.type || '')) {
+        // File thô — không có vỏ JS nào để rỗng.
+        verdict = { url, ok: true, how: 'raw', chars: (res.html || '').trim().length };
+      } else {
+        try {
+          /*
+           * KHÔNG dùng `extractOpts()` ở đây, và đây là cái bẫy chính của mục này:
+           * `extractOpts()` mang theo `minChars: settings.docsMinChars` (mặc định
+           * 600), thứ đi thẳng vào `pickRoot` thành `floor = max(200, 600)`. Với
+           * floor 600 thì cả những trang SSR có thân bài thật cũng rơi `fallback`,
+           * và cửa đo TẮT nhầm hàng loạt.
+           *
+           * `docsMinChars` phục vụ một quyết định KHÁC — "trang này rỗng quá, mở
+           * tab ẩn đọc lại". Hai quyết định thì không dùng chung một ngưỡng. Phép
+           * đo 19 trang dựng nên `PROBE_MIN_CHARS` chạy với `opts = {}`, tức
+           * floor 200; cửa đo phải chạy đúng điều kiện đó.
+           */
+          const doc = EX.fromHtml(res.html || '', res.finalUrl || url, {
+            keepLinks: !!settings.docsKeepLinks,
+            keepImages: settings.docsKeepImages !== false,
+          });
+          verdict = { url, ok: passesProbe(doc), how: doc.how, chars: doc.chars };
+          if (!verdict.ok) verdict.why = 'HTML thô không có thân bài (trang dựng bằng JavaScript)';
+        } catch (e) {
+          verdict = { url, ok: false, why: (e && e.message) || String(e) };
+        }
+      }
+
+      done++;
+      if (onProgress) onProgress(done, urls.length);
+      return verdict;
+    });
   }
 
   /* -------------------------------------------------------------------- */
@@ -172,6 +280,7 @@
         </p>
         <div class="panel__go">
           <label class="panel__run"><input type="checkbox" class="panel__runnow" checked> Chạy ngay</label>
+          <button type="button" class="btn btn--ghost" data-act="copy" disabled>Copy link</button>
           <button type="button" class="btn" data-act="import" disabled>Thêm 0 trang</button>
         </div>
       </footer>`;
@@ -181,6 +290,7 @@
     const list = el.querySelector('.panel__list');
     const search = el.querySelector('.panel__search');
     const goBtn = el.querySelector('[data-act="import"]');
+    const copyBtn = el.querySelector('[data-act="copy"]');
     const runNow = el.querySelector('.panel__runnow');
 
     let rows = [];
@@ -194,6 +304,10 @@
       const n = checkedRows().length;
       goBtn.disabled = !n;
       goBtn.textContent = n ? `Thêm ${n} trang` : 'Thêm 0 trang';
+      // Nút copy LUÔN bật khi có dòng được tick — cửa đo chạy sau cú bấm, không
+      // trước. Đo lúc mở bảng là 200 fetch cho một cú bấm chưa xảy ra.
+      copyBtn.disabled = !n;
+      copyBtn.textContent = n ? `Copy ${n} link` : 'Copy link';
 
       // Nhóm không có URL vẫn cần hiện trạng thái theo con của nó.
       for (const row of rows) {
@@ -279,6 +393,73 @@
       syncCounts();
     }
 
+    /**
+     * Đường trao tay cho trang tài liệu: đo, khử trùng, ghi clipboard, rồi dừng.
+     *
+     * URL đem đi copy là `row.url` — đúng thứ bảng đang hiện. KHÔNG dùng `key`
+     * (`docKey`): đó là khoá *so trùng*, không phải "bản sạch" để dán. `docKey`
+     * percent-encode chữ có dấu (`/tiếng-việt` → `/ti%E1%BA%BFng-vi%E1%BB%87t`),
+     * bỏ `:443`, và cắt `/` cuối. Dán vẫn chạy, nhưng URL hiện ra khác cái người
+     * dùng vừa nhìn thấy. Hai vai, hai chuỗi.
+     */
+    async function copyBundle(picked) {
+      const original = copyBtn.textContent;
+      copyBtn.disabled = true;
+      goBtn.disabled = true;
+
+      try {
+        copyBtn.textContent = `Đang đo 0/${picked.length}…`;
+        const verdicts = await probeUrls(
+          picked.map((r) => r.url),
+          (done, total) => { copyBtn.textContent = `Đang đo ${done}/${total}…`; }
+        );
+
+        const passed = verdicts.filter((v) => v.ok).map((v) => v.url);
+        const blocked = verdicts.filter((v) => !v.ok);
+
+        if (!passed.length) {
+          // Bó rỗng: KHÔNG chạm clipboard. `writeText('')` xoá trắng thứ người
+          // dùng đang giữ, và họ mất nó để đổi lấy một thông báo.
+          flash(
+            `Không trang nào vào được Bó link: cả ${blocked.length} trang đều dựng thân bài bằng JavaScript ` +
+            'hoặc không tải được. Dùng nút "Thêm N trang" — nội dung sẽ được trích ngay tại máy bạn.'
+          );
+          return;
+        }
+
+        const res = await chrome.runtime.sendMessage({ type: MSG.BUNDLE_FILTER, urls: passed });
+        const keep = (res && res.keep) || [];
+        const dropped = (res && res.dropped) || [];
+
+        if (!keep.length) {
+          flash(`Cả ${dropped.length} link đều đã có trong Sổ đã copy hoặc Hàng đợi — không copy lại.`);
+          return;
+        }
+
+        await navigator.clipboard.writeText(keep.join('\n'));
+        // Ghi Sổ SAU khi clipboard đã nhận thật.
+        await chrome.runtime.sendMessage({ type: MSG.BUNDLE_COPIED, urls: keep, from: siteName() });
+
+        const parts = [`Đã copy ${keep.length} link`];
+        if (blocked.length) parts.push(`${blocked.length} trang không có thân bài trong HTML thô → dùng "Thêm N trang"`);
+        if (dropped.length) parts.push(`${dropped.length} đã có trong Sổ`);
+        /*
+         * Nói ra sự đánh đổi thay vì để người dùng tự phát hiện. Cửa đo trả lời
+         * "Nguồn có RỖNG không", KHÔNG trả lời "Nguồn có SẠCH không": máy chủ
+         * Google cào cả trang, không cào riêng khối thân bài, nên một trang qua
+         * cửa vẫn cho ra Nguồn dính sidebar và footer. Đo 2026-08-24: phần dôi
+         * ra ~10-14% với đa số trang, nhưng mkdocs-material là ~61%.
+         */
+        parts.push('link dán vào NotebookLM sẽ kèm cả menu điều hướng của trang');
+        flash(parts.join(' · '));
+      } catch (e) {
+        flash(`Không copy được: ${(e && e.message) || e}`);
+      } finally {
+        copyBtn.textContent = original;
+        syncCounts();
+      }
+    }
+
     el.addEventListener('click', async (event) => {
       const act = event.target && event.target.dataset && event.target.dataset.act;
       if (!act) return;
@@ -300,6 +481,13 @@
         }
         return syncCounts();
       }
+      if (act === 'copy') {
+        const picked = checkedRows();
+        if (!picked.length) return;
+        await copyBundle(picked);
+        return;
+      }
+
       if (act === 'import') {
         const picked = checkedRows();
         if (!picked.length) return;
@@ -375,6 +563,10 @@
   function flash(message) {
     if (!toastEl) {
       toastEl = document.createElement('div');
+      // Tiền tố `nblm-` như mọi phần tử extension chèn vào trang — xem
+      // `test/ui-isolation.test.js`. Không có id thì nó vừa lọt lưới loại trừ
+      // của chính extension, vừa không quan sát được từ test.
+      toastEl.id = 'nblm-docs-toast';
       style(toastEl, {
         position: 'fixed',
         right: '20px',
