@@ -255,6 +255,7 @@ async function run() {
       }
       if (m.type === 'bundle-filter') return { keep: m.urls, dropped: [], counts: { copied: 0, queued: 0 } };
       if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
+      if (m.type === 'jump-notebook') return { ...h.jump };
       return {};
     });
   };
@@ -364,6 +365,67 @@ async function run() {
     h.close();
   }
 
+  /* ---------------------------------------------------------------- */
+  /* mục 6 — nhảy sang tab notebook, và DỪNG                           */
+  /* ---------------------------------------------------------------- */
+
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await h.tick(80);
+    h.click(h.launcher());
+    await h.tick(60);
+    withPages(h);
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    const types = h.sent.map((m) => m.type);
+    eq(types.filter((t) => t === 'jump-notebook').length, 1,
+      '(d) copy xong phải nhảy sang tab NotebookLM, đúng một lần');
+    ok(types.indexOf('jump-notebook') > types.indexOf('bundle-copied'),
+      `(d) nhảy tab phải SAU khi ghi Sổ xong — thứ tự nhận được: ${JSON.stringify(types)}`);
+    ok(!/notebook đích/.test(h.flash()), `(d) nhảy được thì đừng dặn gì thêm — nhận: "${h.flash()}"`);
+    h.close();
+  }
+
+  /*
+   * Cả ba trang đều trượt cửa đo: clipboard chưa nhận gì, nên không có gì để
+   * dán và không có lý do gì để rời trang người dùng đang đứng.
+   */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await h.tick(80);
+    h.click(h.launcher());
+    await h.tick(60);
+    withPages(h, { fail: threeUrls });
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    eq(h.sent.filter((m) => m.type === 'jump-notebook'), [],
+      '(d) Bó rỗng thì KHÔNG nhảy — clipboard chưa nhận gì cả');
+    h.close();
+  }
+
+  /* Chưa đặt notebook đích: copy vẫn xong, nhưng phải chỉ đường thủ công. */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    h.jump.jumped = false;
+    await h.tick(80);
+    h.click(h.launcher());
+    await h.tick(60);
+    withPages(h);
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    eq(h.clipboard.writes.length, 1, '(d) chưa đặt đích KHÔNG được huỷ cú copy');
+    ok(/chưa đặt notebook đích/.test(h.flash()),
+      `(d) phải nói ra rằng chưa có đích để nhảy tới — nhận: "${h.flash()}"`);
+    ok(/Ctrl\+V/.test(h.flash()), `(d) phải chỉ đường thủ công — nhận: "${h.flash()}"`);
+    h.close();
+  }
+
   /* URL đem copy là URL bảng đang hiện, KHÔNG phải docKey. */
   {
     const url = 'https://a.dev/docs/tiếng-việt/';
@@ -374,6 +436,7 @@ async function run() {
     h.reply((m) => {
       if (m.type === 'docs-raw-fetch') return { url: m.url, finalUrl: m.url, type: 'text/html', html: PAGES['https://a.dev/docs/ssr'] };
       if (m.type === 'bundle-filter') return { keep: m.urls, dropped: [], counts: {} };
+      if (m.type === 'jump-notebook') return { ...h.jump };
       return { added: 0 };
     });
     const box = h.panelAll('.row input')[0];

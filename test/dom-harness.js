@@ -302,12 +302,15 @@ function loadYouTubePage({
    * một `reply()` trả `{added: 1}` cho mọi tin sẽ biến cửa 2 thành "loại sạch",
    * và test sẽ đỏ ở chỗ không liên quan gì tới thứ nó đang đo.
    */
+  const jump = { jumped: true, tabId: 1 };
   const defaultReply = (message) => {
     const type = message && message.type;
     if (type === 'bundle-filter') {
       return { keep: message.urls || [], dropped: [], counts: { copied: 0, queued: 0 } };
     }
     if (type === 'bundle-copied') return { added: (message.urls || []).length };
+    /* Mục 6: mặc định coi như đã có notebook đích. Đổi `h.jump` để thử ca ngược. */
+    if (type === 'jump-notebook') return { ...jump };
     if (type === 'enqueue') {
       const n = (message.items || []).length;
       return { added: n, skipped: 0, total: n };
@@ -415,6 +418,8 @@ function loadYouTubePage({
     dispatch: (message) => new Promise((resolve) => router(message, {}, resolve)),
     $: (sel) => win.document.querySelector(sel),
     $$: (sel) => Array.from(win.document.querySelectorAll(sel)),
+    /** Câu trả lời cho `jump-notebook`; đổi tại chỗ để thử ca chưa đặt notebook đích. */
+    jump,
     /** Nội dung toast gần nhất — đọc textContent, xem ghi chú về nhịp chờ ở trên. */
     toast: () => {
       const el = win.document.querySelector('.nblm-toast');
@@ -492,6 +497,7 @@ function loadDocsPage({
   const sent = [];
   let router = null;
 
+  const jump = { jumped: true, tabId: 1 };
   /* Xem `defaultReply` của `loadYouTubePage` — cùng luật: kho rỗng, mọi thứ thành công. */
   let respond = (message) => {
     const type = message && message.type;
@@ -503,6 +509,7 @@ function loadDocsPage({
       const n = (message.items || []).length;
       return { added: n, skipped: 0, total: n };
     }
+    if (type === 'jump-notebook') return { ...jump };
     if (type === 'docs-raw-fetch') return { error: 'harness: chưa cấu hình docs-raw-fetch' };
     return {};
   };
@@ -597,6 +604,8 @@ function loadDocsPage({
     panel: (sel) => (shadow() ? shadow().querySelector(sel) : null),
     panelAll: (sel) => (shadow() ? Array.from(shadow().querySelectorAll(sel)) : []),
     launcher: () => win.document.querySelector('#nblm-docs-launcher'),
+    /** Câu trả lời cho `jump-notebook`; đổi tại chỗ để thử ca chưa đặt notebook đích. */
+    jump,
     /** Câu `flash()` gần nhất. Toast nằm ngoài <body>, trên documentElement. */
     flash: () => {
       const el = win.document.querySelector('#nblm-docs-toast');

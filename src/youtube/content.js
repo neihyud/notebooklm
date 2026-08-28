@@ -232,12 +232,18 @@
     // sau nó lọc mất đúng những link chưa bao giờ tới clipboard.
     await send(MSG.BUNDLE_COPIED, { urls: urlsToCopy, from: from || pageCtx.title || location.href });
 
+    // Mục 6: nhảy sang tab notebook, và DỪNG. Không mở hộp thoại, không bấm chip.
+    const jump = await send(MSG.JUMP_NOTEBOOK, {});
+
     const parts = [`${verb} ${urlsToCopy.length} link công khai`];
     if (restricted.length) parts.push(`${restricted.length} private/unlisted → Hàng đợi`);
     if (unknown.length) parts.push(`${unknown.length} không hỏi được → Hàng đợi`);
     if (dropped.length) parts.push(`${dropped.length} bỏ vì đã có trong Sổ`);
     if (tripped) parts.push('đã dừng hỏi vì YouTube liên tục từ chối');
-    toast(parts.join(' · '), 'ok');
+    // Im lặng ở đây là im lặng sai: clipboard đã có nội dung mà người dùng không
+    // biết mang đi đâu, và không có cú nhảy nào để tự nói hộ.
+    if (!jump || !jump.jumped) parts.push('chưa đặt notebook đích — mở notebook rồi Ctrl+V');
+    toast(parts.join(' · '), jump && jump.jumped ? 'ok' : 'warn');
 
     if (leftover.length) await enqueueLeftover(leftover);
     return {
@@ -784,6 +790,7 @@
    */
   const HANDLED = new Set([
     MSG.YT_PING, MSG.YT_DESCRIBE, MSG.YT_EXTRACT, MSG.YT_CONTEXT, MSG.YT_PLAYLIST, 'nblm-toast',
+    MSG.SHORTCUT_HANDOFF,
   ]);
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -821,6 +828,27 @@
               180000
             );
             sendResponse({ ok: true, ...res });
+            return;
+          }
+
+          case MSG.SHORTCUT_HANDOFF: {
+            /*
+             * Phím tắt vòng qua service worker rồi về đây. `handled: true` nghĩa
+             * là lượt này đã có kết cục — copy được, hoặc `handOff` đã tự xếp
+             * hàng phần không copy được. Service worker đọc đúng cờ này để biết
+             * có phải xếp hàng thay không, nên nó KHÔNG được đặt trước khi
+             * `handOff` chạy xong.
+             *
+             * Chỗ này là nơi câu hỏi "phím tắt còn giữ được user activation
+             * không" được trả lời bằng hành vi thật chứ bằng phán đoán: nếu
+             * `writeText` từ chối, `handOff` đi nhánh clipboardFailed, tự xếp
+             * hàng, và vẫn trả về handled — người dùng mất Bó link nhưng không
+             * mất video.
+             */
+            const res = await handOff([{ videoId: message.videoId }], { from: 'Phím tắt' });
+            // Nhánh duy nhất `handOff` KHÔNG tự xếp hàng: tra Sổ hỏng. Nhận
+            // handled ở đó là bỏ rơi video giữa đường.
+            sendResponse({ handled: !(res && res.error) });
             return;
           }
 

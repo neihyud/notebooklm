@@ -39,6 +39,8 @@
     BUNDLE_FILTER: 'bundle-filter',   // {urls} -> {keep, dropped} (cửa 2: khử trùng)
     BUNDLE_COPIED: 'bundle-copied',   // báo NGƯỢC sau khi writeText xong -> ghi Sổ
     CLEAR_COPIED: 'clear-copied',     // xoá Sổ đã copy
+    JUMP_NOTEBOOK: 'jump-notebook',   // sau khi copy: CHỈ nhảy sang tab notebook, không thao tác
+    SHORTCUT_HANDOFF: 'shortcut-handoff', // background -> tab youtube: phím tắt nhờ tab tự trao tay
     // popup -> background
     OPEN_DOCS_PANEL: 'open-docs-panel',
     COLLECT_TABS: 'collect-tabs',             // gom mọi tab YouTube đang mở

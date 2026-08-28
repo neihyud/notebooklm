@@ -440,6 +440,9 @@
         // Ghi Sổ SAU khi clipboard đã nhận thật.
         await chrome.runtime.sendMessage({ type: MSG.BUNDLE_COPIED, urls: keep, from: siteName() });
 
+        // Mục 6: nhảy sang tab notebook, và DỪNG.
+        const jump = await chrome.runtime.sendMessage({ type: MSG.JUMP_NOTEBOOK });
+
         const parts = [`Đã copy ${keep.length} link`];
         if (blocked.length) parts.push(`${blocked.length} trang không có thân bài trong HTML thô → dùng "Thêm N trang"`);
         if (dropped.length) parts.push(`${dropped.length} đã có trong Sổ`);
@@ -451,6 +454,7 @@
          * ra ~10-14% với đa số trang, nhưng mkdocs-material là ~61%.
          */
         parts.push('link dán vào NotebookLM sẽ kèm cả menu điều hướng của trang');
+        if (!jump || !jump.jumped) parts.push('chưa đặt notebook đích — mở notebook rồi Ctrl+V');
         flash(parts.join(' · '));
       } catch (e) {
         flash(`Không copy được: ${(e && e.message) || e}`);

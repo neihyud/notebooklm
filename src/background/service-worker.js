@@ -230,6 +230,52 @@ async function resolveNotebookTab() {
   return tab.id;
 }
 
+/**
+ * Đường trao tay, mục 6: nhảy sang tab NotebookLM. HẾT.
+ *
+ * Cố tình KHÔNG dùng `resolveNotebookTab`, dù hai hàm tra tab giống hệt nhau ở
+ * đoạn đầu. `resolveNotebookTab` còn `ensureScripts` + `NLM_PING` bốn nhịp +
+ * `sleep(2500)`, và nó ném lỗi khi tab không nằm trong một notebook cụ thể — cả
+ * ba thứ đó tồn tại vì Lượt chạy sắp *thao tác* lên DOM của trang. Đường trao
+ * tay không thao tác gì: clipboard đã có nội dung, người dùng tự Ctrl+V. Gọi
+ * lại hàm kia là gắn lại đúng ngân sách "vỡ khi Google đổi DOM" mà ADR 0001 vừa
+ * gỡ ra khỏi ca này, để đổi lấy đúng con số không.
+ *
+ * Không tìm được tab thì KHÔNG ném: người dùng đang cầm một clipboard vừa ghi
+ * xong, và một exception ở đây sẽ bị bề mặt báo thành "copy hỏng". Trả về lý do
+ * để bề mặt nói tiếp vào câu đã copy.
+ *
+ * @returns {{jumped: boolean, why?: string, tabId?: number}}
+ */
+async function jumpToNotebook() {
+  const settings = await getSettings();
+  const target = (settings.notebookUrl || '').trim();
+
+  const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+  const inNotebook = tabs.filter((t) => /\/notebook\/[^/]+/.test(t.url || ''));
+
+  let tab = null;
+  if (target) {
+    const wantedId = (/\/notebook\/([^/?#]+)/.exec(target) || [])[1];
+    tab = inNotebook.find((t) => wantedId && (t.url || '').includes(wantedId)) || null;
+    if (!tab) {
+      // Mở thẳng ở chế độ active: cả lượt này chỉ tồn tại để đưa người dùng tới
+      // đó. Không `waitTabComplete`, không chờ Angular — không có gì để chờ.
+      tab = tabs[0]
+        ? await chrome.tabs.update(tabs[0].id, { url: target, active: true })
+        : await chrome.tabs.create({ url: target, active: true });
+    }
+  } else {
+    tab = inNotebook[0] || null;
+  }
+
+  if (!tab) return { jumped: false, why: 'no-target' };
+
+  await chrome.tabs.update(tab.id, { active: true });
+  if (tab.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
+  return { jumped: true, tabId: tab.id };
+}
+
 /* -------------------------------------------------------------------- */
 /* tab YouTube phụ trợ                                                   */
 /* -------------------------------------------------------------------- */
@@ -1555,6 +1601,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           sendResponse(await fetchRawHtml(message.url));
           return;
 
+        case MSG.JUMP_NOTEBOOK:
+          sendResponse(await jumpToNotebook());
+          return;
+
         case MSG.OPEN_OPTIONS:
           chrome.runtime.openOptionsPage();
           sendResponse({ ok: true });
@@ -1694,6 +1744,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   else await note('Đã có trong hàng đợi', 'Các video này đã nằm trong hàng đợi rồi.');
 });
 
+/*
+ * Phím tắt nhờ tab tự trao tay, và cửa sổ chờ là 5s. Con số này KHÔNG phải chọn
+ * cho thoải mái: nó phải ngắn hơn cảm giác "phím tắt hỏng" của người dùng, vì
+ * hết giờ là rơi về Hàng đợi chứ không phải báo lỗi. Đủ dài cho một lượt
+ * `describe` bình thường, đủ ngắn để không ai kịp bấm lại phím tắt.
+ */
+const SHORTCUT_TIMEOUT_MS = 5000;
+
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'open-docs-panel') {
     const res = await openDocsPanel(null);
@@ -1708,6 +1766,32 @@ chrome.commands.onCommand.addListener(async (command) => {
     await note('Không phải trang video', 'Phím tắt chỉ dùng được trên trang xem video YouTube.');
     return;
   }
+
+  /*
+   * Mục 7 của ticket 006. Service worker KHÔNG tự quyết được lượt này: nó không
+   * biết privacy (`normalize()` đóng dấu UNKNOWN cho mọi thứ) và không có
+   * `navigator.clipboard`. Cả hai thứ đó chỉ có trong tab, nên lượt này là một
+   * lời NHỜ, không phải một lệnh.
+   *
+   * `handled` là chữ ký của việc tab đã chạy trọn `handOff` — mà `handOff` tự
+   * xếp hàng phần nó không copy được, kể cả nhánh clipboard từ chối. Nên ở đây
+   * KHÔNG được `enqueue` thêm khi `handled`, nếu không mỗi lượt phím tắt thất
+   * bại sẽ xếp hàng hai lần.
+   *
+   * Mọi ca còn lại — tab chưa có content script, tab treo, quá 5s, `handOff`
+   * ném — đều rơi về Hàng đợi y như trước ticket này. Đó là ca mặc định, không
+   * phải ca lỗi: hạng "biết thật" của mục 5 coi đo-không-được là loại.
+   */
+  let handled = false;
+  try {
+    await ensureScripts(tab.id, 'youtube');
+    const res = await sendToTab(tab.id, { type: MSG.SHORTCUT_HANDOFF, videoId }, SHORTCUT_TIMEOUT_MS);
+    handled = !!(res && res.handled);
+  } catch (_) {
+    handled = false;
+  }
+  if (handled) return;
+
   const result = await enqueue([{ videoId }]);
   if (result.added) runQueue();
 });
@@ -1718,6 +1802,7 @@ self.NBLM_SW_INTERNALS = {
   awaitDownloadComplete, saveFile, runQueue, DOWNLOAD_TIMEOUT_MS, ITEM_TIMEOUT_MS,
   bundleKey, filterBundle, recordCopied, clearCopied, enqueue,
   fetchRawHtml, PROBE_TIMEOUT_MS,
+  jumpToNotebook, SHORTCUT_TIMEOUT_MS,
 };
 
 chrome.tabs.onRemoved.addListener((tabId) => {

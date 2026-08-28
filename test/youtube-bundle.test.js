@@ -597,6 +597,167 @@ async function run() {
   }
 
   /* ================================================================== */
+  /* mục 6 — sau khi copy: nhảy sang tab notebook, và DỪNG                */
+  /* ================================================================== */
+
+  /*
+   * Thứ tự ba tin là nội dung chứ không phải cách xếp: `bundle-copied` ghi Sổ,
+   * và Sổ chỉ được nói thật sau khi clipboard đã nhận. Nhảy tab TRƯỚC khi ghi Sổ
+   * là đẩy người dùng sang tab khác trong lúc lượt này còn dở — tab nền bị Chrome
+   * hạ ưu tiên, và một `sendMessage` chưa xong ở đó là một Sổ ghi thiếu.
+   */
+  {
+    const h = loadYouTubePage({
+      body: WATCH_ROW,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    await h.tick(80);
+    h.click('#nblm-copy-button');
+    await h.tick(80);
+
+    const types = h.sent.map((m) => m.type);
+    eq(msgs(h, 'jump-notebook').length, 1, 'copy xong phải nhảy sang tab NotebookLM, đúng một lần');
+    ok(types.indexOf('jump-notebook') > types.indexOf('bundle-copied'),
+      `nhảy tab phải SAU khi ghi Sổ xong — thứ tự nhận được: ${JSON.stringify(types)}`);
+    ok(!/notebook đích/.test(h.toast()),
+      `nhảy được thì đừng dặn gì thêm — nhận: "${h.toast()}"`);
+    h.close();
+  }
+
+  /*
+   * Bó rỗng: KHÔNG nhảy. Nhảy sang notebook với một clipboard chưa được ghi là
+   * mời người dùng dán thứ họ đang giữ từ trước — và đó là ca thường gặp, bấm
+   * copy lần thứ hai trên cùng một danh sách rơi thẳng vào nó.
+   */
+  {
+    const h = loadYouTubePage({
+      body: WATCH_ROW,
+      describe: async (id) => meta({ videoId: id, privacy: 'private' }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    await h.tick(80);
+    h.click('#nblm-copy-button');
+    await h.tick(80);
+
+    eq(msgs(h, 'jump-notebook').length, 0, 'Bó rỗng thì KHÔNG nhảy — clipboard chưa nhận gì cả');
+    h.close();
+  }
+
+  /* Clipboard từ chối: cũng không nhảy, vì cũng không có gì để dán. */
+  {
+    const h = loadYouTubePage({
+      body: WATCH_ROW,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async () => ({ kind: 'other' }),
+      writeText: async () => { throw new Error('Document is not focused'); },
+    });
+    await h.tick(80);
+    h.click('#nblm-copy-button');
+    await h.tick(80);
+
+    eq(msgs(h, 'jump-notebook').length, 0, 'clipboard từ chối thì không nhảy — không có gì để dán');
+    h.close();
+  }
+
+  /*
+   * Chưa đặt notebook đích. Ticket gọi thẳng ca này ra: im lặng ở đây là im lặng
+   * SAI, vì người dùng đang cầm một clipboard vừa ghi xong mà không biết mang đi
+   * đâu — và không có cú nhảy nào để tự nói hộ.
+   */
+  {
+    const h = loadYouTubePage({
+      body: WATCH_ROW,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    h.jump.jumped = false;
+    await h.tick(80);
+    h.click('#nblm-copy-button');
+    await h.tick(80);
+
+    eq(h.clipboard.writes.length, 1, 'chưa đặt đích KHÔNG được huỷ cú copy — clipboard vẫn phải có nội dung');
+    ok(/1 link công khai/.test(h.toast()), `vẫn phải báo đã copy mấy link — nhận: "${h.toast()}"`);
+    ok(/chưa đặt notebook đích/.test(h.toast()),
+      `phải nói ra rằng chưa có đích để nhảy tới — nhận: "${h.toast()}"`);
+    ok(/Ctrl\+V/.test(h.toast()),
+      `phải chỉ đường thủ công, không bỏ người dùng đứng đó — nhận: "${h.toast()}"`);
+    h.close();
+  }
+
+  /* ================================================================== */
+  /* mục 7 — phím tắt nhờ tab trao tay                                   */
+  /* ================================================================== */
+
+  /*
+   * Service worker gửi `shortcut-handoff` xuống đây vì nó không biết privacy và
+   * không có `navigator.clipboard`. Cờ `handled` nó nhận lại quyết định có xếp
+   * hàng thay hay không, nên cờ đó phải nói đúng sự thật của lượt này.
+   */
+  {
+    const h = loadYouTubePage({
+      body: WATCH_ROW,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    await h.tick(80);
+
+    const res = await h.dispatch({ type: 'shortcut-handoff', videoId: 'aaaaaaaaaaa' });
+    await h.tick(80);
+
+    eq(res, { handled: true }, 'phím tắt trên video công khai: tab tự xử, service worker không xếp hàng thay');
+    eq(h.clipboard.writes, ['https://www.youtube.com/watch?v=aaaaaaaaaaa'],
+      'phím tắt phải đi qua đúng đường Bó link, không có đường tắt riêng');
+    eq(enq(h), [], 'đã copy thì không xếp hàng — nếu không, một lượt phím tắt cho ra hai bản');
+    h.close();
+  }
+
+  /*
+   * Phím tắt trên video private. `handled: true` mà KHÔNG copy — vì `handOff` đã
+   * tự xếp hàng rồi. Đây là chỗ dễ đọc nhầm nhất của mục 7: `handled` nghĩa là
+   * "lượt này đã có kết cục", không phải "đã copy".
+   */
+  {
+    const h = loadYouTubePage({
+      body: WATCH_ROW,
+      describe: async (id) => meta({ videoId: id, privacy: 'private' }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    await h.tick(80);
+
+    const res = await h.dispatch({ type: 'shortcut-handoff', videoId: 'aaaaaaaaaaa' });
+    await h.tick(80);
+
+    eq(res, { handled: true }, 'video private: tab đã tự xếp hàng, đó cũng là một kết cục');
+    eq(h.clipboard.writes, [], 'video private không được chạm clipboard, kể cả qua phím tắt');
+    eq(enqItems(h).map((i) => i.videoId), ['aaaaaaaaaaa'], 'video private phải nằm trong Hàng đợi');
+    h.close();
+  }
+
+  /*
+   * Tra Sổ hỏng — nhánh DUY NHẤT `handOff` không tự xếp hàng. Nhận `handled` ở
+   * đây là bỏ rơi video giữa đường: tab không copy, không xếp hàng, và service
+   * worker tưởng xong việc.
+   */
+  {
+    const h = loadYouTubePage({
+      body: WATCH_ROW,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    h.reply((m) => (m.type === 'bundle-filter' ? { error: 'storage hỏng' } : {}));
+    await h.tick(80);
+
+    const res = await h.dispatch({ type: 'shortcut-handoff', videoId: 'aaaaaaaaaaa' });
+    await h.tick(80);
+
+    eq(res, { handled: false },
+      'tra Sổ hỏng phải trả handled:false để service worker xếp hàng thay — không ca nào được im lặng');
+    eq(h.clipboard.writes, [], 'tra Sổ hỏng thì không copy');
+    h.close();
+  }
+
+  /* ================================================================== */
   /* router tin nhắn — ba content script gặp nhau trên một tab           */
   /* ================================================================== */
 
