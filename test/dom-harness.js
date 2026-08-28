@@ -339,10 +339,14 @@ function loadYouTubePage({
 
   win.NBLM_TRANSCRIPT = {
     currentVideoId: () => win.NBLM.videoIdFrom(win.location.href),
-    describe: async (videoId) => {
-      calls.describe.push(videoId);
+    /*
+     * Chuyển tiếp NGUYÊN tham số, kể cả `opts` — `noFallback` đi qua đây, và
+     * nuốt nó thì mọi test về cái giá của một lượt hỏi hỏng đều xanh giả.
+     */
+    describe: async (videoId, opts) => {
+      calls.describe.push({ videoId, opts });
       if (!describe) throw new Error('harness: chưa cấu hình describe()');
-      return describe(videoId);
+      return describe(videoId, opts);
     },
     extract: async () => ({ segments: [] }),
   };

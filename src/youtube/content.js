@@ -10,7 +10,10 @@
 ;(function () {
   'use strict';
 
-  const { MSG, PRIVACY, videoIdFrom, norm, sleep } = globalThis.NBLM;
+  const {
+    MSG, PRIVACY, BUNDLE, videoIdFrom, canonicalUrl, norm, sleep,
+    badgeRejects, bundleVerdict, mapWithLimit,
+  } = globalThis.NBLM;
   const T = globalThis.NBLM_TRANSCRIPT;
   const P = globalThis.NBLM_PANEL;
   const B = globalThis.NBLM_BRIDGE;
@@ -73,6 +76,146 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* Đường trao tay — gom link vào clipboard rồi dừng                    */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Trần đồng thời cho cửa 3. Một video = một lượt `innertube('player')` bằng
+   * phiên đăng nhập của người dùng, nên một playlist 200 video mà huy hiệu không
+   * loại được cái nào là 200 lượt POST tới YouTube. Rate limit ở lượt chạy hàng
+   * loạt là rủi ro đã ghi trong `WORKSPACE_PROTOCOL.md`, không phải lo xa.
+   *
+   * Con số 4 là SUY ĐOÁN mượn của ràng buộc 7 trong ticket 006 — chưa ai đo
+   * ngưỡng thật của YouTube trên tài khoản owner. Đo rồi thì sửa ở đây.
+   */
+  const BUNDLE_LIMIT = 4;
+
+  /**
+   * Cầu dao: quá ngần này lượt hỏi hỏng LIÊN TIẾP thì dừng hỏi hẳn, phần còn lại
+   * rơi về Hàng đợi. Fail-closed — thứ dừng lại là *quyền vào clipboard*, không
+   * phải cả thao tác. Hỏng liên tiếp gần như luôn nghĩa là YouTube đang chặn, và
+   * hỏi tiếp chỉ làm nó chặn lâu hơn.
+   */
+  const BUNDLE_BREAKER = 3;
+
+  /**
+   * Ba cửa, theo đúng thứ tự — và thứ tự này là nội dung chứ không phải cách xếp:
+   *
+   *   cửa 1  huy hiệu, miễn phí, CHỈ ĐƯỢC LOẠI
+   *   cửa 3  hỏi player response, tốn request, CHỈ ĐƯỢC NHẬN
+   *
+   * (Cửa 2 — khử trùng qua Sổ đã copy — chèn vào giữa ở mục 3 của ticket 006.)
+   *
+   * Cái neo: KHÔNG có đường nào tới `writeText` mà không qua cửa 3. Mọi hàm gom
+   * link đều phải đi qua đây, kể cả nút "copy lại những cái đã có" sắp thêm ở
+   * mục 3 — danh sách của nút đó chưa bao giờ đi qua cửa 3, và nếu nó có đường
+   * riêng thì đúng video private cửa 3 vừa chặn sẽ lên clipboard ở lượt sau.
+   *
+   * @param {Array} candidates `{videoId, title, privacy|privacyHint, accessible}`
+   * @returns {{urls: string[], restricted: Array, unknown: Array, tripped: boolean}}
+   */
+  async function buildBundle(candidates) {
+    const restricted = [];
+    const unknown = [];
+    const asking = [];
+
+    for (const c of candidates) {
+      if (!c || !c.videoId) continue;
+      const privacy = c.privacy || c.privacyHint;
+      if (badgeRejects({ privacy, accessible: c.accessible })) restricted.push(c);
+      else asking.push(c);
+    }
+
+    let strike = 0;   // lượt hỏng liên tiếp
+    let tripped = false;
+
+    const asked = await mapWithLimit(asking, BUNDLE_LIMIT, async (c) => {
+      if (tripped) return { c, meta: null };
+      try {
+        // `noFallback`: một lượt hỏi hỏng không được biến thành một lượt tải
+        // nguyên trang watch — xem `getPlayerResponse` trong page-bridge.js.
+        const meta = await T.describe(c.videoId, { noFallback: true });
+        strike = 0;
+        return { c, meta };
+      } catch (_) {
+        if (++strike >= BUNDLE_BREAKER) tripped = true;
+        return { c, meta: null };
+      }
+    });
+
+    const urls = [];
+    for (const { c, meta } of asked) {
+      const { verdict } = bundleVerdict(c.videoId, meta);
+      if (verdict === BUNDLE.ACCEPT) urls.push(canonicalUrl(c.videoId));
+      else if (verdict === BUNDLE.RESTRICTED) restricted.push(c);
+      else unknown.push(c);
+    }
+    return { urls, restricted, unknown, tripped };
+  }
+
+  /**
+   * Gom rồi trao tay: ghi clipboard, và đẩy phần không đủ điều kiện về Hàng đợi.
+   *
+   * Bó rỗng thì KHÔNG chạm clipboard. `writeText('')` xoá trắng thứ người dùng
+   * đang giữ, và họ mất nó để đổi lấy một thông báo. Đây là ca thường gặp chứ
+   * không phải ca biên: bấm copy lần thứ hai trên cùng một playlist là rơi thẳng
+   * vào nó.
+   *
+   * Ba lý do bị loại được đếm RIÊNG. "Đã copy 0 link" là câu vô nghĩa; "cả 12
+   * link đều private" thì hành động được.
+   */
+  async function handOff(candidates, { verb = 'Đã copy' } = {}) {
+    const { urls, restricted, unknown, tripped } = await buildBundle(candidates);
+    const leftover = restricted.concat(unknown);
+
+    if (!urls.length) {
+      const why = [];
+      if (restricted.length) why.push(`${restricted.length} video private/unlisted`);
+      if (unknown.length) why.push(`${unknown.length} video không hỏi được`);
+      toast(
+        why.length
+          ? `Không link nào vào được Bó: ${why.join(' · ')}. Tất cả đã vào Hàng đợi.`
+          : 'Không có video nào để copy.',
+        'warn'
+      );
+      if (leftover.length) await enqueueLeftover(leftover);
+      return { copied: 0, restricted: restricted.length, unknown: unknown.length };
+    }
+
+    try {
+      // `await` xong mới được làm gì tiếp — đóng giao diện trước khi clipboard
+      // ghi xong là mất trắng nội dung.
+      await navigator.clipboard.writeText(urls.join('\n'));
+    } catch (e) {
+      // Clipboard API từ chối khi tài liệu không được focus. Nói ra đường thủ
+      // công thay vì im lặng nuốt — người dùng đang đứng trước một cái nút vừa
+      // bấm mà không có gì xảy ra.
+      toast(`Không ghi được clipboard (${(e && e.message) || e}) — tất cả đã vào Hàng đợi.`, 'error');
+      await enqueueLeftover(candidates.filter((c) => c && c.videoId));
+      return { copied: 0, restricted: restricted.length, unknown: unknown.length, clipboardFailed: true };
+    }
+
+    const parts = [`${verb} ${urls.length} link công khai`];
+    if (restricted.length) parts.push(`${restricted.length} private/unlisted → Hàng đợi`);
+    if (unknown.length) parts.push(`${unknown.length} không hỏi được → Hàng đợi`);
+    if (tripped) parts.push('đã dừng hỏi vì YouTube liên tục từ chối');
+    toast(parts.join(' · '), 'ok');
+
+    if (leftover.length) await enqueueLeftover(leftover);
+    return { copied: urls.length, restricted: restricted.length, unknown: unknown.length, tripped };
+  }
+
+  /** Xếp hàng phần bị loại, im lặng — người dùng đã đọc con số ở toast của Bó rồi. */
+  async function enqueueLeftover(items) {
+    const payload = items.map((i) => ({
+      videoId: i.videoId,
+      title: i.title,
+      privacy: i.privacy || i.privacyHint || PRIVACY.UNKNOWN,
+    }));
+    if (payload.length) await send(MSG.ENQUEUE, { items: payload });
+  }
+
+  /* ------------------------------------------------------------------ */
   /* nút trên trang watch                                                */
   /* ------------------------------------------------------------------ */
 
@@ -105,6 +248,28 @@
       row.prepend(btn);
     }
 
+    /*
+     * Nút THỨ BA, không phải sửa nút cũ. Nút "NotebookLM" và `onWatchClick` giữ
+     * nguyên hành vi xếp hàng: nó là lối vào người dùng đã quen, và nút "→
+     * NotebookLM" trong bảng transcript mang đúng nhãn đó. Hai nút cùng chữ mà
+     * rẽ hai hướng là một cái bẫy — hoặc đổi cả hai, hoặc không đổi cái nào.
+     */
+    let cbtn = document.querySelector('#nblm-copy-button');
+    if (cbtn && cbtn.parentElement === row) {
+      cbtn.dataset.videoId = videoId;
+    } else {
+      if (cbtn) cbtn.remove();
+      cbtn = document.createElement('button');
+      cbtn.id = 'nblm-copy-button';
+      cbtn.className = 'nblm-btn nblm-btn--ghost';
+      cbtn.type = 'button';
+      cbtn.dataset.videoId = videoId;
+      cbtn.title = 'Copy link video vào clipboard để tự dán vào NotebookLM (chỉ video công khai)';
+      cbtn.textContent = 'Copy link';
+      cbtn.addEventListener('click', onCopyClick);
+      btn.after(cbtn);
+    }
+
     let tbtn = document.querySelector('#nblm-transcript-button');
     if (tbtn && tbtn.parentElement === row) {
       tbtn.dataset.videoId = videoId;
@@ -123,7 +288,23 @@
       if (P.isOpen()) P.close();
       else P.open(tbtn.dataset.videoId, settings.preferredLangs);
     });
-    btn.after(tbtn);
+    cbtn.after(tbtn);
+  }
+
+  async function onCopyClick(event) {
+    const el = event.currentTarget;
+    const videoId = el.dataset.videoId;
+    if (!videoId || el.disabled) return;
+
+    el.disabled = true;
+    const original = el.textContent;
+    el.textContent = 'Đang hỏi…';
+    try {
+      await handOff([{ videoId }]);
+    } finally {
+      el.textContent = original;
+      el.disabled = false;
+    }
   }
 
   /** Panel gọi ngược lên đây khi bấm "→ NotebookLM", để dùng chung một đường xếp hàng. */
@@ -287,6 +468,7 @@
     }
     if (selected.size) {
       parts.push(barButton('import', `Import ${selected.size} đã chọn`, !canImportAll()));
+      parts.push(barButton('copy', `Copy ${selected.size} link`));
       parts.push(barButton('clear', 'Bỏ chọn'));
     }
     // Trang watch có playlist ở cột phải cũng vào được nhánh canImportAll(), mà ở
@@ -318,6 +500,24 @@
         if (input) input.checked = true;
       });
       renderBar();
+      return;
+    }
+
+    if (act === 'copy') {
+      const picked = Array.from(selected.values());
+      const el = event.target;
+      const original = el.textContent;
+      el.disabled = true;
+      el.textContent = 'Đang hỏi…';
+      try {
+        // Cửa 3 hỏi TỪNG videoId đã tick, tại đây chứ không lúc tick. "Chọn hết
+        // trang" tick mọi thẻ đã cuộn qua, nên đây có thể là hàng trăm lượt hỏi.
+        await handOff(picked);
+      } finally {
+        el.textContent = original;
+        el.disabled = false;
+      }
+      clearSelection();
       return;
     }
 
@@ -371,12 +571,22 @@
       if (res.truncated) lines.push(`Đã dừng ở giới hạn ${settings.maxBulkVideos} video — chỉnh trong Cài đặt nếu cần nhiều hơn.`);
       lines.push('Video đã có trong hàng đợi sẽ tự động bị loại.');
 
-      const agreed = await confirmDialog({
+      const act = await chooseDialog({
         title: 'Import toàn bộ vào NotebookLM?',
         lines,
-        confirmLabel: `Import ${usable.length} video`,
+        actions: [
+          { act: 'copy', label: 'Copy link công khai' },
+          { act: 'import', label: `Import ${usable.length} video`, primary: true },
+        ],
       });
-      if (!agreed) return;
+      if (!act) return;   // Huỷ — và huỷ tốn ĐÚNG 0 lượt hỏi player response
+
+      if (act === 'copy') {
+        // Cửa 3 chạy ở đây, sau khi người dùng đã chọn — không phải lúc quét
+        // xong. Đối xứng với cửa đo docs: bấm rồi mới trả tiền.
+        await handOff(usable);
+        return;
+      }
 
       await enqueue(
         usable.map((i) => ({
@@ -395,8 +605,15 @@
     }
   }
 
-  /** Hộp xác nhận dựng bằng DOM — nội dung có tiêu đề video nên tránh innerHTML. */
-  function confirmDialog({ title, lines, confirmLabel = 'Đồng ý', cancelLabel = 'Huỷ' }) {
+  /**
+   * Hộp chọn hành động, dựng bằng DOM — nội dung có tiêu đề video nên tránh innerHTML.
+   *
+   * Trả về **tên hành động** hoặc `null` khi huỷ, chứ không phải boolean. Đó là
+   * đổi chữ ký chứ không phải thêm một cái nút: hộp này giờ có hai lối đi khác
+   * hẳn nhau — xếp hàng, hoặc trao tay qua clipboard — và một boolean không nói
+   * được cái nào.
+   */
+  function chooseDialog({ title, lines, actions, cancelLabel = 'Huỷ' }) {
     return new Promise((resolve) => {
       const back = document.createElement('div');
       back.className = 'nblm-modal';
@@ -420,11 +637,18 @@
 
       const row = document.createElement('div');
       row.className = 'nblm-modal__row';
+
       const no = barButton('no', cancelLabel);
-      const yes = barButton('yes', confirmLabel, true);
       no.className = 'nblm-modal__btn';
-      yes.className = 'nblm-modal__btn nblm-modal__btn--primary';
-      row.append(no, yes);
+      row.appendChild(no);
+
+      const buttons = actions.map((a) => {
+        const b = barButton(a.act, a.label, !!a.primary);
+        b.className = 'nblm-modal__btn' + (a.primary ? ' nblm-modal__btn--primary' : '');
+        row.appendChild(b);
+        return b;
+      });
+
       box.appendChild(row);
       back.appendChild(box);
 
@@ -434,18 +658,18 @@
         resolve(value);
       };
       const onKey = (e) => {
-        if (e.key === 'Escape') finish(false);
+        if (e.key === 'Escape') finish(null);
       };
 
-      no.addEventListener('click', () => finish(false));
-      yes.addEventListener('click', () => finish(true));
+      no.addEventListener('click', () => finish(null));
+      buttons.forEach((b, i) => b.addEventListener('click', () => finish(actions[i].act)));
       back.addEventListener('click', (e) => {
-        if (e.target === back) finish(false);
+        if (e.target === back) finish(null);
       });
       document.addEventListener('keydown', onKey);
 
       document.documentElement.appendChild(back);
-      yes.focus();
+      (buttons.find((_, i) => actions[i].primary) || buttons[0] || no).focus();
     });
   }
 
