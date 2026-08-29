@@ -99,14 +99,26 @@ tự fetch HTML thô của từng trang đã tick rồi xem thân bài có sẵn
 thận thừa: một trang nội bộ chỉ đọc được khi đã đăng nhập sẽ đo ra "có thân bài" trên máy bạn,
 rồi NotebookLM — fetch ẩn danh — nhận về trang đăng nhập và nuốt một nguồn rỗng.
 
-Copy xong, extension **nhảy sang tab notebook đích rồi thôi**. Chưa đặt notebook đích thì nó nói
-ra thay vì im lặng, vì lúc đó bạn đang cầm một clipboard mà không biết mang đi đâu.
+Copy xong, extension **nhảy sang tab notebook đích rồi thôi**. Bản tổng kết — copy được mấy
+link, mấy cái rơi về hàng đợi và vì sao — đi kèm cú nhảy dưới dạng **thông báo hệ thống**, chứ
+không phải một dòng chữ ở lại cái tab bạn vừa rời khỏi. Chưa đặt notebook đích thì không nhảy,
+và lúc đó nó nói ngay tại chỗ thay vì im lặng, vì bạn đang cầm một clipboard mà không biết mang
+đi đâu.
 
 **Sổ đã copy** — mỗi link đã ra clipboard được ghi lại kèm thời điểm và chỗ gom được, và lượt
 sau sẽ bị loại để bạn không dựng hai nguồn trùng. Sổ nằm trong popup, ngay dưới hàng đợi, gập
-lại được, và xoá bằng nút *Xoá sổ* (hai nhịp, vì không hoàn tác được). Link bị loại vì trùng
-luôn **hiện ra số**, kèm cách bấm lại để copy cả những cái đã có — im lặng bỏ link là đúng lỗi
-mà extension này sinh ra để chữa.
+lại được, và xoá bằng nút *Xoá sổ* (hai nhịp, vì không hoàn tác được).
+
+Link bị loại vì trùng luôn **hiện ra số, kèm một nút bấm được**: trên YouTube là thẻ *Copy lại
+N link* nổi ở góc dưới bên phải, trong bảng chọn link tài liệu là nút *Copy lại N link đã có*
+cạnh nút Copy. Nút đó bỏ qua vòng khử trùng — đó đúng là việc bạn vừa yêu cầu — nhưng **không**
+bỏ qua cửa cuối: danh sách của nó bị loại *trước* khi ai hỏi player response hay đo HTML thô,
+nên nó vẫn phải đi qua đấy. Im lặng bỏ link là đúng lỗi mà extension này sinh ra để chữa, và
+một con số không kèm cách bấm cũng chỉ là im lặng có chú thích.
+
+Thứ tự ba cửa cũng là chuyện tiền: cửa cuối tốn **một request cho mỗi link**, hai cửa trước thì
+không. Nên khử trùng chạy trước — bấm copy lần thứ hai trên một playlist đã copy hết tốn đúng
+**không** lượt hỏi nào.
 
 Cái giá, nói trước: nguồn dán từ link thì máy chủ Google cào **cả trang**, không cào riêng khối
 thân bài, nên nguồn sẽ dính cả menu điều hướng. Cửa đo trả lời câu "nguồn có **rỗng** không",

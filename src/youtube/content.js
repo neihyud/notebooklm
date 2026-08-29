@@ -99,44 +99,56 @@
   const BUNDLE_BREAKER = 3;
 
   /**
-   * Link bị cửa 2 loại ở lượt gần nhất — nguyên liệu cho "copy lại cả những cái
-   * đã có". Giữ ở đây chứ không hỏi lại service worker: danh sách phải là đúng
-   * cái người dùng vừa được báo, không phải một danh sách tính lại sau đó.
+   * Link bị cửa 2 loại ở lượt gần nhất — nguyên liệu cho nút *Copy lại*.
+   *
+   * Giữ ở đây chứ không hỏi lại service worker: danh sách phải là đúng cái người
+   * dùng vừa được báo, không phải một danh sách tính lại sau đó.
    */
   let lastDropped = [];
+  let lastDroppedFrom = '';
 
   /**
-   * Ba cửa, theo đúng thứ tự — và thứ tự này là nội dung chứ không phải cách xếp:
+   * Cửa 1 — huy hiệu trên thẻ video. Miễn phí, CHỈ ĐƯỢC LOẠI.
    *
-   *   cửa 1  huy hiệu, miễn phí, CHỈ ĐƯỢC LOẠI
-   *   cửa 3  hỏi player response, tốn request, CHỈ ĐƯỢC NHẬN
-   *
-   * (Cửa 2 — khử trùng qua Sổ đã copy — chèn vào giữa ở mục 3 của ticket 006.)
-   *
-   * Cái neo: KHÔNG có đường nào tới `writeText` mà không qua cửa 3. Mọi hàm gom
-   * link đều phải đi qua đây, kể cả nút "copy lại những cái đã có" sắp thêm ở
-   * mục 3 — danh sách của nút đó chưa bao giờ đi qua cửa 3, và nếu nó có đường
-   * riêng thì đúng video private cửa 3 vừa chặn sẽ lên clipboard ở lượt sau.
-   *
-   * @param {Array} candidates `{videoId, title, privacy|privacyHint, accessible}`
-   * @returns {{urls: string[], restricted: Array, unknown: Array, tripped: boolean}}
+   * Khử trùng lặp theo `videoId` ngay tại đây: một playlist có thể chứa cùng một
+   * video hai lần, và không gộp thì cửa 3 trả tiền hai lượt hỏi cho cùng một câu.
    */
-  async function buildBundle(candidates) {
+  function badgeGate(candidates) {
     const restricted = [];
-    const unknown = [];
     const asking = [];
+    const seen = new Set();
 
     for (const c of candidates) {
-      if (!c || !c.videoId) continue;
+      if (!c || !c.videoId || seen.has(c.videoId)) continue;
+      seen.add(c.videoId);
       const privacy = c.privacy || c.privacyHint;
       if (badgeRejects({ privacy, accessible: c.accessible })) restricted.push(c);
       else asking.push(c);
     }
+    return { restricted, asking };
+  }
+
+  /**
+   * Cửa 3 — hỏi player response. Vị ngữ DUY NHẤT cấp phép một URL vào clipboard.
+   *
+   * Cái neo: KHÔNG có đường nào tới `writeText` mà không qua đây. Nút *Copy lại*
+   * cũng phải đi qua, và đó không phải nghi thức thừa — danh sách của nút đó là
+   * `dropped`, thứ cửa 2 loại ra TRƯỚC khi ai hỏi player response, nên nó chưa
+   * bao giờ được cấp phép. Bỏ cửa 3 khỏi nhánh đó là mở đúng cái vòng lặp ticket
+   * 006 đã chỉ ra: cửa 3 đẩy video bị loại sang Hàng đợi, cửa 2 lại tra Hàng đợi,
+   * nên video private vừa bị chặn ở lượt 1 nằm trong `dropped` ở lượt 2.
+   *
+   * @param {Array} candidates `{videoId, title, privacy|privacyHint, accessible}`
+   * @returns {{urls: string[], restricted: Array, unknown: Array, tripped: boolean}}
+   */
+  async function askGate(candidates) {
+    const restricted = [];
+    const unknown = [];
 
     let strike = 0;   // lượt hỏng liên tiếp
     let tripped = false;
 
-    const asked = await mapWithLimit(asking, BUNDLE_LIMIT, async (c) => {
+    const asked = await mapWithLimit(candidates, BUNDLE_LIMIT, async (c) => {
       if (tripped) return { c, meta: null };
       try {
         // `noFallback`: một lượt hỏi hỏng không được biến thành một lượt tải
@@ -163,6 +175,16 @@
   /**
    * Gom rồi trao tay: ghi clipboard, và đẩy phần không đủ điều kiện về Hàng đợi.
    *
+   * Ba cửa, theo đúng thứ tự này — và thứ tự là nội dung chứ không phải cách xếp:
+   *
+   *   cửa 1  huy hiệu, miễn phí, CHỈ ĐƯỢC LOẠI
+   *   cửa 2  khử trùng qua Sổ đã copy + Hàng đợi, một lượt tin, CHỈ ĐƯỢC LOẠI
+   *   cửa 3  hỏi player response, một request MỖI video, CHỈ ĐƯỢC NHẬN
+   *
+   * Cửa 2 đứng TRƯỚC cửa 3 vì cửa 3 là cửa duy nhất tốn tiền: chỉ thứ chưa nằm
+   * ở đâu mới đáng hỏi. Đảo lại thì bấm *Copy link công khai* lần thứ hai trên
+   * một playlist 200 video là 200 lượt POST tới YouTube để rồi vứt cả 200.
+   *
    * Bó rỗng thì KHÔNG chạm clipboard. `writeText('')` xoá trắng thứ người dùng
    * đang giữ, và họ mất nó để đổi lấy một thông báo. Đây là ca thường gặp chứ
    * không phải ca biên: bấm copy lần thứ hai trên cùng một playlist là rơi thẳng
@@ -170,32 +192,34 @@
    *
    * Ba lý do bị loại được đếm RIÊNG. "Đã copy 0 link" là câu vô nghĩa; "cả 12
    * link đều private" thì hành động được.
-   */
-  /**
-   * @param {boolean} opts.skipDedupe bỏ qua cửa 2 — dành cho nút "copy lại cả
-   *   những cái đã có". Nó KHÔNG bỏ qua cửa 3: danh sách của nút đó là `dropped`,
-   *   thứ chưa bao giờ đi qua cửa 3, và cửa 3 lại đẩy video bị loại sang Hàng đợi
-   *   mà cửa 2 thì tra Hàng đợi — nên đúng video private vừa bị chặn sẽ nằm trong
-   *   `dropped` ở lượt sau. Vòng lặp tự đóng nếu ai đó nới cái neo này.
+   *
+   * @param {boolean} opts.skipDedupe bỏ qua cửa 2 — dành riêng cho nút *Copy lại*.
+   *   Nó KHÔNG bỏ qua cửa 3; xem ghi chú ở `askGate`.
    */
   async function handOff(candidates, { verb = 'Đã copy', from = '', skipDedupe = false } = {}) {
-    const { urls, restricted, unknown, tripped } = await buildBundle(candidates);
-    const leftover = restricted.concat(unknown);
+    const label = from || pageCtx.title || location.href;
+    const gate1 = badgeGate(candidates);
 
-    // Cửa 2 — khử trùng. Chạy SAU cửa 3 vì chỉ link đã được cấp phép mới đáng
-    // đem đi tra, và service worker là chỗ duy nhất cầm luật khoá.
-    let keep = urls;
+    // Cửa 2 — khử trùng. Service worker là chỗ duy nhất cầm luật khoá.
+    let toAsk = gate1.asking;
     let dropped = [];
-    if (urls.length && !skipDedupe) {
-      const res = await send(MSG.BUNDLE_FILTER, { urls });
+    if (gate1.asking.length && !skipDedupe) {
+      const res = await send(MSG.BUNDLE_FILTER, { urls: gate1.asking.map((c) => canonicalUrl(c.videoId)) });
       if (res && res.error) {
         toast(`Không tra được Sổ đã copy: ${res.error}`, 'error');
         return { copied: 0, error: res.error };
       }
-      keep = (res && res.keep) || [];
+      const keepIds = new Set(((res && res.keep) || []).map((u) => videoIdFrom(u)).filter(Boolean));
       dropped = (res && res.dropped) || [];
+      toAsk = gate1.asking.filter((c) => keepIds.has(c.videoId));
     }
-    lastDropped = dropped.length ? dropped.map((d) => d.url) : [];
+
+    // Cửa 3 — chỉ chạy trên thứ cửa 2 cho qua.
+    const { urls: keep, restricted: askedOut, unknown, tripped } = await askGate(toAsk);
+    const restricted = gate1.restricted.concat(askedOut);
+    const leftover = restricted.concat(unknown);
+
+    showRecopy(dropped.map((d) => d.url).filter(Boolean), label);
 
     if (!keep.length) {
       const why = [];
@@ -204,7 +228,7 @@
       if (dropped.length) why.push(`${dropped.length} link đã có trong Sổ hoặc Hàng đợi`);
       toast(
         why.length
-          ? `Không link nào vào được Bó: ${why.join(' · ')}.${dropped.length ? ' Bấm lại nút này lần nữa để copy cả những cái đã có.' : ' Tất cả đã vào Hàng đợi.'}`
+          ? `Không link nào vào được Bó: ${why.join(' · ')}.${dropped.length ? ' Dùng nút "Copy lại" ở góc màn hình để copy cả những cái đã có.' : ' Tất cả đã vào Hàng đợi.'}`
           : 'Không có video nào để copy.',
         'warn'
       );
@@ -212,11 +236,10 @@
       return { copied: 0, restricted: restricted.length, unknown: unknown.length, dropped: dropped.length };
     }
 
-    const urlsToCopy = keep;
     try {
       // `await` xong mới được làm gì tiếp — đóng giao diện trước khi clipboard
       // ghi xong là mất trắng nội dung.
-      await navigator.clipboard.writeText(urlsToCopy.join('\n'));
+      await navigator.clipboard.writeText(keep.join('\n'));
     } catch (e) {
       // Clipboard API từ chối khi tài liệu không được focus. Nói ra đường thủ
       // công thay vì im lặng nuốt — người dùng đang đứng trước một cái nút vừa
@@ -230,24 +253,33 @@
 
     // Ghi Sổ SAU khi clipboard đã nhận thật — ghi trước là để Sổ nói dối, và lần
     // sau nó lọc mất đúng những link chưa bao giờ tới clipboard.
-    await send(MSG.BUNDLE_COPIED, { urls: urlsToCopy, from: from || pageCtx.title || location.href });
+    await send(MSG.BUNDLE_COPIED, { urls: keep, from: label });
 
-    // Mục 6: nhảy sang tab notebook, và DỪNG. Không mở hộp thoại, không bấm chip.
-    const jump = await send(MSG.JUMP_NOTEBOOK, {});
-
-    const parts = [`${verb} ${urlsToCopy.length} link công khai`];
+    /*
+     * Bản tổng kết phải dựng TRƯỚC cú nhảy, vì cú nhảy là thứ quyết định nó được
+     * đọc ở đâu. `JUMP_NOTEBOOK` bật tab notebook lên và focus cửa sổ, nên tab
+     * này thành tab nền — một toast ở đây là một bản báo cáo không ai đọc, và nó
+     * mang đúng phần đáng đọc nhất ("12 private/unlisted → Hàng đợi"). Nhảy được
+     * thì service worker báo bằng thông báo hệ thống; không nhảy được thì người
+     * dùng còn đứng đây, và toast là đúng chỗ.
+     */
+    const parts = [`${verb} ${keep.length} link công khai`];
     if (restricted.length) parts.push(`${restricted.length} private/unlisted → Hàng đợi`);
     if (unknown.length) parts.push(`${unknown.length} không hỏi được → Hàng đợi`);
-    if (dropped.length) parts.push(`${dropped.length} bỏ vì đã có trong Sổ`);
+    if (dropped.length) parts.push(`${dropped.length} bỏ vì đã có trong Sổ — nút "Copy lại" ở góc màn hình`);
     if (tripped) parts.push('đã dừng hỏi vì YouTube liên tục từ chối');
-    // Im lặng ở đây là im lặng sai: clipboard đã có nội dung mà người dùng không
-    // biết mang đi đâu, và không có cú nhảy nào để tự nói hộ.
-    if (!jump || !jump.jumped) parts.push('chưa đặt notebook đích — mở notebook rồi Ctrl+V');
-    toast(parts.join(' · '), jump && jump.jumped ? 'ok' : 'warn');
+
+    const jump = await send(MSG.JUMP_NOTEBOOK, { summary: parts.join(' · ') });
+    if (!jump || !jump.jumped) {
+      // Im lặng ở đây là im lặng sai: clipboard đã có nội dung mà người dùng không
+      // biết mang đi đâu, và không có cú nhảy nào để tự nói hộ.
+      parts.push('chưa đặt notebook đích — mở notebook rồi Ctrl+V');
+      toast(parts.join(' · '), 'warn');
+    }
 
     if (leftover.length) await enqueueLeftover(leftover);
     return {
-      copied: urlsToCopy.length,
+      copied: keep.length,
       restricted: restricted.length,
       unknown: unknown.length,
       dropped: dropped.length,
@@ -255,7 +287,88 @@
     };
   }
 
-  /** Xếp hàng phần bị loại, im lặng — người dùng đã đọc con số ở toast của Bó rồi. */
+  /**
+   * Nút *Copy lại* — chỗ duy nhất đi tới `dropped`.
+   *
+   * Vì sao là một phần tử ĐỨNG YÊN chứ không phải "bấm lại nút cũ lần nữa":
+   * nút cũ thường không còn ở đó. Thanh nổi tự gỡ mình khi hết mục được tick
+   * (`renderBar`), và cú bấm copy nào cũng kết thúc bằng `clearSelection()`;
+   * bảng *Import toàn bộ* thì đã đóng. Một lời dặn "bấm lại" trỏ vào một cái nút
+   * đã biến mất thì tệ hơn im lặng.
+   *
+   * Cũng KHÔNG tự tắt sau vài giây: lượt copy thành công kết thúc bằng cú nhảy
+   * sang tab notebook, nên người dùng chỉ nhìn lại tab này về sau. Nó phải còn
+   * đó lúc họ quay lại, và chỉ biến mất khi họ bấm.
+   */
+  let recopyEl = null;
+  function showRecopy(urls, from) {
+    lastDropped = Array.isArray(urls) ? urls : [];
+    lastDroppedFrom = from || '';
+    if (!lastDropped.length) return hideRecopy();
+
+    if (!recopyEl) {
+      recopyEl = document.createElement('div');
+      recopyEl.id = 'nblm-recopy';
+      recopyEl.className = 'nblm-recopy';
+      document.documentElement.appendChild(recopyEl);
+    }
+
+    const text = document.createElement('span');
+    text.className = 'nblm-recopy__text';
+    text.textContent = `${lastDropped.length} link đã có trong Sổ hoặc Hàng đợi`;
+
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'nblm-recopy__go';
+    go.dataset.act = 'recopy';
+    go.textContent = `Copy lại ${lastDropped.length} link`;
+    go.title = 'Copy cả những link đã có trong Sổ đã copy hoặc Hàng đợi';
+    go.addEventListener('click', onRecopyClick);
+
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'nblm-recopy__x';
+    x.dataset.act = 'dismiss';
+    x.textContent = '×';
+    x.title = 'Bỏ qua';
+    x.addEventListener('click', hideRecopy);
+
+    recopyEl.replaceChildren(text, go, x);
+  }
+
+  function hideRecopy() {
+    lastDropped = [];
+    lastDroppedFrom = '';
+    if (recopyEl) {
+      recopyEl.remove();
+      recopyEl = null;
+    }
+  }
+
+  async function onRecopyClick(event) {
+    const el = event.currentTarget;
+    if (el.disabled) return;
+    // Chụp lại TRƯỚC khi `handOff` gọi `showRecopy` và ghi đè `lastDropped`.
+    const urls = lastDropped.slice();
+    const from = lastDroppedFrom;
+    if (!urls.length) return hideRecopy();
+
+    el.disabled = true;
+    el.textContent = 'Đang hỏi…';
+    try {
+      await handOff(
+        urls.map((u) => ({ videoId: videoIdFrom(u) })).filter((c) => c.videoId),
+        { verb: 'Đã copy lại', from, skipDedupe: true }
+      );
+    } finally {
+      // Lượt bình thường: `handOff` đã gọi `showRecopy([])` nên phần tử tự gỡ.
+      // Còn sống nghĩa là lượt này ném giữa chừng — dựng lại nguyên trạng, đừng
+      // bỏ một cái nút "Đang hỏi…" đứng đó vĩnh viễn.
+      if (recopyEl && recopyEl.contains(el)) showRecopy(urls, from);
+    }
+  }
+
+  /** Xếp hàng phần bị loại, im lặng — người dùng đã đọc con số ở bản tổng kết rồi. */
   async function enqueueLeftover(items) {
     const payload = items.map((i) => ({
       videoId: i.videoId,

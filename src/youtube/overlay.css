@@ -129,6 +129,64 @@
 .nblm-toast[data-kind="warn"] { border-left: 4px solid #fdd663; }
 .nblm-toast[data-kind="ok"] { border-left: 4px solid #81c995; }
 
+/*
+ * Nút "Copy lại" — đứng yên, không tự tắt. Nằm ngay TRÊN chỗ toast mọc ra
+ * (bottom 24px + chiều cao toast) để hai thứ không chồng nhau khi cùng hiện.
+ */
+.nblm-recopy {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  z-index: 2147483002;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 380px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border-left: 4px solid #fdd663;
+  background: #202124;
+  color: #e8eaed;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
+  font-family: "Roboto", "Arial", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.nblm-recopy__text { flex: 1 1 auto; }
+
+.nblm-recopy__go {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 18px;
+  background: #8ab4f8;
+  color: #202124;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.nblm-recopy__go:hover { background: #aecbfa; }
+.nblm-recopy__go:disabled { opacity: .6; cursor: default; }
+
+.nblm-recopy__x {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #9aa0a6;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.nblm-recopy__x:hover { background: rgba(255, 255, 255, .12); color: #e8eaed; }
+
 /* nút phụ (Transcript) cạnh nút NotebookLM */
 #nblm-transcript-button.nblm-btn--ghost {
   background: rgba(255, 255, 255, .12);

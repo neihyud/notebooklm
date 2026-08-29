@@ -175,6 +175,57 @@ const queue = () => store.get('queue') || [];
   ok(called('tabs.sendMessage').length === 0,
     'nhảy sang tab KHÔNG được ping content script — không có gì để hỏi, clipboard đã xong');
 
+  /*
+   * Bản tổng kết của Bó đi kèm CÚ NHẢY, và phải đi bằng thông báo hệ thống.
+   *
+   * Lý do nằm ở chính ba dòng ngay trên: cú nhảy này bật tab notebook lên rồi
+   * focus cửa sổ, nên ngay sau nó tab YouTube/tài liệu thành tab NỀN. Một toast
+   * dựng ở đó là bản báo cáo không ai đọc — mà nó mang đúng phần đáng đọc nhất:
+   * "12 private/unlisted → Hàng đợi", "3 trang không có thân bài → dùng Thêm N
+   * trang". Bề mặt vẫn dựng được toast, nhưng đó là *một chuỗi trong một tab đã
+   * bị bỏ lại*, nên hoán vị "toast thay vì thông báo" phải đỏ ở đây.
+   */
+  store.clear();
+  await setTarget(NB('abc'));
+  resetNav([{ id: 1, windowId: 7, url: NB('abc'), active: false }]);
+  {
+    const res = await SW.jumpToNotebook('Đã copy 5 link công khai · 12 private/unlisted → Hàng đợi');
+    eq(res.jumped, true, 'ca dựng sai thì assertion sau vô nghĩa — phải nhảy được trước đã');
+    const notes = called('notify');
+    eq(notes.length, 1, 'nhảy kèm bản tổng kết phải báo đúng một lần bằng thông báo hệ thống');
+    const body = (notes[0] && notes[0][1] && notes[0][1][0]) || {};
+    ok(/12 private\/unlisted/.test(body.message || ''),
+      `thông báo phải mang NGUYÊN bản tổng kết, kể cả phần rơi về Hàng đợi — nhận: "${body.message}"`);
+  }
+
+  /*
+   * Không có bản tổng kết thì KHÔNG báo. `jumpToNotebook` còn được gọi ở chỗ
+   * khác, và một thông báo rỗng bật lên mỗi lượt nhảy là nhiễu chứ không phải
+   * thông tin.
+   */
+  store.clear();
+  await setTarget(NB('abc'));
+  resetNav([{ id: 1, windowId: 7, url: NB('abc'), active: false }]);
+  {
+    await SW.jumpToNotebook();
+    eq(called('notify').length, 0, 'nhảy mà không kèm tổng kết thì không được bật thông báo');
+  }
+
+  /*
+   * Không nhảy được thì KHÔNG báo, dù có tổng kết trong tay: lúc đó người dùng
+   * còn đứng ở tab nguồn, bề mặt tự toast tại chỗ và kèm được câu "chưa đặt
+   * notebook đích — mở notebook rồi Ctrl+V". Báo cả hai là nói hai lần một
+   * chuyện, mà bản của service worker lại thiếu đúng câu chỉ đường.
+   */
+  store.clear();
+  resetNav([{ id: 2, windowId: 7, url: 'https://www.youtube.com/', active: true }]);
+  {
+    const res = await SW.jumpToNotebook('Đã copy 5 link công khai');
+    eq(res.jumped, false, 'ca dựng sai thì assertion sau vô nghĩa — ca này phải là không nhảy được');
+    eq(called('notify').length, 0,
+      'không nhảy được thì để bề mặt tự nói — nó còn kèm được câu chỉ đường mà service worker không có');
+  }
+
   /* Có tab NotebookLM nhưng không phải notebook đích: điều hướng tab đó. */
   store.clear();
   await setTarget(NB('abc'));

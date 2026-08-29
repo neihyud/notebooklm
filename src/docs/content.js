@@ -280,6 +280,7 @@
         </p>
         <div class="panel__go">
           <label class="panel__run"><input type="checkbox" class="panel__runnow" checked> Chạy ngay</label>
+          <button type="button" class="btn btn--ghost" data-act="recopy" hidden>Copy lại</button>
           <button type="button" class="btn btn--ghost" data-act="copy" disabled>Copy link</button>
           <button type="button" class="btn" data-act="import" disabled>Thêm 0 trang</button>
         </div>
@@ -291,6 +292,7 @@
     const search = el.querySelector('.panel__search');
     const goBtn = el.querySelector('[data-act="import"]');
     const copyBtn = el.querySelector('[data-act="copy"]');
+    const recopyBtn = el.querySelector('[data-act="recopy"]');
     const runNow = el.querySelector('.panel__runnow');
 
     let rows = [];
@@ -394,7 +396,24 @@
     }
 
     /**
-     * Đường trao tay cho trang tài liệu: đo, khử trùng, ghi clipboard, rồi dừng.
+     * Link bị cửa khử trùng loại ở lượt gần nhất — nguyên liệu cho nút *Copy lại*.
+     * Sống trong closure của bảng: nó là danh sách người dùng vừa được báo, không
+     * phải một danh sách tính lại sau đó.
+     */
+    let lastDropped = [];
+
+    function setRecopy(urls) {
+      lastDropped = Array.isArray(urls) ? urls : [];
+      recopyBtn.hidden = !lastDropped.length;
+      recopyBtn.textContent = `Copy lại ${lastDropped.length} link đã có`;
+    }
+
+    /**
+     * Đường trao tay cho trang tài liệu: khử trùng, đo, ghi clipboard, rồi dừng.
+     *
+     * Khử trùng ĐỨNG TRƯỚC cửa đo, vì cửa đo là thứ tốn tiền: mỗi trang là một
+     * lượt fetch HTML thô. Đảo lại thì bấm *Copy N link* lần thứ hai trên một
+     * sidebar 200 trang là 200 lượt fetch để rồi vứt cả 200.
      *
      * URL đem đi copy là `row.url` — đúng thứ bảng đang hiện. KHÔNG dùng `key`
      * (`docKey`): đó là khoá *so trùng*, không phải "bản sạch" để dán. `docKey`
@@ -403,14 +422,76 @@
      * dùng vừa nhìn thấy. Hai vai, hai chuỗi.
      */
     async function copyBundle(picked) {
+      const urls = picked.map((r) => r.url);
+
+      // `.catch` chứ không để trần: service worker vừa nạp lại thì `sendMessage`
+      // *reject*, và một promise rejection trong handler click này không có ai
+      // bắt — cú bấm chết câm. Biến nó thành đúng hình dạng lỗi ở dưới.
+      const res = await chrome.runtime
+        .sendMessage({ type: MSG.BUNDLE_FILTER, urls })
+        .catch((e) => ({ error: (e && e.message) || String(e) }));
+      /*
+       * Lỗi của cửa khử trùng KHÔNG được đọc thành "không có gì để copy". Cả hai
+       * ca cùng cho `keep` rỗng, nhưng một bên là "đã có rồi" còn bên kia là
+       * "chưa tra được" — và bên thứ hai mà báo thành bên thứ nhất thì người dùng
+       * vừa trả tiền cho một lượt đo xong nhận một câu sai nguyên nhân.
+       */
+      if (res && res.error) {
+        flash(`Không tra được Sổ đã copy: ${res.error} — chưa copy gì cả, thử lại sau.`);
+        return;
+      }
+      const keep = (res && res.keep) || [];
+      const dropped = (res && res.dropped) || [];
+      setRecopy(dropped.map((d) => d.url).filter(Boolean));
+
+      if (!keep.length) {
+        flash(
+          dropped.length
+            ? `Cả ${dropped.length} link đều đã có trong Sổ đã copy hoặc Hàng đợi — dùng nút "Copy lại ${dropped.length} link đã có".`
+            : 'Không có trang nào để copy.'
+        );
+        return;
+      }
+
+      await measureAndCopy(keep, { dropped: dropped.length });
+    }
+
+    /**
+     * Nút *Copy lại* — chỗ duy nhất đi tới `dropped`, và nó vẫn phải qua cửa đo.
+     *
+     * Bỏ cửa đo ở nhánh này là bỏ đúng thứ giữ cho Bó link không sinh Nguồn rỗng:
+     * `dropped` bị loại TRƯỚC khi ai đo nó, nên trong đó có thể là một trang
+     * docsify dựng toàn bộ thân bài bằng JavaScript. Khử trùng thì bỏ được — đó
+     * chính là việc người dùng vừa yêu cầu — cửa đo thì không.
+     */
+    async function recopyBundle() {
+      const urls = lastDropped.slice();
+      if (!urls.length) return setRecopy([]);
+      // Chỉ buông danh sách khi clipboard đã nhận thật. Buông trước rồi cửa đo
+      // hỏng giữa chừng là vứt mất bản duy nhất còn giữ nó — người dùng không
+      // có đường nào lấy lại ngoài xoá sạch Sổ.
+      const copied = await measureAndCopy(urls, { verb: 'Đã copy lại' });
+      setRecopy(copied ? [] : urls);
+    }
+
+    /**
+     * Cửa đo → clipboard → Sổ → nhảy tab. Dùng chung cho cả hai nút, vì cái neo
+     * là "không có đường nào tới `writeText` mà không qua cửa đo" — hai bản chép
+     * tay của đoạn này là hai chỗ để cái neo tuột ra.
+     *
+     * @returns {boolean} clipboard đã nhận thật hay chưa — `recopyBundle` đọc nó
+     *   để biết có được buông danh sách bị loại hay không.
+     */
+    async function measureAndCopy(urls, { verb = 'Đã copy', dropped = 0 } = {}) {
       const original = copyBtn.textContent;
       copyBtn.disabled = true;
+      recopyBtn.disabled = true;
       goBtn.disabled = true;
 
       try {
-        copyBtn.textContent = `Đang đo 0/${picked.length}…`;
+        copyBtn.textContent = `Đang đo 0/${urls.length}…`;
         const verdicts = await probeUrls(
-          picked.map((r) => r.url),
+          urls,
           (done, total) => { copyBtn.textContent = `Đang đo ${done}/${total}…`; }
         );
 
@@ -424,28 +505,22 @@
             `Không trang nào vào được Bó link: cả ${blocked.length} trang đều dựng thân bài bằng JavaScript ` +
             'hoặc không tải được. Dùng nút "Thêm N trang" — nội dung sẽ được trích ngay tại máy bạn.'
           );
-          return;
+          return false;
         }
 
-        const res = await chrome.runtime.sendMessage({ type: MSG.BUNDLE_FILTER, urls: passed });
-        const keep = (res && res.keep) || [];
-        const dropped = (res && res.dropped) || [];
-
-        if (!keep.length) {
-          flash(`Cả ${dropped.length} link đều đã có trong Sổ đã copy hoặc Hàng đợi — không copy lại.`);
-          return;
-        }
-
-        await navigator.clipboard.writeText(keep.join('\n'));
+        await navigator.clipboard.writeText(passed.join('\n'));
         // Ghi Sổ SAU khi clipboard đã nhận thật.
-        await chrome.runtime.sendMessage({ type: MSG.BUNDLE_COPIED, urls: keep, from: siteName() });
+        await chrome.runtime.sendMessage({ type: MSG.BUNDLE_COPIED, urls: passed, from: siteName() });
 
-        // Mục 6: nhảy sang tab notebook, và DỪNG.
-        const jump = await chrome.runtime.sendMessage({ type: MSG.JUMP_NOTEBOOK });
-
-        const parts = [`Đã copy ${keep.length} link`];
+        /*
+         * Bản tổng kết dựng TRƯỚC cú nhảy và đi kèm nó. Mục 6 bật tab notebook
+         * lên rồi focus cửa sổ, nên tab tài liệu này thành tab nền ngay sau đó —
+         * `flash` ở đây là bản báo cáo không ai đọc, mà nó mang đúng phần đáng
+         * đọc nhất: những trang trượt cửa đo và cái giá của nguồn dán từ link.
+         */
+        const parts = [`${verb} ${passed.length} link`];
         if (blocked.length) parts.push(`${blocked.length} trang không có thân bài trong HTML thô → dùng "Thêm N trang"`);
-        if (dropped.length) parts.push(`${dropped.length} đã có trong Sổ`);
+        if (dropped) parts.push(`${dropped} đã có trong Sổ`);
         /*
          * Nói ra sự đánh đổi thay vì để người dùng tự phát hiện. Cửa đo trả lời
          * "Nguồn có RỖNG không", KHÔNG trả lời "Nguồn có SẠCH không": máy chủ
@@ -454,12 +529,19 @@
          * ra ~10-14% với đa số trang, nhưng mkdocs-material là ~61%.
          */
         parts.push('link dán vào NotebookLM sẽ kèm cả menu điều hướng của trang');
-        if (!jump || !jump.jumped) parts.push('chưa đặt notebook đích — mở notebook rồi Ctrl+V');
-        flash(parts.join(' · '));
+
+        const jump = await chrome.runtime.sendMessage({ type: MSG.JUMP_NOTEBOOK, summary: parts.join(' · ') });
+        if (!jump || !jump.jumped) {
+          parts.push('chưa đặt notebook đích — mở notebook rồi Ctrl+V');
+          flash(parts.join(' · '));
+        }
+        return true;
       } catch (e) {
         flash(`Không copy được: ${(e && e.message) || e}`);
+        return false;
       } finally {
         copyBtn.textContent = original;
+        recopyBtn.disabled = false;
         syncCounts();
       }
     }
@@ -489,6 +571,11 @@
         const picked = checkedRows();
         if (!picked.length) return;
         await copyBundle(picked);
+        return;
+      }
+
+      if (act === 'recopy') {
+        await recopyBundle();
         return;
       }
 

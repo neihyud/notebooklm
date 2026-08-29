@@ -47,6 +47,19 @@ const enq = (h) => h.sent.filter((m) => m.type === 'enqueue');
 const enqItems = (h, i = 0) => ((enq(h)[i] && enq(h)[i].items) || []);
 const msgs = (h, type) => h.sent.filter((m) => m.type === type);
 
+/*
+ * Bản tổng kết của một Bó đi KÈM CÚ NHẢY, không ở lại tab YouTube.
+ *
+ * Đọc `h.toast()` cho ca nhảy được là đọc một bản báo cáo trên tab vừa bị bỏ
+ * lại: `jumpToNotebook` bật tab notebook lên rồi focus cửa sổ. Assertion cũ ghim
+ * đúng chỗ đó, tức nó chứng nhận một chuỗi người dùng không bao giờ nhìn thấy —
+ * và phần đáng đọc nhất của chuỗi ấy là số video rơi về Hàng đợi.
+ */
+const summary = (h) => {
+  const m = msgs(h, 'jump-notebook').pop();
+  return (m && m.summary) || '';
+};
+
 const meta = (over = {}) =>
   Object.assign(
     { title: 'Tiêu đề', channel: 'Kênh', durationSec: 90, privacy: 'public', hasCaptions: true, playable: true },
@@ -354,7 +367,10 @@ async function run() {
     eq(asked[0].opts, { noFallback: true },
       '(a) cửa 3 phải tắt nhánh tải trang watch: một lượt hỏi hỏng không được thành một lượt tải HTML đầy đủ');
     eq(enq(h), [], '(a) link đã vào clipboard thì KHÔNG xếp hàng nữa — Đường trao tay dừng ở đó');
-    ok(/1 link công khai/.test(h.toast()), `(a) phải nói đã copy mấy link — nhận: "${h.toast()}"`);
+    ok(/1 link công khai/.test(summary(h)),
+      `(a) phải nói đã copy mấy link, và nói trong bản tổng kết đi kèm cú nhảy — nhận: "${summary(h)}"`);
+    eq(h.toast(), '',
+      '(a) nhảy được rồi thì KHÔNG dựng toast ở tab này nữa — tab YouTube vừa thành tab nền, không ai đọc');
     h.close();
   }
 
@@ -682,6 +698,190 @@ async function run() {
       `phải nói ra rằng chưa có đích để nhảy tới — nhận: "${h.toast()}"`);
     ok(/Ctrl\+V/.test(h.toast()),
       `phải chỉ đường thủ công, không bỏ người dùng đứng đó — nhận: "${h.toast()}"`);
+    h.close();
+  }
+
+  /* ================================================================== */
+  /* thứ tự ba cửa, và nút Copy lại                                      */
+  /* ================================================================== */
+
+  /*
+   * Cửa 2 đứng TRƯỚC cửa 3, và đây là chỗ đo cái giá của thứ tự đó.
+   *
+   * Cửa 3 là cửa duy nhất tốn tiền: một video = một lượt `innertube('player')`.
+   * Đảo lại thì bấm copy lần thứ hai trên một danh sách đã copy hết vẫn trả đủ
+   * N lượt POST tới YouTube để rồi cửa 2 vứt cả N — và cầu dao không cứu được,
+   * vì mọi lượt hỏi đó đều THÀNH CÔNG.
+   *
+   * Assertion phải là `asked`, không phải clipboard: hai thứ tự cửa cho ra cùng
+   * một clipboard rỗng, nên assert kết quả sẽ xanh cả hai chiều hoán vị.
+   */
+  const listBody3 = [
+    videoCard('vidcopied01', 'Đã copy một'),
+    videoCard('vidcopied02', 'Đã copy hai'),
+    videoCard('vidcopied03', 'Đã copy ba'),
+  ].join('');
+
+  /** Background coi MỌI url là đã có trong Sổ. */
+  const allDropped = (m) => {
+    if (m.type === 'bundle-filter') {
+      return { keep: [], dropped: (m.urls || []).map((u) => ({ url: u, why: 'copied' })), counts: { copied: (m.urls || []).length, queued: 0 } };
+    }
+    if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
+    if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };
+    if (m.type === 'enqueue') return { added: (m.items || []).length };
+    return {};
+  };
+
+  const tickAll = (h) =>
+    h.$$('.nblm-pick input').forEach((b) => { b.checked = true; b.dispatchEvent(new h.win.Event('change')); });
+
+  /*
+   * Bấm nút Copy lại, và KHÔNG ném khi nó vắng mặt.
+   *
+   * `h.click()` ném `Error` cho phần tử không tìm thấy, mà một cú ném ở đây nuốt
+   * luôn dòng tổng kết của cả file: hoán vị "không dựng nút Copy lại" khi ấy đo
+   * ra "không in được gì" thay vì một con số fail. Đúng bài học của
+   * `docs/adr/0001-duong-trao-tay.md` — thiệt hại phải đếm được.
+   */
+  const clickRecopy = (h) => {
+    const btn = h.$('#nblm-recopy .nblm-recopy__go');
+    if (!btn) return false;
+    h.click(btn);
+    return true;
+  };
+
+  {
+    const asked = [];
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: listBody3,
+      describe: async (id) => { asked.push(id); return meta({ videoId: id }); },
+      bridge: async () => ({ kind: 'other' }),
+    });
+    h.reply(allDropped);
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    eq(asked, [],
+      'cửa 2 loại sạch thì cửa 3 KHÔNG được hỏi lượt nào — cửa 3 là cửa duy nhất tốn request');
+    eq(msgs(h, 'bundle-filter').length, 1, 'cửa 2 chạy đúng một lượt cho cả Bó');
+    eq(h.clipboard.writes, [], 'không link nào qua được cửa 2 thì không chạm clipboard');
+    h.close();
+  }
+
+  /*
+   * Nút *Copy lại* phải là một phần tử ĐỨNG YÊN, không phải lời dặn "bấm lại nút
+   * cũ lần nữa". Nút cũ thường không còn ở đó: `onBarClick` kết thúc bằng
+   * `clearSelection()`, và `renderBar` tự gỡ thanh nổi khi hết mục được tick.
+   */
+  {
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: listBody3,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    h.reply(allDropped);
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    const chip = h.$('#nblm-recopy');
+    ok(!!chip, 'cửa 2 loại link thì phải hiện nút Copy lại — con số không kèm cách bấm là im lặng bỏ link');
+    // `chip &&` chứ không `chip.textContent` trần: nút vắng mặt phải ra MỘT DÒNG
+    // FAIL nữa, không phải một cú ném nuốt mất dòng tổng kết của cả file.
+    const chipText = chip ? chip.textContent : '';
+    ok(/3/.test(chipText), `nút Copy lại phải mang đúng số link bị loại — nhận: "${chipText}"`);
+    ok(!h.$('[data-act="copy"]'),
+      'thanh nổi đã tự gỡ sau cú bấm — đó là lý do nút Copy lại không được gắn vào nó');
+    h.close();
+  }
+
+  /*
+   * Bấm *Copy lại*: bỏ qua cửa 2 (đó là việc người dùng vừa yêu cầu), NHƯNG vẫn
+   * phải qua cửa 3. Ghim cả hai vế trong một ca — bỏ vế nào cũng thành một hoán
+   * vị xanh: chỉ ghim cửa 2 thì bỏ luôn cửa 3 vẫn xanh, chỉ ghim cửa 3 thì giữ
+   * nguyên cửa 2 (tức nút không làm gì) vẫn xanh.
+   */
+  {
+    const asked = [];
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: listBody3,
+      describe: async (id) => { asked.push(id); return meta({ videoId: id }); },
+      bridge: async () => ({ kind: 'other' }),
+    });
+    h.reply(allDropped);
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    ok(clickRecopy(h), 'phải có nút Copy lại để bấm — không có thì mọi assertion dưới đây vô nghĩa');
+    await h.tick(200);
+
+    eq(msgs(h, 'bundle-filter').length, 1,
+      'Copy lại KHÔNG tra Sổ lần nữa — cửa 2 chính là thứ người dùng vừa bảo bỏ qua');
+    eq(asked.slice().sort(), ['vidcopied01', 'vidcopied02', 'vidcopied03'],
+      'Copy lại VẪN phải qua cửa 3: danh sách của nó bị cửa 2 loại trước khi ai hỏi player response');
+    eq(h.clipboard.writes, [
+      'https://www.youtube.com/watch?v=vidcopied01\nhttps://www.youtube.com/watch?v=vidcopied02\nhttps://www.youtube.com/watch?v=vidcopied03',
+    ], 'Copy lại phải đưa đủ cả ba link vào clipboard');
+    ok(/Đã copy lại 3 link/.test(summary(h)),
+      `bản tổng kết phải phân biệt copy lại với copy lần đầu — nhận: "${summary(h)}"`);
+    ok(!h.$('#nblm-recopy'), 'copy lại xong thì nút tự gỡ — danh sách đó đã hết vai');
+    h.close();
+  }
+
+  /*
+   * Cái neo, đo thẳng: một video private lọt vào `dropped` thì nút *Copy lại*
+   * KHÔNG được đưa nó lên clipboard.
+   *
+   * Đây không phải ca giả định. Cửa 3 đẩy video bị loại sang Hàng đợi, mà cửa 2
+   * tra cả Hàng đợi — nên đúng video private bị chặn ở lượt 1 sẽ nằm trong
+   * `dropped` ở lượt 2. Bỏ cửa 3 khỏi nhánh Copy lại là đóng vòng lặp đó lại
+   * thành một đường rò.
+   */
+  {
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: videoCard('vidprivat09', 'Riêng tư'),
+      describe: async (id) => meta({ videoId: id, privacy: 'private' }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    h.reply(allDropped);
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    ok(clickRecopy(h), 'ca dựng sai thì mọi assertion sau đều vô nghĩa — nút phải có mặt trước đã');
+    await h.tick(200);
+
+    eq(h.clipboard.writes, [],
+      'video private đi qua nút Copy lại vẫn bị cửa 3 chặn — không có đường nào tới writeText mà không qua cửa 3');
+    eq(enqItems(h, enq(h).length - 1).map((i) => i.videoId), ['vidprivat09'],
+      'và nó phải rơi về Hàng đợi, không mất trắng');
+    h.close();
+  }
+
+  /* Không có link nào bị loại thì không dựng nút — một cái nút không làm gì là một cái bẫy. */
+  {
+    const h = loadYouTubePage({
+      body: WATCH_ROW,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    await h.tick(80);
+    h.click('#nblm-copy-button');
+    await h.tick(120);
+
+    eq(h.clipboard.writes.length, 1, 'ca dựng sai thì assertion sau vô nghĩa — lượt copy phải thành công đã');
+    ok(!h.$('#nblm-recopy'), 'cửa 2 không loại gì thì KHÔNG có nút Copy lại');
     h.close();
   }
 

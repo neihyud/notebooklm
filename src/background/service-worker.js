@@ -245,9 +245,17 @@ async function resolveNotebookTab() {
  * xong, và một exception ở đây sẽ bị bề mặt báo thành "copy hỏng". Trả về lý do
  * để bề mặt nói tiếp vào câu đã copy.
  *
+ * `summary` là bản tổng kết của Bó, và nó phải đi qua ĐÂY chứ không ở lại tab
+ * nguồn. Cú nhảy này bật tab notebook lên rồi focus cửa sổ, nên ngay sau nó tab
+ * YouTube/tài liệu thành tab nền: một toast dựng ở đó là bản báo cáo không ai
+ * đọc — mà nó mang đúng phần đáng đọc nhất ("12 private/unlisted → Hàng đợi",
+ * "3 trang không có thân bài → dùng Thêm N trang"). Chỉ báo khi thật sự nhảy;
+ * không nhảy thì người dùng còn đứng ở tab nguồn và toast tại chỗ là đúng chỗ.
+ *
+ * @param {string} [summary] bản tổng kết để báo bằng thông báo hệ thống sau cú nhảy
  * @returns {{jumped: boolean, why?: string, tabId?: number}}
  */
-async function jumpToNotebook() {
+async function jumpToNotebook(summary) {
   const settings = await getSettings();
   const target = (settings.notebookUrl || '').trim();
 
@@ -273,6 +281,7 @@ async function jumpToNotebook() {
 
   await chrome.tabs.update(tab.id, { active: true });
   if (tab.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
+  if (summary) await note('Đã copy, Ctrl+V vào Thêm nguồn', summary);
   return { jumped: true, tabId: tab.id };
 }
 
@@ -1618,7 +1627,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return;
 
         case MSG.JUMP_NOTEBOOK:
-          sendResponse(await jumpToNotebook());
+          sendResponse(await jumpToNotebook(message.summary));
           return;
 
         case MSG.OPEN_OPTIONS:

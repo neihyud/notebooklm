@@ -31,6 +31,20 @@ const tree = () => [
   docNode('API', 'https://docs.example.dev/api'),
 ];
 
+/*
+ * Bản tổng kết của một Bó đi KÈM CÚ NHẢY, không ở lại tab tài liệu.
+ *
+ * Đọc `h.flash()` cho ca nhảy được là đọc một bản báo cáo trên tab vừa bị bỏ
+ * lại: `jumpToNotebook` bật tab notebook lên rồi focus cửa sổ. Assertion cũ ghim
+ * đúng chỗ đó, tức nó chứng nhận một chuỗi người dùng không bao giờ nhìn thấy.
+ */
+const summary = (h) => {
+  const m = h.sent.filter((x) => x.type === 'jump-notebook').pop();
+  return (m && m.summary) || '';
+};
+
+const msgs = (h, type) => h.sent.filter((m) => m.type === type);
+
 const check = (h, i) => {
   const box = h.panelAll('.row input')[i];
   box.checked = true;
@@ -245,19 +259,40 @@ async function run() {
   const threeUrls = Object.keys(PAGES);
   const threeTree = () => threeUrls.map((u, i) => docNode(`Trang ${i}`, u));
 
-  /** Background giả: trả HTML thô như `fetchRawHtml` trả, và ghi lại đã hỏi gì. */
-  const withPages = (h, { fail = [], onFetch = null } = {}) => {
+  /**
+   * Background giả: trả HTML thô như `fetchRawHtml` trả, và ghi lại đã hỏi gì.
+   *
+   * @param {string[]|'all'} opts.drop url mà cửa khử trùng coi là ĐÃ CÓ trong Sổ
+   * @param {string} opts.filterError cửa khử trùng hỏng — ca khác hẳn "đã có rồi"
+   */
+  const withPages = (h, { fail = [], onFetch = null, drop = [], filterError = null } = {}) => {
     h.reply((m) => {
       if (m.type === 'docs-raw-fetch') {
         if (onFetch) onFetch(m.url);
         if (fail.includes(m.url)) return { url: m.url, error: 'HTTP 503' };
         return { url: m.url, finalUrl: m.url, type: 'text/html', html: PAGES[m.url] || '' };
       }
-      if (m.type === 'bundle-filter') return { keep: m.urls, dropped: [], counts: { copied: 0, queued: 0 } };
+      if (m.type === 'bundle-filter') {
+        if (filterError) return { error: filterError };
+        const urls = m.urls || [];
+        const out = drop === 'all' ? urls : urls.filter((u) => drop.includes(u));
+        return {
+          keep: urls.filter((u) => !out.includes(u)),
+          dropped: out.map((u) => ({ url: u, why: 'copied' })),
+          counts: { copied: out.length, queued: 0 },
+        };
+      }
       if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
       if (m.type === 'jump-notebook') return { ...h.jump };
       return {};
     });
+  };
+
+  /** Mở bảng chọn và tick hết — ba dòng lặp lại ở gần như mọi ca dưới đây. */
+  const openAndTickAll = async (h) => {
+    await h.tick(80);
+    h.click(h.launcher());
+    await h.tick(60);
   };
 
   {
@@ -297,12 +332,14 @@ async function run() {
     h.click('[data-act="copy"]');
     await h.tick(150);
 
-    const note = h.flash();
+    const note = summary(h);
     ok(/Đã copy 3 link/.test(note), `(d) phải nói đã copy mấy link — nhận: "${note}"`);
     ok(/1 trang không có thân bài/.test(note),
       `(d) phải nêu số trang bị loại, kèm đường đi thay thế — nhận: "${note}"`);
     ok(/menu điều hướng/.test(note),
       '(d) phải nói ra sự đánh đổi: cửa đo trả lời "Nguồn có RỖNG không", không trả lời "Nguồn có SẠCH không"');
+    eq(h.flash(), '',
+      '(d) nhảy được rồi thì KHÔNG dựng flash ở tab này nữa — tab tài liệu vừa thành tab nền, không ai đọc');
     h.close();
   }
 
@@ -362,6 +399,146 @@ async function run() {
       'Sổ ghi ĐÚNG những link đã tới clipboard, không phải toàn bộ danh sách đã tick');
     ok(h.sent.findIndex((m) => m.type === 'bundle-filter') < h.sent.findIndex((m) => m.type === 'bundle-copied'),
       'cửa 2 phải chạy trước khi ghi Sổ');
+    h.close();
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* khử trùng đứng TRƯỚC cửa đo, và nút Copy lại                       */
+  /* ---------------------------------------------------------------- */
+
+  /*
+   * Cửa đo là thứ tốn tiền ở bề mặt này: mỗi trang là một lượt fetch HTML thô.
+   * Nên khử trùng phải chạy trước — bấm *Copy N link* lần thứ hai trên một
+   * sidebar đã copy hết không được tốn một lượt fetch nào.
+   *
+   * Assertion phải là `asked`, không phải clipboard: hai thứ tự cho ra cùng một
+   * clipboard rỗng, nên assert kết quả sẽ xanh cả hai chiều hoán vị.
+   */
+  {
+    const asked = [];
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h, { drop: 'all', onFetch: (u) => asked.push(u) });
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    eq(asked, [],
+      '(d) khử trùng loại sạch thì cửa đo KHÔNG được fetch trang nào — cửa đo là cửa duy nhất tốn tiền');
+    eq(h.clipboard.writes, [], '(d) không link nào qua khử trùng thì không chạm clipboard');
+    ok(!/Cả 0 link/.test(h.flash()), `(d) đừng in một con số 0 vào câu "cả N link" — nhận: "${h.flash()}"`);
+    h.close();
+  }
+
+  /*
+   * Con số link bị loại phải đi KÈM một cách bấm. Im lặng bỏ link là đúng lỗi
+   * extension này sinh ra để chữa, và một con số không kèm nút thì cũng chỉ là
+   * im lặng có kèm chú thích.
+   */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h, { drop: 'all' });
+    h.click('[data-act="all"]');
+
+    ok(h.panel('[data-act="recopy"]').hidden, '(d) chưa có link nào bị loại thì nút Copy lại phải ẩn');
+
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    const btn = h.panel('[data-act="recopy"]');
+    ok(btn && !btn.hidden, '(d) khử trùng loại link thì phải hiện nút Copy lại');
+    ok(/4/.test(btn ? btn.textContent : ''),
+      `(d) nút Copy lại phải mang đúng số link bị loại — nhận: "${btn ? btn.textContent : ''}"`);
+    h.close();
+  }
+
+  /*
+   * Bấm *Copy lại*: bỏ qua khử trùng (việc người dùng vừa yêu cầu), NHƯNG vẫn
+   * phải qua cửa đo. Ba vế ghim trong một ca, vì bỏ vế nào cũng thành một hoán
+   * vị xanh — và vế thứ ba là chỗ dễ tuột nhất: `dropped` bị loại TRƯỚC khi ai
+   * đo nó, nên trong đó có thể là một trang dựng thân bài bằng JavaScript.
+   */
+  {
+    const asked = [];
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h, { drop: 'all', onFetch: (u) => asked.push(u) });
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    const btn = h.panel('[data-act="recopy"]');
+    ok(!!btn && !btn.hidden, '(d) ca dựng sai thì mọi assertion sau vô nghĩa — nút phải có mặt trước đã');
+    if (btn) h.click(btn);
+    await h.tick(200);
+
+    eq(msgs(h, 'bundle-filter').length, 1,
+      '(d) Copy lại KHÔNG tra Sổ lần nữa — khử trùng chính là thứ người dùng vừa bảo bỏ qua');
+    eq(asked.slice().sort(), threeUrls.slice().sort(),
+      '(d) Copy lại VẪN phải qua cửa đo: danh sách của nó bị loại trước khi ai đo nó');
+    eq(h.clipboard.writes, ['https://a.dev/docs/ssr\nhttps://a.dev/docs/tiny\nhttps://a.dev/docs/junk'],
+      '(d) trang dựng bằng JavaScript vẫn bị cửa đo chặn ở nhánh Copy lại — không có đường vòng');
+    ok(/Đã copy lại 3 link/.test(summary(h)),
+      `(d) bản tổng kết phải phân biệt copy lại với copy lần đầu — nhận: "${summary(h)}"`);
+    h.close();
+  }
+
+  /*
+   * Copy lại mà cửa đo hỏng: danh sách bị loại phải CÒN NGUYÊN.
+   *
+   * Buông nó trước khi clipboard nhận thật là vứt mất bản duy nhất còn giữ nó —
+   * Sổ đã copy không có xoá từng dòng, nên đường lấy lại một link sẽ là *Xoá sổ*
+   * toàn bộ, hai nhịp, không hoàn tác. Cái giá quá cao cho một lượt fetch hỏng.
+   */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h, { drop: 'all' });
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    ok(!h.panel('[data-act="recopy"]').hidden, '(d) ca dựng sai thì assertion sau vô nghĩa — nút phải hiện trước đã');
+
+    withPages(h, { drop: 'all', fail: threeUrls });   // mọi lượt đo đều hỏng
+    h.click(h.panel('[data-act="recopy"]'));
+    await h.tick(200);
+
+    eq(h.clipboard.writes, [], '(d) cửa đo hỏng hết thì KHÔNG chạm clipboard');
+    const btn = h.panel('[data-act="recopy"]');
+    ok(btn && !btn.hidden, '(d) copy lại hỏng thì nút phải CÒN ĐÓ để bấm lại');
+    ok(/4/.test(btn ? btn.textContent : ''),
+      `(d) và còn nguyên cả 4 link, không rơi mất cái nào — nhận: "${btn ? btn.textContent : ''}"`);
+    h.close();
+  }
+
+  /*
+   * Cửa khử trùng HỎNG không được đọc thành "không có gì để copy".
+   *
+   * Hai ca cùng cho `keep` rỗng, và đó là cái bẫy: bản trước đọc thẳng
+   * `res.keep || []` nên một lượt tra hỏng ra câu "Cả 0 link đều đã có trong Sổ"
+   * — vừa vô nghĩa vừa sai nguyên nhân. Bề mặt YouTube xử lý đúng ca này từ đầu;
+   * đây là chỗ hai bề mặt lệch nhau.
+   */
+  {
+    const asked = [];
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h, { filterError: 'storage hỏng', onFetch: (u) => asked.push(u) });
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    eq(h.clipboard.writes, [], '(d) tra Sổ hỏng thì KHÔNG copy — fail-closed');
+    eq(asked, [], '(d) tra Sổ hỏng thì đừng trả tiền cho cửa đo');
+    eq(msgs(h, 'bundle-copied'), [], '(d) tra Sổ hỏng thì không ghi Sổ');
+    ok(/storage hỏng/.test(h.flash()),
+      `(d) phải nói ra nguyên nhân thật, nguyên văn lỗi — nhận: "${h.flash()}"`);
+    ok(!/đã có trong Sổ/.test(h.flash()),
+      `(d) KHÔNG được báo "đã có trong Sổ": đó là ca khác hẳn, và nói nhầm thì người dùng đi tìm nhầm chỗ — nhận: "${h.flash()}"`);
+    ok(h.panel('[data-act="recopy"]').hidden,
+      '(d) tra hỏng thì không có danh sách bị loại nào — đừng dựng một nút Copy lại rỗng');
     h.close();
   }
 
