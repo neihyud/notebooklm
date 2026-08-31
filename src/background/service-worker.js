@@ -253,9 +253,10 @@ async function resolveNotebookTab() {
  * không nhảy thì người dùng còn đứng ở tab nguồn và toast tại chỗ là đúng chỗ.
  *
  * @param {string} [summary] bản tổng kết để báo bằng thông báo hệ thống sau cú nhảy
- * @returns {{jumped: boolean, why?: string, tabId?: number}}
+ * @param {string} [source] tên bề mặt khởi lượt ('YouTube' | 'Tài liệu'), làm tiền tố tiêu đề
+ * @returns {{jumped: boolean, why?: string, tabId?: number, noted?: boolean}}
  */
-async function jumpToNotebook(summary) {
+async function jumpToNotebook(summary, source) {
   const settings = await getSettings();
   const target = (settings.notebookUrl || '').trim();
 
@@ -300,7 +301,12 @@ async function jumpToNotebook(summary) {
   // `noted` được trả lên để bên gọi biết bản tổng kết có thật sự tới nơi không.
   // Nhảy được nghĩa là tab này thành tab nền, nên thông báo hệ thống là đường
   // duy nhất còn lại; nó câm thì bên gọi phải tự nói bằng toast của mình.
-  const noted = summary ? await note('Đã copy, Ctrl+V vào Thêm nguồn', summary) : true;
+  //
+  // `summary` rỗng cho `noted: true` — đọc là "không có gì để báo nên không có
+  // gì hỏng", không phải "đã báo xong". Hai bên gọi thật đều luôn gửi `summary`
+  // (`youtube/content.js`, `docs/content.js`), nên nhánh này chỉ tồn tại cho
+  // lời gọi trần; bên gọi nào bỏ `summary` mà vẫn đọc `noted` là tự lừa mình.
+  const noted = summary ? await note('Đã copy, Ctrl+V vào Thêm nguồn', summary, source) : true;
   return { jumped: true, tabId: tab.id, noted };
 }
 
@@ -692,14 +698,14 @@ async function filterBundle(urls) {
     else keep.push(url);
   }
 
-  return {
-    keep,
-    dropped,
-    counts: {
-      copied: dropped.filter((d) => d.why === 'copied').length,
-      queued: dropped.filter((d) => d.why === 'queued').length,
-    },
-  };
+  /*
+   * Trả đúng hai field. `counts: {copied, queued}` từng đứng ở đây và KHÔNG bề
+   * mặt nào đọc: cả `youtube/content.js` lẫn `docs/content.js` đều tự đếm lại
+   * từ `dropped` vì chúng còn cần chính danh sách url để dựng thẻ *Copy lại*.
+   * Một field chỉ có test đọc là một field nói dối về hợp đồng — nó làm hợp
+   * đồng trông rộng hơn thứ thật sự được giữ.
+   */
+  return { keep, dropped };
 }
 
 /**
@@ -730,6 +736,19 @@ function recordCopied(urls, from) {
   return run;
 }
 
+/*
+ * Sổ KHÔNG có trần, và đó là một quyết định chứ không phải một chỗ quên.
+ *
+ * Trần theo số dòng hay theo tuổi đều làm hỏng đúng thứ Sổ sinh ra để giữ: một
+ * dòng bị cắt là một link được coi như chưa bao giờ copy, nên lần sau cửa 2 cho
+ * nó qua và người dùng dán trùng — im lặng, đúng cái lỗi Đường trao tay dựng ra
+ * để chặn. Người dùng xoá bằng nút *Xoá sổ*, và đó là chỗ duy nhất được xoá.
+ *
+ * Giá phải trả có thật và được chấp nhận: mỗi lượt ghi đọc rồi ghi lại TOÀN BỘ
+ * mảng, nên thời gian ghi lớn tuyến tính theo kích thước Sổ. `manifest.json`
+ * xin `unlimitedStorage` chính vì thế. `COPIED_PAGE = 50` bên dưới chỉ giới hạn
+ * số dòng GỬI cho popup mỗi lượt — nó không đụng gì tới thứ được lưu.
+ */
 async function writeCopied(urls, from) {
   const log = await getCopiedLog();
   const known = new Set(log.map((row) => row.key).filter(Boolean));
@@ -1416,11 +1435,32 @@ async function runQueue() {
 }
 
 /**
+ * Cắt cho vừa `max` ký tự, và cắt thì phải NÓI RA là đã cắt.
+ *
+ * `slice(0, 300)` trần cắt câm ở đuôi, mà đuôi mới là chỗ bản tổng kết để những
+ * vế đáng đọc nhất: "Đã copy N link" đứng đầu, còn "M private/unlisted",
+ * "K đang nằm trong Hàng đợi", "chưa ghi được Sổ đã copy" đều được `push` sau.
+ * Hôm nay chuỗi dài nhất đo được còn dưới 300, nhưng bất biến đó không ai giữ —
+ * thêm một `parts.push` nữa là nó đứt, và đứt không một dấu hiệu.
+ */
+function cut(s, max) {
+  const t = String(s == null ? '' : s);
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+/**
  * Bắn một thông báo hệ thống. Trả về `true` khi có cơ sở tin là nó tới nơi.
  *
  * Giá trị trả về mới là phần đáng kể: có chỗ trong luồng (cú nhảy sang notebook)
  * mà thông báo này là đường DUY NHẤT còn lại để nói với người dùng, vì tab họ vừa
  * bấm đã thành tab nền. Nuốt hết lỗi và không nói gì là để bản tổng kết bốc hơi.
+ *
+ * `source` là NGUỒN của lượt, và nó là tham số chứ không phải chuỗi cứng vì hàm
+ * này phục vụ hai luồng khác nhau: bấm copy trên YouTube, và bấm copy trên bảng
+ * tài liệu. Gắn cứng "YouTube →" cho cả hai thì người dùng bấm ở bảng docs nhận
+ * một thông báo nói họ vừa làm gì đó với YouTube. Không truyền thì tiêu đề chỉ
+ * còn "NotebookLM — …": Hàng đợi tự chạy, không khởi từ bề mặt nào, nhưng vẫn
+ * cần tên để phân biệt giữa một trung tâm thông báo đầy thứ khác.
  *
  * `getPermissionLevel()` là tín hiệu tốt nhất có sẵn, KHÔNG phải bằng chứng đủ:
  * doc chính thức của Chrome nói nó trả về `"granted"` | `"denied"` cho quyền của
@@ -1428,7 +1468,7 @@ async function runQueue() {
  * tầng hệ điều hành. Nên `true` ở đây đọc là "không có dấu hiệu bị chặn", chứ
  * không phải "người dùng đã nhìn thấy".
  */
-async function note(title, message) {
+async function note(title, message, source) {
   try {
     if (chrome.notifications.getPermissionLevel) {
       const level = await chrome.notifications.getPermissionLevel();
@@ -1437,8 +1477,8 @@ async function note(title, message) {
     await chrome.notifications.create({
       type: 'basic',
       iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-      title: `YouTube → NotebookLM — ${title}`,
-      message: String(message).slice(0, 300),
+      title: source ? `${source} → NotebookLM — ${title}` : `NotebookLM — ${title}`,
+      message: cut(message, 300),
     });
     return true;
   } catch (_) {
@@ -1686,7 +1726,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return;
 
         case MSG.JUMP_NOTEBOOK:
-          sendResponse(await jumpToNotebook(message.summary));
+          sendResponse(await jumpToNotebook(message.summary, message.source));
           return;
 
         case MSG.OPEN_OPTIONS:

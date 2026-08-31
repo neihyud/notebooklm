@@ -212,6 +212,53 @@ const queue = () => store.get('queue') || [];
   }
 
   /*
+   * Tiêu đề phải nói ĐÚNG bề mặt đã khởi lượt. Trước đây nó là một chuỗi cứng
+   * "YouTube → NotebookLM — …" cho mọi lượt, nên người dùng bấm Copy trên bảng
+   * tài liệu — không đụng gì tới YouTube — vẫn nhận một thông báo bảo họ vừa
+   * làm gì đó với YouTube.
+   *
+   * Ghim CẢ HAI giá trị: chỉ ghim ca docs thì hoán vị "luôn dùng source" xanh,
+   * chỉ ghim ca YouTube thì hoán vị "giữ chuỗi cứng" xanh.
+   */
+  for (const [source, want] of [['Tài liệu', 'Tài liệu → NotebookLM — '], ['YouTube', 'YouTube → NotebookLM — ']]) {
+    resetNav([{ id: 1, windowId: 7, url: NB('abc'), active: false }]);
+    await SW.jumpToNotebook('Đã copy 5 link công khai', source);
+    const body = (called('notify')[0] || [])[1];
+    const title = (body && body[0] && body[0].title) || '';
+    ok(title.startsWith(want),
+      `lượt khởi từ "${source}" phải mang tiền tố "${want}" — nhận: "${title}"`);
+  }
+
+  /*
+   * Cắt 300 ký tự phải NHÌN THẤY được. `slice(0, 300)` trần cắt câm ở đuôi, mà
+   * đuôi là chỗ bản tổng kết để những vế đáng đọc nhất — "M private/unlisted",
+   * "chưa ghi được Sổ đã copy" đều được `push` SAU "Đã copy N link".
+   *
+   * Ca này ghim hai thứ tách nhau: độ dài trần 300 (không thì thông báo tự cắt
+   * chỗ khác), và ký tự "…" ở cuối (không thì hoán vị `slice(0, 300)` trần vẫn
+   * xanh). Một mình assertion độ dài KHÔNG phân biệt được hai bản.
+   */
+  {
+    resetNav([{ id: 1, windowId: 7, url: NB('abc'), active: false }]);
+    const dai = `Đã copy 5 link công khai · ${'x'.repeat(400)} · chưa ghi được Sổ đã copy`;
+    await SW.jumpToNotebook(dai, 'YouTube');
+    const body = (called('notify')[0] || [])[1];
+    const msg = (body && body[0] && body[0].message) || '';
+    eq(msg.length, 300, `thông báo phải cắt về đúng 300 ký tự — nhận: ${msg.length}`);
+    ok(msg.endsWith('…'),
+      `và phải nói ra là đã cắt, chứ không cụt câm — nhận đuôi: "${msg.slice(-12)}"`);
+  }
+
+  /* Chuỗi ngắn thì KHÔNG được đụng vào — không có "…" mọc ra từ hư không. */
+  {
+    resetNav([{ id: 1, windowId: 7, url: NB('abc'), active: false }]);
+    await SW.jumpToNotebook('Đã copy 5 link công khai', 'YouTube');
+    const body = (called('notify')[0] || [])[1];
+    eq((body && body[0] && body[0].message) || '', 'Đã copy 5 link công khai',
+      'chuỗi dưới ngưỡng phải đi nguyên vẹn — cắt vô cớ là mất chữ');
+  }
+
+  /*
    * Không có bản tổng kết thì KHÔNG báo. `jumpToNotebook` còn được gọi ở chỗ
    * khác, và một thông báo rỗng bật lên mỗi lượt nhảy là nhiễu chứ không phải
    * thông tin.

@@ -723,7 +723,10 @@ function probe(promise) {
    */
 
   /** Câu tổng kết cuối lượt, tách khỏi mọi thông báo khác. */
-  const tomTat = () => notes.filter((n) => n.title === 'YouTube → NotebookLM — Import xong');
+  // Tiền tố là 'NotebookLM — ', KHÔNG phải 'YouTube → NotebookLM — ': Hàng đợi
+  // chạy cả Mục docs lẫn Mục video, nên gắn cứng "YouTube →" là nói sai nguồn
+  // cho một nửa số lượt. Tiền tố theo bề mặt chỉ dành cho lượt trao tay.
+  const tomTat = () => notes.filter((n) => n.title === 'NotebookLM — Import xong');
 
   /* ---------- D1. toàn thành công ---------- */
   {
@@ -846,7 +849,7 @@ function probe(promise) {
     // Hai thông báo cùng hình dạng {title, message} rời khỏi cùng một hàm `note`
     // trong cùng một lượt: lý do dừng và câu tổng kết phải vào đúng thông báo của
     // mình, không đổi chỗ cho nhau.
-    const dung = notes.filter((n) => n.title === 'YouTube → NotebookLM — Dừng hàng đợi');
+    const dung = notes.filter((n) => n.title === 'NotebookLM — Dừng hàng đợi');
     ok(dung.length === 1, `phải báo một lần lý do dừng, nhận: ${JSON.stringify(notes.map((n) => n.title))}`);
     ok(
       (dung[0] || {}).message === 'NotebookLM báo: Notebook đã đủ 300 nguồn',

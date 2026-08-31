@@ -306,7 +306,7 @@ function loadYouTubePage({
   const defaultReply = (message) => {
     const type = message && message.type;
     if (type === 'bundle-filter') {
-      return { keep: message.urls || [], dropped: [], counts: { copied: 0, queued: 0 } };
+      return { keep: message.urls || [], dropped: [] };
     }
     if (type === 'bundle-copied') return { added: (message.urls || []).length };
     /* Mục 6: mặc định coi như đã có notebook đích. Đổi `h.jump` để thử ca ngược. */
@@ -502,7 +502,7 @@ function loadDocsPage({
   let respond = (message) => {
     const type = message && message.type;
     if (type === 'bundle-filter') {
-      return { keep: message.urls || [], dropped: [], counts: { copied: 0, queued: 0 } };
+      return { keep: message.urls || [], dropped: [] };
     }
     if (type === 'bundle-copied') return { added: (message.urls || []).length };
     if (type === 'enqueue') {

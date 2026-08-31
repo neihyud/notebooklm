@@ -416,8 +416,16 @@
      */
     let lastDropped = [];
 
-    function setRecopy(urls) {
-      lastDropped = (Array.isArray(urls) ? urls : []).filter(Boolean);
+    /**
+     * @param {string[]} urls danh sách mới.
+     * @param {boolean} opts.merge gộp vào danh sách đang giữ thay vì thay thế.
+     *   Một lượt copy trên tập dòng KHÁC không biết gì về nợ của lượt trước, nên
+     *   ghi đè là lặng lẽ vứt phần người dùng chưa xử lý — kể cả khi chính lượt
+     *   này sau đó trượt sạch cửa đo.
+     */
+    function setRecopy(urls, { merge = false } = {}) {
+      const next = (Array.isArray(urls) ? urls : []).filter(Boolean);
+      lastDropped = merge ? [...new Set([...lastDropped, ...next])] : next;
       const on = lastDropped.length > 0;
       recopyBtn.hidden = !on;
       // Nút bỏ qua đi liền với nút Copy lại — ẩn/hiện cùng nhau, nếu không thì
@@ -486,7 +494,7 @@
        */
       const dropped = out.filter((d) => d.why === 'copied');
       const queued = out.filter((d) => d.why !== 'copied');
-      setRecopy(dropped.map((d) => d.url));
+      setRecopy(dropped.map((d) => d.url), { merge: true });
 
       if (!keep.length) {
         const why = [];
@@ -612,7 +620,7 @@
         parts.push('link dán vào NotebookLM sẽ kèm cả menu điều hướng của trang');
 
         const jump = await chrome.runtime
-          .sendMessage({ type: MSG.JUMP_NOTEBOOK, summary: parts.join(' · ') })
+          .sendMessage({ type: MSG.JUMP_NOTEBOOK, summary: parts.join(' · '), source: 'Tài liệu' })
           .catch(() => null);
         if (!jump || !jump.jumped) {
           parts.push(jumpWhy(jump));
@@ -720,6 +728,11 @@
         rows = next;
         boxes.clear();
         search.value = '';
+        // Bảng là singleton nhớ: `close()` chỉ đặt `display:none`, nên không
+        // buông ở đây là mở lại trên trang khác vẫn thấy "Copy lại N link đã có"
+        // của trang trước. Danh sách đó là thứ người dùng vừa được báo TRÊN MỘT
+        // TRANG KHÁC; giữ nó lại là đổi nghĩa của chính con số.
+        setRecopy([]);
         render();
       },
     };

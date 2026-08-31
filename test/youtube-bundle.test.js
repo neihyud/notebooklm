@@ -728,7 +728,7 @@ async function run() {
   /** Background coi MỌI url là đã có trong Sổ. */
   const allDropped = (m) => {
     if (m.type === 'bundle-filter') {
-      return { keep: [], dropped: (m.urls || []).map((u) => ({ url: u, why: 'copied' })), counts: { copied: (m.urls || []).length, queued: 0 } };
+      return { keep: [], dropped: (m.urls || []).map((u) => ({ url: u, why: 'copied' })) };
     }
     if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
     if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };
@@ -841,6 +841,207 @@ async function run() {
   }
 
   /*
+   * Con số trong bản tổng kết phải là con số Hàng đợi THẬT SỰ nhận, không phải
+   * con số gửi đi.
+   *
+   * Hàng đợi khử trùng theo `itemKey`, nên bấm *Copy link công khai* mười lần
+   * trên một trang có một video bị huy hiệu chặn thì cả mười lần đều báo "1
+   * video private/unlisted → Hàng đợi" trong khi chín lần sau không thêm gì.
+   * Một con số lặp lại y hệt mà không phản ánh việc gì đang xảy ra thì người
+   * dùng không có cách nào biết là không có gì thay đổi.
+   *
+   * Ghim CHỮ chứ không ghim số: cả hai bản đều in ra "2", nên assert con số sẽ
+   * xanh cả hai chiều hoán vị.
+   */
+  {
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: [videoCard('vidprivat01', 'Riêng một', 'Private'), videoCard('vidprivat02', 'Riêng hai', 'Private')].join(''),
+      describe: async (id) => meta({ videoId: id, privacy: 'private' }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    // Hàng đợi đã có sẵn cả hai: `added: 0`.
+    h.reply((m) => {
+      if (m.type === 'bundle-filter') return { keep: m.urls || [], dropped: [] };
+      if (m.type === 'enqueue') return { added: 0, skipped: (m.items || []).length };
+      if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };
+      return {};
+    });
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(200);
+
+    const said = summary(h) || h.toast();
+    ok(/đã có sẵn trong Hàng đợi/.test(said),
+      `Hàng đợi không nhận thêm gì thì phải NÓI RA, không báo "→ Hàng đợi" như lần đầu — nhận: "${said}"`);
+    ok(!/2 → Hàng đợi/.test(said),
+      `và không được báo con số gửi đi như thể nó là con số đã thêm — nhận: "${said}"`);
+    h.close();
+  }
+
+  /*
+   * Cùng một luật ở NHÁNH KIA. `handOff` có hai đường dựng bản tổng kết — bó
+   * rỗng (`why`) và bó có hàng (`parts`) — và chúng là hai đoạn code riêng. Ca
+   * trên chỉ đi qua đường thứ nhất; đo hoán vị 2026-08-31, sửa riêng dòng ở
+   * `parts` cho 0 đỏ. Một nhánh xanh không nói gì về nhánh còn lại.
+   */
+  {
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: [videoCard('vidcongkhai', 'Công khai'), videoCard('vidprivat03', 'Riêng ba', 'Private')].join(''),
+      describe: async (id) => meta({ videoId: id, privacy: id === 'vidprivat03' ? 'private' : 'public' }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    h.reply((m) => {
+      if (m.type === 'bundle-filter') return { keep: m.urls || [], dropped: [] };
+      if (m.type === 'enqueue') return { added: 0, skipped: (m.items || []).length };
+      if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
+      if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };
+      return {};
+    });
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(200);
+
+    const said = summary(h) || h.toast();
+    ok(/Đã copy 1 link/.test(said),
+      `ca dựng sai thì assertion sau vô nghĩa — phải có link công khai để đi vào nhánh này, nhận: "${said}"`);
+    ok(/đã có sẵn trong Hàng đợi/.test(said),
+      `nhánh "bó có hàng" cũng phải nói con số THẬT — nhận: "${said}"`);
+    ok(!/1 → Hàng đợi/.test(said),
+      `và cũng không được báo con số gửi đi — nhận: "${said}"`);
+    h.close();
+  }
+
+  /*
+   * Node bị gỡ khỏi DOM mà biến vẫn trỏ vào nó: mọi lần ghi sau đó rơi vào hư
+   * không — không lỗi, không chữ, và người dùng không thấy gì cả.
+   *
+   * Đây là ca thật trên YouTube: SPA thay cả cây khi chuyển trang, và overlay
+   * treo vào `document.documentElement` chứ không vào một host riêng. Ca này
+   * dựng lại đúng tình huống đó bằng cách gỡ tay hai phần tử.
+   *
+   * Assertion phải là "phần tử MỚI có mặt trong DOM và mang đúng chữ", không
+   * phải "biến còn truthy": hoán vị bỏ `isConnected` giữ nguyên biến truthy nên
+   * assert trên biến sẽ xanh cả hai chiều.
+   */
+  {
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: listBody3,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async (kind) =>
+        kind === 'context' ? { kind: 'playlist', playlistId: 'PL123', title: 'Playlist thử' } : { items: [] },
+    });
+    h.reply(allDropped);
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    const chip = h.$('#nblm-recopy');
+    const toastNode = h.$('.nblm-toast');
+    ok(!!chip && !!toastNode, 'ca dựng sai thì assertion sau vô nghĩa — cả thẻ lẫn toast phải có mặt trước đã');
+    if (chip) chip.remove();
+    if (toastNode) toastNode.remove();
+
+    // Lượt copy thứ hai: cả hai phải mọc lại, không ghi vào cái xác cũ.
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(200);
+
+    const chip2 = h.$('#nblm-recopy');
+    ok(!!chip2 && chip2 !== chip,
+      'thẻ bị gỡ khỏi DOM thì lượt sau phải dựng thẻ MỚI, không ghi vào node đã chết');
+    ok(/3 link/.test((chip2 && chip2.textContent) || ''),
+      `và thẻ mới phải mang đủ nội dung — nhận: "${(chip2 && chip2.textContent) || ''}"`);
+    const toast2 = h.$('.nblm-toast');
+    ok(!!toast2 && (toast2.textContent || '').length > 0,
+      `toast bị gỡ cũng phải mọc lại kèm chữ — nhận: "${toast2 ? toast2.textContent : '(không có toast)'}"`);
+    h.close();
+  }
+
+  /*
+   * `from` của `bundle-copied` — ngữ cảnh mà Sổ ghi lại cho mỗi dòng.
+   *
+   * Ca này phải dựng CHỦ ĐÍCH cho `pageCtx` đổi giữa hai cú bấm, nếu không nó
+   * chứng nhận nhầm chỗ: thẻ *Copy lại* chụp `lastDroppedFrom` lúc dựng, còn
+   * `handOff` khi thiếu `from` thì rơi về `pageCtx.title`. Trên một trang đứng
+   * yên, hai đường cho cùng một chuỗi — hoán vị "bỏ hẳn phép chụp" vẫn xanh.
+   * Đúng cái bẫy hai-cơ-chế-cùng-giữ-một-luật.
+   *
+   * Và đây chính là ca thật, không phải ca dựng cho vui: thẻ sống qua cả cú
+   * chuyển trang. Người dùng bấm copy trên playlist A, sang playlist B, rồi mới
+   * bấm *Copy lại* — Sổ phải ghi A, vì đó là nơi những link ấy đến từ.
+   */
+  {
+    let ctx = { kind: 'playlist', playlistId: 'PLA', title: 'Playlist A' };
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PLA',
+      body: listBody3,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async (kind) => (kind === 'context' ? ctx : { items: [] }),
+    });
+    h.reply(allDropped);
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    /*
+     * Sang "playlist B". Phải bắn `yt-navigate-finish`, KHÔNG phải chạm DOM:
+     * `refreshContext()` chỉ chạy ở `onNavigate`, còn `MutationObserver` chỉ
+     * kích `scheduleScan` (quét thẻ video). Đo 2026-08-31: bản dùng
+     * `insertAdjacentHTML` để hoán vị "copy lại quên chụp nguồn" sống sót 0 đỏ,
+     * vì `pageCtx.title` vẫn là 'Playlist A' — ca xanh mà không đo được gì.
+     */
+    ctx = { kind: 'playlist', playlistId: 'PLB', title: 'Playlist B' };
+    h.win.dispatchEvent(new h.win.Event('yt-navigate-finish'));
+    await h.tick(150);
+    ok(/Playlist A/.test((h.$('#nblm-recopy') || {}).textContent || ''),
+      `ca dựng sai thì assertion sau vô nghĩa — thẻ phải vẫn mang nguồn cũ, nhận: "${(h.$('#nblm-recopy') || {}).textContent || ''}"`);
+
+    ok(clickRecopy(h), 'phải có nút Copy lại để bấm');
+    await h.tick(200);
+
+    const book = msgs(h, 'bundle-copied').pop();
+    eq(book && book.from, 'Playlist A',
+      `Sổ phải ghi ngữ cảnh GỐC của những link này, không phải trang đang đứng — nhận: ${JSON.stringify(book && book.from)}`);
+    h.close();
+  }
+
+  /*
+   * Vế còn lại: lượt copy THƯỜNG lấy `from` từ trang đang đứng. Không có vế này
+   * thì hoán vị "luôn dùng một chuỗi cứng" vẫn xanh ở ca trên.
+   */
+  {
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PLC',
+      body: listBody3,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async (kind) =>
+        kind === 'context' ? { kind: 'playlist', playlistId: 'PLC', title: 'Playlist C' } : { items: [] },
+    });
+    h.reply((m) => {
+      if (m.type === 'bundle-filter') return { keep: m.urls || [], dropped: [] };
+      if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
+      if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };
+      return {};
+    });
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    const book = msgs(h, 'bundle-copied').pop();
+    eq(book && book.from, 'Playlist C',
+      `lượt copy thường phải ghi tên trang đang đứng — nhận: ${JSON.stringify(book && book.from)}`);
+    h.close();
+  }
+
+  /*
    * Cái neo, đo thẳng: một video private lọt vào `dropped` thì nút *Copy lại*
    * KHÔNG được đưa nó lên clipboard.
    *
@@ -863,6 +1064,26 @@ async function run() {
     await h.tick(150);
 
     ok(clickRecopy(h), 'ca dựng sai thì mọi assertion sau đều vô nghĩa — nút phải có mặt trước đã');
+
+    /*
+     * Đọc NGAY, trước bất kỳ `tick` nào: `onRecopyClick` khoá hai nút đồng bộ
+     * rồi mới `await handOff`, và `finally` dựng lại thẻ với nút × mới toanh —
+     * chờ một nhịp là cửa sổ quan sát đóng lại. Cùng cái bẫy đã ghi cho nhịp
+     * chờ dài nuốt nhịp chờ ngắn.
+     *
+     * Vì sao khoá ×: bấm × giữa lúc "Đang hỏi…" thì thẻ biến mất trong khi lượt
+     * vẫn chạy tới clipboard và toast — người dùng thấy mình đã huỷ, máy thì
+     * không huỷ gì cả.
+     */
+    {
+      const go = h.$('#nblm-recopy .nblm-recopy__go');
+      const x = h.$('#nblm-recopy .nblm-recopy__x');
+      ok(go && go.disabled === true,
+        `trong lúc chờ, nút Copy lại phải khoá — nhận: ${go ? go.disabled : '(không có nút)'}`);
+      ok(x && x.disabled === true,
+        `và nút × cũng phải khoá — nhận: ${x ? x.disabled : '(không có nút)'}`);
+    }
+
     await h.tick(200);
 
     eq(h.clipboard.writes, [],
@@ -924,16 +1145,30 @@ async function run() {
      * số chọn cho hai dòng thì bốn dòng là chồng lên nhau, và thứ bị che là cái
      * nút.
      *
-     * PHẠM VI CA NÀY, nói thẳng: nó chỉ chứng nhận `bottom` được ghi INLINE bởi
-     * `layoutRecopy()` (24px — chỗ nghỉ khi không có toast). Nhánh "có toast thì
-     * cộng chiều cao thật" KHÔNG đo được ở đây vì hai lý do cộng lại: jsdom
-     * không tính layout (`getBoundingClientRect` ở harness trả height cố định
-     * 40), và harness bóp mọi `setTimeout` xuống ≤20ms nên hẹn giờ tắt toast
-     * 4200ms bắn xong trước khi assertion đọc tới. Chỗ chồng lấn thật phải chụp
-     * bằng trình duyệt thật mới thấy — đúng bài học đã ghi cho ca nút Dừng.
+     * PHẠM VI CA NÀY, nói thẳng: đo được nhánh né `#nblm-bar`, KHÔNG đo được
+     * nhánh né toast. Thanh chọn hàng loạt còn đứng đó lúc assertion chạy nên
+     * `heightOf` trả 40 (harness trả rect cố định 120x40) và con số ra 24+40+12.
+     * Toast thì không: harness bóp mọi `setTimeout` xuống ≤20ms nên hẹn giờ tắt
+     * toast 4200ms bắn xong trước khi đọc tới, và `nblm-toast--show` đã rụng.
+     * Chỗ toast chồng lấn thật phải chụp bằng trình duyệt thật mới thấy — đúng
+     * bài học đã ghi cho ca nút Dừng.
+     *
+     * Ghim CON SỐ chứ không ghim "có style inline": `24px` cũng là style inline,
+     * nên hoán vị bỏ hẳn phép né thanh vẫn xanh nếu chỉ assert là có ghi.
      */
+    ok(chip && chip.style.bottom === '76px',
+      `thẻ phải đứng trên #nblm-bar (24 mép + 40 cao + 12 khe) — nhận: "${chip ? chip.style.bottom || '(không có style inline)' : ''}"`);
+
+    /*
+     * Và tụt về chỗ nghỉ khi không còn gì ở mép dưới. Không có vế này thì hoán
+     * vị "luôn trả 76px" cũng xanh, và thẻ sẽ lơ lửng giữa màn hình trắng.
+     * `fullscreenchange` là đường công khai duy nhất gọi lại `layoutRecopy()`.
+     */
+    const bar = h.$('#nblm-bar');
+    if (bar) bar.remove();
+    h.win.document.dispatchEvent(new h.win.Event('fullscreenchange'));
     ok(chip && chip.style.bottom === '24px',
-      `\`bottom\` phải do layoutRecopy() ghi inline, không phải hằng số trong CSS — nhận: "${chip ? chip.style.bottom || '(không có style inline)' : ''}"`);
+      `thanh biến mất thì thẻ tụt xuống mép — nhận: "${chip ? chip.style.bottom : ''}"`);
     h.close();
   }
 
@@ -955,7 +1190,7 @@ async function run() {
     h.reply((m) => {
       if (m.type === 'bundle-filter') {
         // Trả về một url chưa từng được gửi đi.
-        return { keep: ['https://www.youtube.com/watch?v=khonggui99'], dropped: [], counts: { copied: 0, queued: 0 } };
+        return { keep: ['https://www.youtube.com/watch?v=khonggui99'], dropped: [] };
       }
       if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };
       return { added: 1 };
@@ -1156,7 +1391,7 @@ async function run() {
     h.reply((m) => {
       if (m.type === 'bundle-filter') {
         filtered.push((m.urls || []).slice());
-        return { keep: m.urls || [], dropped: [], counts: { copied: 0, queued: 0 } };
+        return { keep: m.urls || [], dropped: [] };
       }
       if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
       if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };
@@ -1253,7 +1488,7 @@ async function run() {
           else if (u.includes('vidqueued02')) dropped.push({ url: u, why: 'queued' });
           else keep.push(u);
         }
-        return { keep, dropped, counts: { copied: 1, queued: 1 } };
+        return { keep, dropped };
       }
       if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
       if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };

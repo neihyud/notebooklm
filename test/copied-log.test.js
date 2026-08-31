@@ -118,7 +118,13 @@ const log = () => store.get('copiedLog') || [];
     const res = await SW.filterBundle([YT('aaaaaaaaaaa'), YT('bbbbbbbbbbb')]);
     eq(res.keep, [YT('bbbbbbbbbbb')], 'link đã có trong Sổ phải bị loại');
     eq(res.dropped, [{ url: YT('aaaaaaaaaaa'), why: 'copied' }], 'link bị loại phải quay về KÈM LÝ DO, không bị nuốt');
-    eq(res.counts, { copied: 1, queued: 0 }, 'hai lý do phải đếm riêng — người dùng xử lý chúng khác nhau');
+    /*
+     * Hợp đồng của cửa 2 là ĐÚNG hai field. `counts: {copied, queued}` từng
+     * được trả thêm và không bề mặt nào đọc — cả hai bề mặt tự đếm từ `dropped`
+     * vì chúng còn cần chính danh sách url để dựng thẻ *Copy lại*.
+     */
+    eq(Object.keys(res).sort(), ['dropped', 'keep'],
+      `cửa 2 chỉ trả {keep, dropped} — nhận: ${JSON.stringify(Object.keys(res).sort())}`);
   }
 
   /* Trùng ngay trong chính một Bó: NotebookLM không tự khử trùng URL. */

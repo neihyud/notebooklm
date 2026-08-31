@@ -36,10 +36,14 @@
     DOCS_READ: 'docs-read',       // trích ngay từ DOM đang hiển thị
     DOCS_RAW_FETCH: 'docs-raw-fetch', // tab -> background: fetch ẨN DANH, trả HTML thô
     // Đường trao tay: bề mặt -> background -> bề mặt
-    BUNDLE_FILTER: 'bundle-filter',   // {urls} -> {keep, dropped} (cửa 2: khử trùng)
+    // {urls} -> {keep, dropped}; mỗi phần tử `dropped` là {url, why:'copied'|'queued'}.
+    BUNDLE_FILTER: 'bundle-filter',   // cửa 2: khử trùng
     BUNDLE_COPIED: 'bundle-copied',   // báo NGƯỢC sau khi writeText xong -> ghi Sổ
     CLEAR_COPIED: 'clear-copied',     // xoá Sổ đã copy
-    JUMP_NOTEBOOK: 'jump-notebook',   // {summary} sau khi copy: nhảy sang tab notebook + báo, không thao tác
+    // {summary, source} sau khi copy: nhảy sang tab notebook + báo, không thao tác.
+    // `summary` bắt buộc trên thực tế — bỏ nó thì `noted: true` trả về nghĩa là
+    // "không có gì để báo", không phải "đã báo". `source` là tên bề mặt khởi lượt.
+    JUMP_NOTEBOOK: 'jump-notebook',
     SHORTCUT_HANDOFF: 'shortcut-handoff', // background -> tab youtube: phím tắt nhờ tab tự trao tay
     // popup -> background
     OPEN_DOCS_PANEL: 'open-docs-panel',

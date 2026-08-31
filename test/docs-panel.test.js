@@ -296,7 +296,6 @@ async function run() {
         return {
           keep: urls.filter((u) => !out.includes(u) && !q.includes(u)),
           dropped: out.map((u) => ({ url: u, why: 'copied' })).concat(q.map((u) => ({ url: u, why: 'queued' }))),
-          counts: { copied: out.length, queued: q.length },
         };
       }
       if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
@@ -632,7 +631,7 @@ async function run() {
     await h.tick(60);
     h.reply((m) => {
       if (m.type === 'docs-raw-fetch') return { url: m.url, finalUrl: m.url, type: 'text/html', html: PAGES['https://a.dev/docs/ssr'] };
-      if (m.type === 'bundle-filter') return { keep: m.urls, dropped: [], counts: {} };
+      if (m.type === 'bundle-filter') return { keep: m.urls, dropped: [] };
       if (m.type === 'jump-notebook') return { ...h.jump };
       return { added: 0 };
     });
@@ -783,6 +782,74 @@ async function run() {
       ok(h.panel('[data-act="recopy"]').hidden && x.hidden,
         'bấm × thì cả hai nút cùng biến — bỏ lại một dấu × mồ côi là để lại một cái bẫy');
     }
+    h.close();
+  }
+
+  /*
+   * Nợ của lượt trước không được lượt sau lặng lẽ vứt đi.
+   *
+   * Hai lượt copy trên hai TẬP DÒNG KHÁC NHAU: lượt sau không biết gì về link
+   * lượt trước còn nợ, nên ghi đè `lastDropped` là xoá đúng thứ người dùng vừa
+   * được báo mà chưa xử lý. Con số trên nút khi ấy tụt xuống, và không có gì
+   * nói cho họ biết cái kia đã đi đâu.
+   *
+   * Ghim con số TRÊN NÚT chứ không ghim `lastDropped`: nút là thứ người dùng
+   * đọc, và nó là bản duy nhất còn giữ danh sách đó.
+   */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+
+    const tick = (i) => {
+      const box = h.panelAll('.row input')[i];
+      box.checked = true;
+      box.dispatchEvent(new h.win.Event('change', { bubbles: true }));
+    };
+
+    withPages(h, { drop: [threeUrls[0]] });
+    tick(0);
+    h.click('[data-act="copy"]');
+    await h.tick(250);
+    ok(/Copy lại 1 link/.test(h.panel('[data-act="recopy"]').textContent),
+      `ca dựng sai thì assertion sau vô nghĩa — lượt đầu phải nợ đúng 1, nhận: "${h.panel('[data-act="recopy"]').textContent}"`);
+
+    withPages(h, { drop: [threeUrls[1]] });
+    h.panelAll('.row input').forEach((b) => { b.checked = false; b.dispatchEvent(new h.win.Event('change', { bubbles: true })); });
+    tick(1);
+    h.click('[data-act="copy"]');
+    await h.tick(250);
+    ok(/Copy lại 2 link/.test(h.panel('[data-act="recopy"]').textContent),
+      `lượt sau phải GỘP vào nợ cũ, không ghi đè — nhận: "${h.panel('[data-act="recopy"]').textContent}"`);
+    h.close();
+  }
+
+  /*
+   * Nhưng nợ đó phải BUÔNG khi bảng nạp trang khác.
+   *
+   * Bảng là singleton nhớ: `close()` chỉ đặt `display:none`, nên không buông ở
+   * `load()` thì mở lại trên trang khác vẫn thấy "Copy lại N link đã có" của
+   * trang trước — cùng con số, khác hẳn ý nghĩa. Bấm vào nó là copy link của
+   * một trang người dùng đã rời khỏi.
+   *
+   * Ca này và ca ngay trên là hai vế của cùng một luật, và chúng kéo ngược
+   * chiều nhau: giữ khi cùng bảng, buông khi đổi bảng. Thiếu vế nào thì vế kia
+   * cũng "sửa" được bằng cách làm sai vế này.
+   */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h, { drop: 'all' });
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(250);
+    ok(!h.panel('[data-act="recopy"]').hidden,
+      'ca dựng sai thì assertion sau vô nghĩa — phải có nợ trước đã');
+
+    // Mở lại: `open()` gọi `panel.load(...)`, đúng đường một trang khác đi qua.
+    h.click(h.launcher());
+    await h.tick(60);
+    ok(h.panel('[data-act="recopy"]').hidden && h.panel('[data-act="recopy-dismiss"]').hidden,
+      `nạp lại bảng phải buông nợ cũ — nhận: "${h.panel('[data-act="recopy"]').textContent}"`);
     h.close();
   }
 

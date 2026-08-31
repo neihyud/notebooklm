@@ -1,4 +1,17 @@
-/* Giao diện chèn vào YouTube. Dùng tiền tố nblm- để không đụng CSS của YouTube. */
+/*
+ * Giao diện chèn vào YouTube. Dùng tiền tố nblm- để không đụng CSS của YouTube.
+ *
+ * Cô lập ở đây là TIỀN TỐ + specificity, không phải shadow root — khác hẳn bảng
+ * tài liệu (`src/docs/content.js` dùng `attachShadow` + `:host { all: initial }`).
+ * Sự khác biệt là cố ý ở mức "chưa đổi", không phải ở mức "đã cân nhắc và chọn":
+ * ba overlay dưới đây (#nblm-bar, .nblm-toast, .nblm-recopy) có từ trước, và
+ * chuyển sang shadow DOM là đổi cả ba cùng lúc chứ không lẻ được.
+ *
+ * Bảng màu cũng cố định TỐI, không theo `prefers-color-scheme`. Chúng là thẻ nổi
+ * trên nền trang, không phải chữ chạy trong dòng, nên nền tối vẫn đọc được ở
+ * YouTube light mode — mất là mất sự hoà hợp, không phải mất khả năng đọc. Đổi
+ * thì cũng phải đổi cả ba.
+ */
 
 #nblm-watch-button.nblm-btn {
   display: inline-flex;
@@ -415,4 +428,15 @@
   background: #1a73e8;
   color: #fff;
   font-weight: 500;
+}
+
+/*
+ * Tôn trọng "giảm chuyển động" của hệ điều hành. Đây là thứ DUY NHẤT trong khối
+ * ghi chú đầu file sửa lẻ được: nó không đòi đổi cấu trúc, và chấm động của nút
+ * là một vòng lặp vô hạn — đúng loại chuyển động mà thiết lập đó nhắm tới.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .nblm-btn--busy .nblm-btn__dot { animation: none; opacity: .5; }
+  .nblm-toast { transition: none; }
+  #nblm-panel { transition: none; }
 }

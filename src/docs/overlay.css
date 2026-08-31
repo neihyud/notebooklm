@@ -212,6 +212,15 @@
   accent-color: #1a73e8;
 }
 
+/*
+ * `[hidden]` của UA stylesheet thua BẤT KỲ author rule nào đặt `display`. Hôm
+ * nay `.btn` không đặt `display` nên chưa hỏng, nhưng bất biến đó giòn: thêm
+ * `.btn { display: inline-flex }` là nút *Copy lại* hiện lên trên trình duyệt
+ * thật trong khi `btn.hidden === true`, và test đọc IDL property vẫn xanh 100%.
+ * `popup.css:52` đã có dòng này; đây là chỗ thứ hai cần nó.
+ */
+[hidden] { display: none !important; }
+
 .btn {
   height: 34px;
   padding: 0 16px;
@@ -231,6 +240,28 @@
   background: #dadce0;
   color: #9aa0a6;
   cursor: default;
+}
+
+/*
+ * Hành động phụ. Class này được gắn cho *Copy lại* và *Copy link* từ trước mà
+ * chưa bao giờ được định nghĩa Ở ĐÂY — nó chỉ tồn tại trong `popup.css`, thứ
+ * không với tới được vì bảng docs nằm trong shadow root riêng chỉ nạp file này.
+ * Hệ quả: cả hai render y hệt nút chính *Thêm N trang*, không còn phân cấp nào.
+ */
+.btn--ghost {
+  background: transparent;
+  color: #1a73e8;
+  box-shadow: inset 0 0 0 1px #dadce0;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: rgba(26, 115, 232, .08);
+}
+
+.btn--ghost:disabled {
+  background: transparent;
+  color: #9aa0a6;
+  box-shadow: inset 0 0 0 1px #e8eaed;
 }
 
 /* Nút bỏ qua thẻ *Copy lại* — tròn, nhạt, đứng ngay cạnh nút nó bỏ qua. */
@@ -286,6 +317,19 @@
   .btn:disabled {
     background: #3c4043;
     color: #80868b;
+  }
+
+  .btn--ghost {
+    color: #8ab4f8;
+    box-shadow: inset 0 0 0 1px #5f6368;
+  }
+
+  .btn--ghost:hover:not(:disabled) { background: rgba(138, 180, 248, .12); }
+
+  .btn--ghost:disabled {
+    background: transparent;
+    color: #80868b;
+    box-shadow: inset 0 0 0 1px #3c4043;
   }
 
   .btn--x {

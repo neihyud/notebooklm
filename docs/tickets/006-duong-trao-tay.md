@@ -141,7 +141,7 @@ khoá**. Đừng chép `itemKey` sang đó để lấp: bản chép sẽ trôi k
 "đường dữ liệu song song" mà repo này đã dính một lần. Cũng đừng cho content script `setQueue`
 — nó đua ghi với `setQueue()` của service worker (`:524`).
 
-Luồng: bề mặt gửi `{ urls }` lên → service worker trả `{ keep, dropped, reason }` → content
+Luồng: bề mặt gửi `{ urls }` lên → service worker trả `{ keep, dropped }` → content
 script `writeText` → **báo ngược lên rồi service worker mới ghi Sổ**. Thứ tự này bắt buộc:
 `writeText` từ chối được (ràng buộc 6), và ghi Sổ trước khi copy xong là để Sổ nói dối — lần
 sau nó sẽ lọc mất đúng những link chưa bao giờ tới clipboard.
@@ -694,7 +694,7 @@ Thứ tự đề nghị:
    mục Kiểm chứng. Không phụ thuộc luồng UI kia, không phụ thuộc phần cứng owner.
 2. **Mục 5** — vị ngữ ba điều kiện, một hàm dùng chung. Làm trước mục 1 vì mục 1 gọi nó.
 3. **Mục 1 + 2** — bốn bề mặt sinh Bó, hình dạng Bó.
-4. **Mục 3 lõi** — khoá storage, khử trùng, luồng `{urls}` → `{keep, dropped, reason}`. Sau bước
+4. **Mục 3 lõi** — khoá storage, khử trùng, luồng `{urls}` → `{keep, dropped}`. Sau bước
    này Sổ đã chạy đúng, chỉ chưa nhìn thấy được trong popup.
 5. **Mục 4** — cửa đo. Độc lập với 1–3, xen vào đâu cũng được.
 6. **Mục 6 + 7**.

@@ -6,26 +6,77 @@ Round: 1
 Scope: Nhánh `fix/duong-trao-tay-copy-lai` vs `main` (commit 79f34b9): nút *Copy lại* trên YouTube + bảng docs, hoán vị cửa 2/cửa 3 trong `handOff`, summary đi kèm `JUMP_NOTEBOOK`
 Report path: docs/ultrareview/26-08-31-duong-trao-tay-copy-lai-round-1.md
 
-## Trạng thái (cập nhật 2026-08-31, sau commit `e1f9ff2`)
+## Trạng thái (cập nhật 2026-08-31, sau lượt sửa P3)
 
 Báo cáo này được viết TRƯỚC khi sửa, nên phần **Findings** bên dưới mô tả mọi
-finding như đang mở. Không đúng nữa. Đọc kèm bảng này:
+finding như đang mở. Không còn đúng. Đọc kèm bảng này:
 
 - **F001–F024 — ĐÃ ĐÓNG** ở `e1f9ff2` ("Đường trao tay: gỡ những chỗ hỏng CÂM
-  trên đường tới clipboard"). Mỗi fix đã đo bằng hoán vị trên source thật; danh
-  sách hoán vị kèm số dòng đỏ nằm trong commit message. Test 1246 → 1307 pass.
-- **F025–F044 — CÒN MỞ.** Toàn bộ là P3; chưa ai đụng vào.
+  trên đường tới clipboard"). Test 1246 → 1307 pass.
+- **F025–F044 — ĐÃ XỬ LÝ HẾT** ở lượt này. Chi tiết bên dưới.
 
-Hai ngoại lệ, để khỏi phải đọc lại code mới biết:
+### F025–F044, từng cái một
 
-- **F036 không còn đúng** — `finally` của `measureAndCopy` giờ khôi phục
-  `progressEl.textContent`, và `syncCounts()` đã chuyển sang `copyBundle`/
-  `recopyBundle`, nên dòng đó không còn là code chết.
-- **F042 đúng một nửa** — `layoutRecopy()` và handler `fullscreenchange` có kiểm
-  `isConnected`, nhưng các chỗ khác giữ `toastEl`/`recopyEl` thì chưa.
+| ID | Kết cục | Ghi chú |
+|---|---|---|
+| F025 | sửa | `load()` gọi `setRecopy([])` — bảng singleton không mang nợ sang trang khác |
+| F026 | sửa | `setRecopy(..., {merge:true})` gộp nợ thay vì ghi đè |
+| F027 | không phải bug | đã đóng từ `e1f9ff2` |
+| F028 | sửa | `enqueueLeftover` trả `added` THẬT; `queueSays()` là một vế riêng, tách khỏi vế nguyên nhân |
+| F029 | sửa | nút `×` khoá cùng nút *Copy lại* trong lúc "Đang hỏi…" |
+| F030 | sửa | `test/handoff-integration.test.js` — content script nối thẳng vào `onMessage` thật |
+| F031 | sửa | `[hidden]{display:none!important}` trong `src/docs/overlay.css` |
+| F032 | sửa | assert `from` của `bundle-copied` cho cả hai đường |
+| F033 | sửa | `note()` nhận `source`; Hàng đợi dùng tiền tố `NotebookLM — ` |
+| F034 | sửa | `cut()` cắt CÓ dấu `…`; test biên 300 ký tự |
+| F035 | sửa | `.btn--ghost` định nghĩa trong đúng stylesheet của shadow root |
+| F036 | không còn đúng | `finally` của `measureAndCopy` đã khôi phục `progressEl` từ `e1f9ff2` |
+| F037 | gỡ | `counts` không có consumer production — gỡ khỏi `filterBundle`, sửa comment `shared.js` |
+| F038 | sửa doc | ticket 006 nói `{keep, dropped, reason}`; sửa thành `{keep, dropped}` |
+| F039 | sửa | handler bọc arrow, `hideRecopy` không nhận `MouseEvent` |
+| F040 | sửa một phần | thêm `prefers-reduced-motion`; shadow DOM + light mode ghi lại là quyết định "chưa đổi", đổi thì phải đổi cả ba overlay |
+| F041 | sửa | `layoutRecopy()` đo cả `#nblm-bar`, không chỉ toast |
+| F042 | sửa | `isConnected` ở mọi chỗ giữ `toastEl`/`recopyEl` |
+| F043 | ghi lại quyết định | Sổ không có trần là CỐ Ý — cắt một dòng là để cửa 2 mù với link đó |
+| F044 | ghi lại bất biến | `summary` bắt buộc trên thực tế; `noted:true` khi thiếu nó nghĩa là "không có gì để báo" |
 
-Phần **Verification Queue** vẫn chạy được nguyên trạng cho F025–F044; các lệnh
-của F001–F024 giờ đo hiện trạng SAU khi sửa, không phải hiện trạng báo cáo mô tả.
+### Đo hoán vị — mỗi dòng là một lần chạy thật, đọc exit code + tổng pass/fail
+
+| Hoán vị | Kết quả |
+|---|---|
+| F025 `load()` không gọi `setRecopy([])` | exit 1, 1 đỏ |
+| F026 `setRecopy(...)` bỏ `{merge:true}` | exit 1, 1 đỏ |
+| F028 `parts` báo con số gửi đi | exit 1, 2 đỏ |
+| F028 `why` báo con số gửi đi | exit 1, 2 đỏ |
+| F028 `enqueueLeftover` bỏ qua `res.added` | exit 1, 2 đỏ |
+| F029 không khoá nút `×` | exit 1, 1 đỏ |
+| F030 `itemKey` đổi tiền tố `yt:` → `ytq:` | exit 1, 2 đỏ |
+| F030 `bundleKey` bỏ nhánh videoId | exit 1, 3 đỏ |
+| F030 `canonicalUrl` → `youtube.com/v/<id>` | exit 0 — tương đương thật, `videoIdFrom` nhận cả ba dạng |
+| F030 `canonicalUrl` → `youtu.be/<id>` | exit 0 — cùng lý do |
+| F031 gỡ luật `[hidden]` | exit 1, 1 đỏ |
+| F032 *Copy lại* quên chụp nguồn | exit 1, 1 đỏ |
+| F032 nguồn là chuỗi cứng | exit 1, 2 đỏ |
+| F033 quay lại chuỗi cứng "YouTube →" | exit 1, 1 đỏ (+8 đỏ ở `service-worker-done`) |
+| F034 cắt câm bằng `slice(0, max)` | exit 1, 1 đỏ |
+| F035 gỡ định nghĩa `.btn--ghost` | exit 1, 1 đỏ |
+| F041 `layoutRecopy` bỏ nhánh `#nblm-bar` | exit 1, 1 đỏ |
+| F041 bỏ chỗ nghỉ khi mép dưới trống | exit 1, 1 đỏ |
+| F042 toast bỏ `isConnected` | exit 1, 1 đỏ |
+| F042 thẻ bỏ `isConnected` | exit 1, 2 đỏ |
+
+### Chỗ KHÔNG ghim được, nói thẳng
+
+- **F039** — bọc handler trong arrow là phòng thủ cho tương lai. `hideRecopy()`
+  hôm nay không nhận tham số, nên hai bản cho ra hình dạng y hệt và không có
+  hoán vị nào phân biệt được. Ghi ở comment, không có test.
+- **F040** — `prefers-reduced-motion` và bảng màu là chuyện CASCADE, thứ jsdom
+  mù hoàn toàn. Cần trình duyệt thật mới đo được.
+- **F031, F035** — hai ca mới ở `ui-isolation.test.js` đo trên VĂN BẢN của file
+  CSS: bắt được "class không có luật nào", KHÔNG bắt được "có luật nhưng thua
+  cascade".
+- **F043, F044** — chỉ là ghi lại quyết định trong code; không có hành vi nào đổi
+  nên không có gì để ghim.
 
 ## Prior Round Guard
 

@@ -63,7 +63,10 @@
   let toastEl = null;
   let toastTimer = null;
   function toast(message, kind = 'ok') {
-    if (!toastEl) {
+    // `isConnected` chứ không chỉ truthy: biến còn trỏ vào node mà node đã bị gỡ
+    // khỏi DOM thì mọi lần ghi sau đó rơi vào hư không — không lỗi, không chữ.
+    // `panel.js:57` đã dùng đúng khuôn này.
+    if (!toastEl || !toastEl.isConnected) {
       toastEl = document.createElement('div');
       toastEl.className = 'nblm-toast';
       overlayRoot().appendChild(toastEl);
@@ -284,19 +287,24 @@
     }
 
     if (!keep.length) {
+      // Xếp hàng TRƯỚC khi dựng câu: câu phải nói con số Hàng đợi thật sự nhận,
+      // không phải con số ta gửi đi.
+      const q = leftover.length ? await enqueueLeftover(leftover) : { added: 0 };
+
       const why = [];
       if (restricted.length) why.push(`${restricted.length} video private/unlisted`);
       if (unknown.length) why.push(`${unknown.length} video không hỏi được`);
       if (dropped.length) why.push(`${dropped.length} link đã có trong Sổ đã copy`);
       if (queued.length) why.push(`${queued.length} link đang nằm trong Hàng đợi`);
       if (lost > 0) why.push(`${lost} link quay về không khớp ứng viên nào`);
+      if (leftover.length) why.push(queueSays(leftover.length, q.added));
+      const said = why.filter(Boolean);
       toast(
-        why.length
-          ? `Không link nào vào được Bó: ${why.join(' · ')}.${recopyHint(dropped, queued)}`
+        said.length
+          ? `Không link nào vào được Bó: ${said.join(' · ')}.${recopyHint(dropped, queued)}`
           : 'Không có video nào để copy.',
         'warn'
       );
-      if (leftover.length) await enqueueLeftover(leftover);
       return {
         copied: 0, restricted: restricted.length, unknown: unknown.length,
         dropped: dropped.length, queued: queued.length,
@@ -334,16 +342,22 @@
      * thì service worker báo bằng thông báo hệ thống; không nhảy được thì người
      * dùng còn đứng đây, và toast là đúng chỗ.
      */
+    // Cùng lý do như nhánh Bó rỗng: bản tổng kết phải mang con số Hàng đợi thật.
+    // Xếp hàng ở đây còn đúng thứ tự hơn — nó xong trước cú nhảy, chứ không chạy
+    // trong lúc người dùng đã sang tab khác.
+    const q = leftover.length ? await enqueueLeftover(leftover) : { added: 0 };
+
     const parts = [`${verb} ${keep.length} link công khai`];
-    if (restricted.length) parts.push(`${restricted.length} private/unlisted → Hàng đợi`);
-    if (unknown.length) parts.push(`${unknown.length} không hỏi được → Hàng đợi`);
+    if (restricted.length) parts.push(`${restricted.length} private/unlisted`);
+    if (unknown.length) parts.push(`${unknown.length} không hỏi được`);
+    if (leftover.length) parts.push(queueSays(leftover.length, q.added));
     if (dropped.length) parts.push(`${dropped.length} bỏ vì đã có trong Sổ — nút "Copy lại" ở góc màn hình`);
     if (queued.length) parts.push(`${queued.length} đang nằm trong Hàng đợi — mở popup để xử lý`);
     if (lost > 0) parts.push(`${lost} link quay về không khớp ứng viên nào — đã bỏ qua`);
     if (tripped) parts.push('đã dừng hỏi vì YouTube liên tục từ chối');
     if (bookErr) parts.push(`chưa ghi được Sổ đã copy (${bookErr}) — lần sau có thể copy trùng`);
 
-    const jump = await send(MSG.JUMP_NOTEBOOK, { summary: parts.join(' · ') });
+    const jump = await send(MSG.JUMP_NOTEBOOK, { summary: parts.join(' · '), source: 'YouTube' });
     if (!jump || !jump.jumped) {
       // Im lặng ở đây là im lặng sai: clipboard đã có nội dung mà người dùng không
       // biết mang đi đâu, và không có cú nhảy nào để tự nói hộ.
@@ -356,7 +370,6 @@
       toast(parts.join(' · '), 'warn');
     }
 
-    if (leftover.length) await enqueueLeftover(leftover);
     return {
       copied: keep.length,
       restricted: restricted.length,
@@ -429,7 +442,7 @@
     lastDroppedFrom = from || '';
     recopyGen++;
 
-    if (!recopyEl) {
+    if (!recopyEl || !recopyEl.isConnected) {
       recopyEl = document.createElement('div');
       recopyEl.id = 'nblm-recopy';
       recopyEl.className = 'nblm-recopy';
@@ -465,7 +478,10 @@
     // `×` là một ký tự nhân, không phải một cái tên. Trình đọc màn hình đọc nó
     // đúng như thế nếu không có nhãn.
     x.setAttribute('aria-label', 'Bỏ qua thẻ Copy lại');
-    x.addEventListener('click', hideRecopy);
+    // Bọc trong arrow chứ không gắn thẳng: gắn thẳng thì `hideRecopy` nhận
+    // `MouseEvent` làm tham số đầu, và ngày nào đó nó mọc tham số thì không có
+    // gì cảnh báo — nó chỉ lặng lẽ nhận nhầm.
+    x.addEventListener('click', () => hideRecopy());
 
     recopyEl.replaceChildren(text, go, x);
     layoutRecopy();
@@ -498,6 +514,12 @@
     const gen = recopyGen;
     el.disabled = true;
     el.textContent = 'Đang hỏi…';
+    // Khoá luôn `×`. Bấm được `×` giữa lúc "Đang hỏi…" thì thẻ biến mất trong
+    // khi lượt vẫn chạy tới clipboard và toast: người dùng thấy mình đã huỷ,
+    // còn máy thì không huỷ gì cả. Trong lúc chờ, thẻ không có hành động nào
+    // dùng được — số phận của nó là việc của `finally` bên dưới.
+    const x = recopyEl && recopyEl.querySelector('[data-act="dismiss"]');
+    if (x) x.disabled = true;
 
     let res = null;
     try {
@@ -519,20 +541,35 @@
   }
 
   /**
-   * Đặt thẻ ngay trên toast, đo theo chiều cao THẬT của toast.
+   * Đặt thẻ ngay trên thứ đang chiếm mép dưới, đo theo chiều cao THẬT của nó.
    *
    * Khoảng cách cứng không làm được việc này: toast mang bản tổng kết nhiều vế
-   * ("12 private/unlisted → Hàng đợi · 3 không hỏi được…") nên nó cao hai, ba,
-   * bốn dòng tuỳ lượt. Một con số chọn cho hai dòng thì bốn dòng là chồng lên
-   * nhau, và thứ bị che là cái nút.
+   * ("12 private/unlisted · 3 không hỏi được · 15 → Hàng đợi") nên nó cao hai,
+   * ba, bốn dòng tuỳ lượt. Một con số chọn cho hai dòng thì bốn dòng là chồng
+   * lên nhau, và thứ bị che là cái nút.
+   *
+   * Phải đo CẢ `#nblm-bar`, không chỉ toast. Thanh chọn hàng loạt cũng đứng ở
+   * `bottom: 24px` (`overlay.css`), căn giữa màn hình; cửa sổ hẹp thì nó kéo dài
+   * tới tận mép phải và đè lên thẻ. Nó hiện đúng lúc dễ đụng nhất — người dùng
+   * vừa tick vài video xong bấm copy.
    */
   function layoutRecopy() {
     if (!recopyEl) return;
     const up = toastEl && toastEl.isConnected && toastEl.classList.contains('nblm-toast--show');
-    const h = up && toastEl.getBoundingClientRect ? toastEl.getBoundingClientRect().height : 0;
-    // 24px là mép dưới của toast trong overlay.css; 12px là khe giữa hai thẻ.
-    // Toast tắt rồi thì thẻ tụt xuống chỗ của nó — không có gì để tránh nữa.
+    const bar = document.querySelector('#nblm-bar');
+    const h = Math.max(
+      up ? heightOf(toastEl) : 0,
+      bar && bar.isConnected ? heightOf(bar) : 0
+    );
+    // 24px là mép dưới của toast/thanh trong overlay.css; 12px là khe giữa hai
+    // thẻ. Không còn gì ở dưới thì thẻ tụt xuống chỗ của nó.
     recopyEl.style.bottom = `${Math.round(h ? 24 + h + 12 : 24)}px`;
+  }
+
+  /** 0 khi không đo được — jsdom không có layout, và `null` ở đây là bẫy `NaN`. */
+  function heightOf(el) {
+    const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+    return r && r.height > 0 ? r.height : 0;
   }
 
   /**
@@ -552,14 +589,42 @@
     layoutRecopy();
   });
 
-  /** Xếp hàng phần bị loại, im lặng — người dùng đã đọc con số ở bản tổng kết rồi. */
+  /**
+   * Xếp hàng phần bị loại, im lặng — người dùng đọc con số ở bản tổng kết.
+   *
+   * Trả về `added` THẬT chứ không để bên gọi đếm đầu vào. Hai con số khác nhau:
+   * Hàng đợi khử trùng theo `itemKey`, nên bấm *Copy link công khai* mười lần
+   * trên một trang có một video bị huy hiệu chặn thì cả mười lần đều báo "1
+   * video private/unlisted → Hàng đợi" trong khi chín lần sau không thêm gì.
+   * Một con số lặp lại y hệt mà không phản ánh việc gì đang xảy ra thì người
+   * dùng không có cách nào biết là không có gì thay đổi.
+   *
+   * @returns {{added: number, skipped: number}}
+   */
   async function enqueueLeftover(items) {
     const payload = items.map((i) => ({
       videoId: i.videoId,
       title: i.title,
       privacy: i.privacy || i.privacyHint || PRIVACY.UNKNOWN,
     }));
-    if (payload.length) await send(MSG.ENQUEUE, { items: payload });
+    if (!payload.length) return { added: 0, skipped: 0 };
+    const res = await send(MSG.ENQUEUE, { items: payload });
+    const added = res && typeof res.added === 'number' ? res.added : payload.length;
+    return { added, skipped: payload.length - added };
+  }
+
+  /**
+   * Một vế RIÊNG cho kết quả xếp hàng, tách khỏi các vế nguyên nhân.
+   *
+   * Gộp `added` vào vế nguyên nhân thì sai ngay khi có hai nguyên nhân: một lượt
+   * `ENQUEUE` cho cả `restricted` lẫn `unknown` trả về một con số chung, không
+   * chia được về từng rổ. Tách ra thì mỗi con số nói đúng thứ nó biết.
+   */
+  function queueSays(n, added) {
+    if (!n) return '';
+    if (added >= n) return `${n} → Hàng đợi`;
+    if (added > 0) return `${n} → Hàng đợi (${added} mới, ${n - added} đã có sẵn)`;
+    return `${n} đã có sẵn trong Hàng đợi, không thêm gì mới`;
   }
 
   /* ------------------------------------------------------------------ */
