@@ -233,6 +233,23 @@
   cursor: default;
 }
 
+/* Nút bỏ qua thẻ *Copy lại* — tròn, nhạt, đứng ngay cạnh nút nó bỏ qua. */
+.btn--x {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #5f6368;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.btn--x:hover:not(:disabled) {
+  background: rgba(60, 64, 67, .12);
+  color: #202124;
+}
+
 /* ---- nền tối ---- */
 
 @media (prefers-color-scheme: dark) {
@@ -270,4 +287,16 @@
     background: #3c4043;
     color: #80868b;
   }
+
+  .btn--x {
+    background: transparent;
+    color: #9aa0a6;
+  }
+
+  .btn--x:hover:not(:disabled) {
+    background: rgba(255, 255, 255, .12);
+    color: #e8eaed;
+  }
+
+  .btn--x:disabled { background: transparent; }
 }

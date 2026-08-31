@@ -281,6 +281,7 @@
         <div class="panel__go">
           <label class="panel__run"><input type="checkbox" class="panel__runnow" checked> Chạy ngay</label>
           <button type="button" class="btn btn--ghost" data-act="recopy" hidden>Copy lại</button>
+          <button type="button" class="btn btn--x" data-act="recopy-dismiss" aria-label="Bỏ qua danh sách Copy lại" title="Bỏ qua" hidden>×</button>
           <button type="button" class="btn btn--ghost" data-act="copy" disabled>Copy link</button>
           <button type="button" class="btn" data-act="import" disabled>Thêm 0 trang</button>
         </div>
@@ -293,10 +294,21 @@
     const goBtn = el.querySelector('[data-act="import"]');
     const copyBtn = el.querySelector('[data-act="copy"]');
     const recopyBtn = el.querySelector('[data-act="recopy"]');
+    const recopyX = el.querySelector('[data-act="recopy-dismiss"]');
     const runNow = el.querySelector('.panel__runnow');
 
     let rows = [];
     const boxes = new Map(); // id -> input
+
+    /**
+     * Một lượt copy đang chạy.
+     *
+     * Cửa khử trùng và cửa đo đều là một vòng `await`, và trong lúc chờ thì cái
+     * nút vẫn bấm được: `syncCounts()` bật lại nó theo số dòng đang tick, chứ
+     * không theo "đang bận hay không". Hai lượt chồng nhau là hai lượt cùng ghi
+     * `copyBtn.textContent` và cùng gọi `writeText` — bản thắng là bản về sau.
+     */
+    let busy = false;
 
     function checkedRows() {
       return rows.filter((r) => r.url && boxes.get(r.id) && boxes.get(r.id).checked);
@@ -304,11 +316,13 @@
 
     function syncCounts() {
       const n = checkedRows().length;
-      goBtn.disabled = !n;
+      goBtn.disabled = busy || !n;
       goBtn.textContent = n ? `Thêm ${n} trang` : 'Thêm 0 trang';
       // Nút copy LUÔN bật khi có dòng được tick — cửa đo chạy sau cú bấm, không
-      // trước. Đo lúc mở bảng là 200 fetch cho một cú bấm chưa xảy ra.
-      copyBtn.disabled = !n;
+      // trước. Đo lúc mở bảng là 200 fetch cho một cú bấm chưa xảy ra. Ngoại lệ
+      // duy nhất là `busy`: tick thêm một dòng giữa lượt đo không được phép mở
+      // đường cho lượt thứ hai chen vào.
+      copyBtn.disabled = busy || !n;
       copyBtn.textContent = n ? `Copy ${n} link` : 'Copy link';
 
       // Nhóm không có URL vẫn cần hiện trạng thái theo con của nó.
@@ -403,8 +417,12 @@
     let lastDropped = [];
 
     function setRecopy(urls) {
-      lastDropped = Array.isArray(urls) ? urls : [];
-      recopyBtn.hidden = !lastDropped.length;
+      lastDropped = (Array.isArray(urls) ? urls : []).filter(Boolean);
+      const on = lastDropped.length > 0;
+      recopyBtn.hidden = !on;
+      // Nút bỏ qua đi liền với nút Copy lại — ẩn/hiện cùng nhau, nếu không thì
+      // một dấu × mồ côi đứng lại giữa hàng nút.
+      recopyX.hidden = !on;
       recopyBtn.textContent = `Copy lại ${lastDropped.length} link đã có`;
     }
 
@@ -424,6 +442,24 @@
     async function copyBundle(picked) {
       const urls = picked.map((r) => r.url);
 
+      // Khoá NGAY, đồng bộ, trước cái `await` đầu tiên. Bấm hai lần liền tay là
+      // hai lượt cùng chạy: `res` của lượt đầu về sau lượt sau, `setRecopy` ghi
+      // đè nhau, và cửa đo chạy hai lần cho cùng một danh sách.
+      if (busy) return;
+      busy = true;
+      copyBtn.disabled = true;
+      recopyBtn.disabled = true;
+      goBtn.disabled = true;
+      try {
+        await runCopyBundle(urls);
+      } finally {
+        busy = false;
+        recopyBtn.disabled = false;
+        syncCounts();
+      }
+    }
+
+    async function runCopyBundle(urls) {
       // `.catch` chứ không để trần: service worker vừa nạp lại thì `sendMessage`
       // *reject*, và một promise rejection trong handler click này không có ai
       // bắt — cú bấm chết câm. Biến nó thành đúng hình dạng lỗi ở dưới.
@@ -441,19 +477,30 @@
         return;
       }
       const keep = (res && res.keep) || [];
-      const dropped = (res && res.dropped) || [];
-      setRecopy(dropped.map((d) => d.url).filter(Boolean));
+      const out = ((res && res.dropped) || []).filter((d) => d && d.url);
+      /*
+       * Chỉ thứ bị loại vì ĐÃ COPY mới vào nút *Copy lại*. Thứ bị loại vì đang
+       * nằm trong Hàng đợi thì việc của nó là chạy trong Hàng đợi — copy lại link
+       * của một trang mà cửa đo đã kết luận là rỗng thân bài chỉ dựng lại đúng
+       * cái Nguồn rỗng người dùng vừa tránh được. Hai lý do, hai lối đi.
+       */
+      const dropped = out.filter((d) => d.why === 'copied');
+      const queued = out.filter((d) => d.why !== 'copied');
+      setRecopy(dropped.map((d) => d.url));
 
       if (!keep.length) {
+        const why = [];
+        if (dropped.length) why.push(`${dropped.length} link đã có trong Sổ đã copy`);
+        if (queued.length) why.push(`${queued.length} link đang nằm trong Hàng đợi`);
         flash(
-          dropped.length
-            ? `Cả ${dropped.length} link đều đã có trong Sổ đã copy hoặc Hàng đợi — dùng nút "Copy lại ${dropped.length} link đã có".`
+          why.length
+            ? `Không copy được gì: ${why.join(' · ')}.${dropped.length ? ` Dùng nút "Copy lại ${dropped.length} link đã có".` : ' Mở popup để xử lý Hàng đợi.'}`
             : 'Không có trang nào để copy.'
         );
         return;
       }
 
-      await measureAndCopy(keep, { dropped: dropped.length });
+      await measureAndCopy(keep, { dropped: dropped.length, queued: queued.length, progressEl: copyBtn });
     }
 
     /**
@@ -465,13 +512,30 @@
      * chính là việc người dùng vừa yêu cầu — cửa đo thì không.
      */
     async function recopyBundle() {
+      if (busy) return;
       const urls = lastDropped.slice();
       if (!urls.length) return setRecopy([]);
-      // Chỉ buông danh sách khi clipboard đã nhận thật. Buông trước rồi cửa đo
-      // hỏng giữa chừng là vứt mất bản duy nhất còn giữ nó — người dùng không
-      // có đường nào lấy lại ngoài xoá sạch Sổ.
-      const copied = await measureAndCopy(urls, { verb: 'Đã copy lại' });
-      setRecopy(copied ? [] : urls);
+
+      busy = true;
+      copyBtn.disabled = true;
+      recopyBtn.disabled = true;
+      goBtn.disabled = true;
+      try {
+        // Chỉ buông danh sách khi clipboard đã nhận thật. Buông trước rồi cửa đo
+        // hỏng giữa chừng là vứt mất bản duy nhất còn giữ nó — người dùng không
+        // có đường nào lấy lại ngoài xoá sạch Sổ.
+        //
+        // Và "nhận thật" là nhận từng link một, không phải cả gói: cửa đo cho
+        // qua 8 trong 12 thì 4 trang còn lại vẫn chưa tới clipboard. Buông sạch
+        // là mất chúng; giữ nguyên cả 12 là bắt người dùng copy trùng 8 cái vừa
+        // copy xong. Giữ đúng phần còn nợ.
+        const res = await measureAndCopy(urls, { verb: 'Đã copy lại', progressEl: recopyBtn });
+        setRecopy(res.ok ? res.blocked : urls);
+      } finally {
+        busy = false;
+        recopyBtn.disabled = false;
+        syncCounts();
+      }
     }
 
     /**
@@ -479,20 +543,22 @@
      * là "không có đường nào tới `writeText` mà không qua cửa đo" — hai bản chép
      * tay của đoạn này là hai chỗ để cái neo tuột ra.
      *
-     * @returns {boolean} clipboard đã nhận thật hay chưa — `recopyBundle` đọc nó
-     *   để biết có được buông danh sách bị loại hay không.
+     * @param {HTMLElement} opts.progressEl nút để hiện tiến độ đo. Phải là nút
+     *   người dùng VỪA BẤM: đếm "Đang đo 3/12" trên nút *Copy link* trong khi
+     *   người ta bấm *Copy lại* là báo tiến độ ở chỗ không ai nhìn.
+     * @returns {{ok: boolean, passed: string[], blocked: string[]}} `ok` là
+     *   clipboard đã nhận thật hay chưa; `blocked` là phần KHÔNG tới được
+     *   clipboard — `recopyBundle` đọc nó để biết còn nợ những gì.
      */
-    async function measureAndCopy(urls, { verb = 'Đã copy', dropped = 0 } = {}) {
-      const original = copyBtn.textContent;
-      copyBtn.disabled = true;
-      recopyBtn.disabled = true;
-      goBtn.disabled = true;
+    async function measureAndCopy(urls, { verb = 'Đã copy', dropped = 0, queued = 0, progressEl = copyBtn } = {}) {
+      const original = progressEl.textContent;
+      const fail = (msg) => { flash(msg); return { ok: false, passed: [], blocked: urls.slice() }; };
 
       try {
-        copyBtn.textContent = `Đang đo 0/${urls.length}…`;
+        progressEl.textContent = `Đang đo 0/${urls.length}…`;
         const verdicts = await probeUrls(
           urls,
-          (done, total) => { copyBtn.textContent = `Đang đo ${done}/${total}…`; }
+          (done, total) => { progressEl.textContent = `Đang đo ${done}/${total}…`; }
         );
 
         const passed = verdicts.filter((v) => v.ok).map((v) => v.url);
@@ -501,16 +567,29 @@
         if (!passed.length) {
           // Bó rỗng: KHÔNG chạm clipboard. `writeText('')` xoá trắng thứ người
           // dùng đang giữ, và họ mất nó để đổi lấy một thông báo.
-          flash(
+          return fail(
             `Không trang nào vào được Bó link: cả ${blocked.length} trang đều dựng thân bài bằng JavaScript ` +
             'hoặc không tải được. Dùng nút "Thêm N trang" — nội dung sẽ được trích ngay tại máy bạn.'
           );
-          return false;
         }
 
-        await navigator.clipboard.writeText(passed.join('\n'));
-        // Ghi Sổ SAU khi clipboard đã nhận thật.
-        await chrome.runtime.sendMessage({ type: MSG.BUNDLE_COPIED, urls: passed, from: siteName() });
+        try {
+          await navigator.clipboard.writeText(passed.join('\n'));
+        } catch (e) {
+          return fail(`Không ghi được clipboard: ${(e && e.message) || e}`);
+        }
+
+        /*
+         * TỪ ĐÂY TRỞ XUỐNG clipboard ĐÃ nhận. Mọi hỏng hóc sau vạch này đều là
+         * hỏng của việc ghi Sổ hoặc của cú nhảy, KHÔNG phải của việc copy — và
+         * gộp chúng vào một câu "Không copy được" là nói dối đúng chiều nguy
+         * hiểm: người dùng đi copy lại một thứ đang nằm sẵn trong clipboard.
+         * Nên không cái nào được phép ném ra ngoài; tất cả đi bằng `.catch`.
+         */
+        const book = await chrome.runtime
+          .sendMessage({ type: MSG.BUNDLE_COPIED, urls: passed, from: siteName() })
+          .catch((e) => ({ error: (e && e.message) || String(e) }));
+        const bookErr = (book && book.error) || (book ? '' : 'không có hồi âm');
 
         /*
          * Bản tổng kết dựng TRƯỚC cú nhảy và đi kèm nó. Mục 6 bật tab notebook
@@ -520,7 +599,9 @@
          */
         const parts = [`${verb} ${passed.length} link`];
         if (blocked.length) parts.push(`${blocked.length} trang không có thân bài trong HTML thô → dùng "Thêm N trang"`);
-        if (dropped) parts.push(`${dropped} đã có trong Sổ`);
+        if (dropped) parts.push(`${dropped} đã có trong Sổ — nút "Copy lại"`);
+        if (queued) parts.push(`${queued} đang nằm trong Hàng đợi`);
+        if (bookErr) parts.push(`chưa ghi được Sổ đã copy (${bookErr}) — lần sau có thể copy trùng`);
         /*
          * Nói ra sự đánh đổi thay vì để người dùng tự phát hiện. Cửa đo trả lời
          * "Nguồn có RỖNG không", KHÔNG trả lời "Nguồn có SẠCH không": máy chủ
@@ -530,20 +611,32 @@
          */
         parts.push('link dán vào NotebookLM sẽ kèm cả menu điều hướng của trang');
 
-        const jump = await chrome.runtime.sendMessage({ type: MSG.JUMP_NOTEBOOK, summary: parts.join(' · ') });
+        const jump = await chrome.runtime
+          .sendMessage({ type: MSG.JUMP_NOTEBOOK, summary: parts.join(' · ') })
+          .catch(() => null);
         if (!jump || !jump.jumped) {
-          parts.push('chưa đặt notebook đích — mở notebook rồi Ctrl+V');
+          parts.push(jumpWhy(jump));
+          flash(parts.join(' · '));
+        } else if (bookErr || jump.noted === false) {
+          // Nhảy được thì bản tổng kết đi bằng thông báo hệ thống. Thông báo câm
+          // hoặc trong đó có tin xấu về Sổ thì phải để lại vết ngay trên tab này.
           flash(parts.join(' · '));
         }
-        return true;
+        return { ok: true, passed, blocked: blocked.map((v) => v.url) };
       } catch (e) {
-        flash(`Không copy được: ${(e && e.message) || e}`);
-        return false;
+        // Chỉ còn cửa đo mới ném tới được đây — clipboard chưa nhận gì cả.
+        return fail(`Không đo được: ${(e && e.message) || e}`);
       } finally {
-        copyBtn.textContent = original;
-        recopyBtn.disabled = false;
-        syncCounts();
+        progressEl.textContent = original;
       }
+    }
+
+    /** Vì sao không đứng trước ô "Thêm nguồn" — nói ra đường thủ công tương ứng. */
+    function jumpWhy(jump) {
+      const why = jump && jump.why;
+      if (why === 'tab-gone') return 'tab notebook đã đóng — mở lại rồi Ctrl+V';
+      if (why === 'no-target') return 'chưa đặt notebook đích — mở notebook rồi Ctrl+V';
+      return 'không sang được notebook — mở notebook rồi Ctrl+V';
     }
 
     el.addEventListener('click', async (event) => {
@@ -579,9 +672,17 @@
         return;
       }
 
+      // Thẻ *Copy lại* không tự tắt — nó phải còn đó lúc người dùng quay lại từ
+      // tab notebook. Nên phải có đúng một cách để nói "thôi, bỏ đi".
+      if (act === 'recopy-dismiss') {
+        return setRecopy([]);
+      }
+
       if (act === 'import') {
         const picked = checkedRows();
         if (!picked.length) return;
+        if (busy) return;
+        busy = true;
         goBtn.disabled = true;
         goBtn.textContent = 'Đang xếp hàng…';
         try {
@@ -604,6 +705,7 @@
         } catch (e) {
           flash(`Lỗi: ${(e && e.message) || e}`);
         } finally {
+          busy = false;
           syncCounts();
         }
       }

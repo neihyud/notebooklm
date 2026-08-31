@@ -22,6 +22,7 @@ const eq = (got, want, m) =>
 
 const noopEvent = () => ({ addListener() {}, removeListener() {} });
 const store = new Map();
+
 /* Router tin nhắn của service worker — cần nó để hỏi GET_STATE đúng đường popup hỏi. */
 let router = null;
 
@@ -309,6 +310,59 @@ const log = () => store.get('copiedLog') || [];
     ok(st.copied.rows.length < st.copied.total,
       'Sổ chỉ có lớn lên và popup hỏi lại mỗi 1500ms — không được gửi cả Sổ qua mỗi lượt');
     eq(st.copied.rows[0].url, 'https://a.dev/p/119', 'lát cắt phải cắt từ đầu MỚI, không phải đầu cũ');
+  }
+
+  /*
+   * Hai lượt ghi Sổ CHỒNG NHAU.
+   *
+   * `getCopiedLog()` → sửa mảng → `storage.local.set()` là đọc-sửa-ghi, và một
+   * service worker phục vụ mọi tab cùng lúc: hai tab bấm copy sát nhau thì cả
+   * hai đọc cùng một bản Sổ, mỗi bên thêm phần của mình vào bản chụp riêng, rồi
+   * bên ghi sau đè mất bên ghi trước.
+   *
+   * Không có ai báo lỗi — và Sổ mất dòng nghĩa là lượt sau copy trùng đúng
+   * những link vừa mất. `chrome.storage` không có giao dịch, nên phép nối tiếp
+   * phải nằm trong chính `recordCopied`.
+   *
+   * KHÔNG `await` từng lượt một: `await` là đúng thứ giấu mất cuộc đua.
+   */
+  store.clear();
+  {
+    const [a, b] = await Promise.all([
+      SW.recordCopied([YT('ccccccccccc')], 'tab một'),
+      SW.recordCopied([YT('ddddddddddd')], 'tab hai'),
+    ]);
+    const keys = (store.get(N.KEYS.COPIED) || []).map((r) => r.key).sort();
+    eq(keys, ['yt:ccccccccccc', 'yt:ddddddddddd'],
+      'hai lượt ghi chồng nhau phải giữ được CẢ HAI dòng — bên ghi sau không được đè mất bên trước');
+    eq([a.added, b.added], [1, 1], 'và cả hai lượt đều phải báo đúng phần mình vừa thêm');
+    eq([a.total, b.total].sort(), [1, 2],
+      '`total` phải phản ánh Sổ tại thời điểm lượt đó ghi — hai lượt nối tiếp thì thấy 1 rồi 2');
+  }
+
+  /*
+   * Một lượt ghi hỏng KHÔNG được giết mọi lượt sau. Dây nối tiếp mà giữ nguyên
+   * một promise bị từ chối thì mọi mắt xích sau đều ném theo, và Sổ chết hẳn
+   * cho tới lần service worker khởi động lại.
+   */
+  store.clear();
+  {
+    const real = chrome.storage.local.set;
+    chrome.storage.local.set = async () => { throw new Error('storage đầy'); };
+    let threw = null;
+    await SW.recordCopied([YT('eeeeeeeeeee')], 'lượt hỏng').catch((e) => { threw = e; });
+    chrome.storage.local.set = real;
+    ok(!!threw, 'ca dựng sai thì assertion sau vô nghĩa — lượt này phải hỏng thật');
+
+    /*
+     * `.catch` tại chỗ, không phải `process.on('unhandledRejection')`: một
+     * handler ở tầng tiến trình NUỐT cú chết mà vẫn cho exit code 0, nên hoán vị
+     * "dây giữ nguyên cú từ chối" khi ấy không in gì và cũng không đỏ. Bắt ở đây
+     * thì nó thành một dòng fail đếm được, và dòng tổng kết vẫn in ra.
+     */
+    const after = await SW.recordCopied([YT('fffffffffff')], 'lượt sau')
+      .catch((e) => ({ error: (e && e.message) || String(e) }));
+    eq(after.added, 1, `lượt sau một lượt hỏng vẫn phải ghi được — dây nối tiếp không được giữ lại cú từ chối. Nhận: ${JSON.stringify(after)}`);
   }
 
   console.log(`\n${pass} pass, ${fail} fail`);

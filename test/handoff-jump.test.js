@@ -34,6 +34,10 @@ const nav = {
   reply: () => ({ ok: true }),
   lastError: null,
   nextId: 100,
+  /** `chrome.tabs.update` NÉM cho tabId này — người dùng vừa đóng tab đó. */
+  goneTabs: [],
+  /** Quyền thông báo của extension; `chrome.notifications.getPermissionLevel` đọc nó. */
+  notifyLevel: 'granted',
 };
 const resetNav = (tabs) => {
   nav.tabs = tabs.map((t) => ({ ...t }));
@@ -41,6 +45,8 @@ const resetNav = (tabs) => {
   nav.reply = (msg) => ({ ok: true, videoId: 'x' });
   nav.lastError = null;
   nav.nextId = 100;
+  nav.goneTabs = [];
+  nav.notifyLevel = 'granted';
 };
 const called = (name) => nav.calls.filter((c) => c[0] === name);
 
@@ -83,7 +89,10 @@ global.chrome = {
   alarms: { create: async () => {}, clear: async () => {}, onAlarm: noopEvent() },
   commands: { onCommand: { addListener(fn) { commandListener = fn; }, removeListener() {} } },
   contextMenus: { create() {}, removeAll: (cb) => cb && cb(), onClicked: noopEvent() },
-  notifications: { create: async (...a) => { nav.calls.push(['notify', a]); } },
+  notifications: {
+    create: async (...a) => { nav.calls.push(['notify', a]); },
+    getPermissionLevel: async () => nav.notifyLevel,
+  },
   scripting: {
     executeScript: async (o) => { nav.calls.push(['executeScript', o]); return [{ result: null }]; },
     insertCSS: async (o) => { nav.calls.push(['insertCSS', o]); },
@@ -102,6 +111,10 @@ global.chrome = {
     },
     update: async (id, props) => {
       nav.calls.push(['tabs.update', id, props]);
+      // Chrome NÉM cho tabId đã chết, chứ không trả về null. Đó là cả nội dung
+      // của ca này: `tabs.query` trả về một bản chụp, người dùng đóng được tab
+      // giữa lúc chụp và lúc bật.
+      if (nav.goneTabs.includes(id)) throw new Error(`No tab with id: ${id}.`);
       const t = nav.tabs.find((x) => x.id === id);
       if (t) Object.assign(t, props);
       return t || { id, ...props };
@@ -224,6 +237,57 @@ const queue = () => store.get('queue') || [];
     eq(res.jumped, false, 'ca dựng sai thì assertion sau vô nghĩa — ca này phải là không nhảy được');
     eq(called('notify').length, 0,
       'không nhảy được thì để bề mặt tự nói — nó còn kèm được câu chỉ đường mà service worker không có');
+  }
+
+  /*
+   * Tab notebook chết giữa lúc chụp và lúc bật.
+   *
+   * `chrome.tabs.query` trả về một BẢN CHỤP; người dùng đóng tab được ngay sau
+   * đó, và `chrome.tabs.update` trên tabId đã chết thì NÉM. Cú ném đó xuyên qua
+   * `sendResponse`, nên bề mặt nhận `undefined` và đọc thành "đã nhảy rồi":
+   * clipboard có nội dung, người dùng đứng nguyên tại chỗ, không một dòng nào
+   * nói cho họ biết. Phải trả về một `why` đọc được.
+   */
+  store.clear();
+  await setTarget(NB('abc'));
+  resetNav([{ id: 1, windowId: 7, url: NB('abc'), active: false }]);
+  nav.goneTabs = [1];
+  {
+    let threw = null;
+    const res = await SW.jumpToNotebook('Đã copy 5 link công khai').catch((e) => { threw = e; return null; });
+    ok(!threw, `tab chết KHÔNG được để lọt cú ném lên bề mặt — nhận: ${threw && threw.message}`);
+    eq(res && res.jumped, false, 'tab chết thì phải nói là không nhảy được');
+    eq(res && res.why, 'tab-gone',
+      'và phải phân biệt với "chưa đặt đích": hai ca dẫn tới hai câu chỉ đường khác nhau');
+    eq(called('notify').length, 0, 'không nhảy được thì để bề mặt tự nói — nó còn kèm được câu chỉ đường');
+  }
+
+  /*
+   * Thông báo hệ thống bị tắt: `jumpToNotebook` phải NÓI RA.
+   *
+   * Nhảy được nghĩa là tab nguồn vừa thành tab nền, nên thông báo là đường duy
+   * nhất còn lại để bản tổng kết tới người dùng. Nó câm mà `jumped:true` vẫn về
+   * trơn tru thì bản tổng kết bốc hơi, và bề mặt không có cách nào biết để bù.
+   */
+  store.clear();
+  await setTarget(NB('abc'));
+  resetNav([{ id: 1, windowId: 7, url: NB('abc'), active: false }]);
+  nav.notifyLevel = 'denied';
+  {
+    const res = await SW.jumpToNotebook('Đã copy 5 link công khai');
+    eq(res.jumped, true, 'ca dựng sai thì assertion sau vô nghĩa — cú nhảy vẫn phải thành công');
+    eq(res.noted, false,
+      'thông báo bị tắt thì phải báo `noted:false` để bề mặt tự để lại vết — không thì bản tổng kết bốc hơi');
+    eq(called('notify').length, 0, 'và không gọi create() một cách vô ích khi quyền đã bị từ chối');
+  }
+
+  /* Quyền còn nguyên thì `noted` phải là true — nếu không, cờ trên vô nghĩa. */
+  store.clear();
+  await setTarget(NB('abc'));
+  resetNav([{ id: 1, windowId: 7, url: NB('abc'), active: false }]);
+  {
+    const res = await SW.jumpToNotebook('Đã copy 5 link công khai');
+    eq(res.noted, true, 'có quyền thông báo thì `noted` phải là true — cờ luôn-false thì không đo được gì');
   }
 
   /* Có tab NotebookLM nhưng không phải notebook đích: điều hướng tab đó. */

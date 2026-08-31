@@ -19,6 +19,18 @@ const { loadDocsPage, docNode } = require('./dom-harness.js');
 
 let pass = 0, fail = 0;
 const ok = (cond, m) => (cond ? pass++ : (fail++, console.log(`❌ ${m}`)));
+
+/*
+ * Một promise rejection không ai bắt trong handler `click` GIẾT cả tiến trình,
+ * và cú chết đó nuốt luôn dòng tổng kết của file — hoán vị "bỏ `.catch` quanh
+ * `sendMessage`" khi ấy đo ra "không in được gì" thay vì một con số fail. Bắt
+ * lại và đếm nó như một dòng đỏ: thiệt hại phải đếm được.
+ *
+ * Đây cũng đúng là hình dạng lỗi ngoài đời — service worker vừa nạp lại thì
+ * `sendMessage` ném, và cú bấm chết câm.
+ */
+const rejections = [];
+process.on('unhandledRejection', (e) => rejections.push((e && e.message) || String(e)));
 const eq = (got, want, m) =>
   ok(JSON.stringify(got) === JSON.stringify(want), `${m}\n   nhận: ${JSON.stringify(got)}\n   cần : ${JSON.stringify(want)}`);
 
@@ -265,8 +277,12 @@ async function run() {
    * @param {string[]|'all'} opts.drop url mà cửa khử trùng coi là ĐÃ CÓ trong Sổ
    * @param {string} opts.filterError cửa khử trùng hỏng — ca khác hẳn "đã có rồi"
    */
-  const withPages = (h, { fail = [], onFetch = null, drop = [], filterError = null } = {}) => {
+  const withPages = (h, { fail = [], onFetch = null, drop = [], queue = [], filterError = null, reject = [] } = {}) => {
     h.reply((m) => {
+      // Service worker vừa nạp lại / vừa cập nhật thì `sendMessage` *reject*,
+      // không trả về `{error}`. Hai hình dạng hỏng khác nhau, và bề mặt phải
+      // sống qua cả hai.
+      if (reject.includes(m.type)) throw new Error('Extension context invalidated.');
       if (m.type === 'docs-raw-fetch') {
         if (onFetch) onFetch(m.url);
         if (fail.includes(m.url)) return { url: m.url, error: 'HTTP 503' };
@@ -276,10 +292,11 @@ async function run() {
         if (filterError) return { error: filterError };
         const urls = m.urls || [];
         const out = drop === 'all' ? urls : urls.filter((u) => drop.includes(u));
+        const q = urls.filter((u) => queue.includes(u) && !out.includes(u));
         return {
-          keep: urls.filter((u) => !out.includes(u)),
-          dropped: out.map((u) => ({ url: u, why: 'copied' })),
-          counts: { copied: out.length, queued: 0 },
+          keep: urls.filter((u) => !out.includes(u) && !q.includes(u)),
+          dropped: out.map((u) => ({ url: u, why: 'copied' })).concat(q.map((u) => ({ url: u, why: 'queued' }))),
+          counts: { copied: out.length, queued: q.length },
         };
       }
       if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
@@ -587,7 +604,10 @@ async function run() {
   /* Chưa đặt notebook đích: copy vẫn xong, nhưng phải chỉ đường thủ công. */
   {
     const h = loadDocsPage({ tree: threeTree() });
+    // Đúng hình dạng service worker thật trả về khi chưa đặt notebook đích —
+    // `why` là thứ quyết định câu chỉ đường, nên fixture không được bỏ nó.
     h.jump.jumped = false;
+    h.jump.why = 'no-target';
     await h.tick(80);
     h.click(h.launcher());
     await h.tick(60);
@@ -646,6 +666,179 @@ async function run() {
     ok(result === false, '(d) router KHÔNG được trả lời tin của content script khác (nlm-ping)');
     h.close();
   }
+
+  /*
+   * Bấm *Copy link* hai lần liền tay.
+   *
+   * Cửa khử trùng và cửa đo đều là một vòng `await`, và trong lúc chờ thì
+   * `syncCounts()` bật lại nút theo số dòng đang tick — theo "có gì để copy
+   * không", chứ không theo "đang bận hay không". Hai lượt chồng nhau là hai lượt
+   * cùng đo, cùng ghi clipboard, và cùng ghi Sổ.
+   *
+   * Khoá phải là ĐỒNG BỘ, đặt trước cái `await` đầu tiên: đặt sau thì cú bấm thứ
+   * hai đã lọt qua rồi.
+   */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h);
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    h.click('[data-act="copy"]');   // liền tay, chưa kịp một nhịp nào
+    await h.tick(250);
+
+    eq(h.sent.filter((m) => m.type === 'bundle-filter').length, 1,
+      'cú bấm thứ hai KHÔNG được mở thêm một lượt — khoá phải đóng trước cái await đầu tiên');
+    eq(h.clipboard.writes.length, 1, 'và chỉ được ghi clipboard đúng một lần');
+    h.close();
+  }
+
+  /* ================================================================== */
+  /* sendMessage *reject*, không phải `{error}`                          */
+  /* ================================================================== */
+
+  /*
+   * Service worker vừa nạp lại thì `chrome.runtime.sendMessage` NÉM, chứ không
+   * trả về `{error}`. Trong một handler `click` async thì cú ném đó không có ai
+   * bắt: cú bấm chết câm, và người dùng đứng trước một cái nút vừa bấm mà không
+   * có gì xảy ra.
+   *
+   * Ghim ở đúng cửa khử trùng, tức TRƯỚC clipboard: câu báo phải nói rõ chưa
+   * copy gì cả, để người dùng biết clipboard của họ còn nguyên.
+   */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h, { reject: ['bundle-filter'] });
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    eq(h.clipboard.writes, [], 'cửa khử trùng ném thì KHÔNG được chạm clipboard');
+    ok(/chưa copy gì cả/.test(h.flash()),
+      `cú bấm không được chết câm — phải nói ra rằng clipboard còn nguyên. Nhận: "${h.flash()}"`);
+    ok(!h.panel('[data-act="copy"]').disabled,
+      'và nút phải bật lại được — bỏ nó tắt vĩnh viễn là khoá người dùng khỏi lượt thử lại');
+    h.close();
+  }
+
+  /*
+   * `bundle-copied` ném SAU khi clipboard đã nhận. Đây là vạch phân đôi:
+   * clipboard CÓ nội dung, chỉ Sổ là chưa ghi được. Báo thành "Không copy được"
+   * là nói dối đúng chiều nguy hiểm — người dùng đi copy lại một thứ đang nằm
+   * sẵn trong clipboard, và bỏ qua đúng cái tin đáng biết (lần sau sẽ copy trùng).
+   */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h, { reject: ['bundle-copied'] });
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(200);
+
+    eq(h.clipboard.writes.length, 1, 'ca dựng sai thì assertion sau vô nghĩa — clipboard phải nhận được đã');
+    ok(!/Không copy được/.test(h.flash()),
+      `clipboard đã nhận thì KHÔNG được báo là không copy được — nhận: "${h.flash()}"`);
+    ok(/chưa ghi được Sổ/.test(h.flash()),
+      `và phải nói ra rằng Sổ chưa ghi được, vì đó là thứ lượt sau phải trả giá — nhận: "${h.flash()}"`);
+    h.close();
+  }
+
+  /* ================================================================== */
+  /* cửa khử trùng loại MỘT PHẦN, hai lý do là hai lối đi                */
+  /* ================================================================== */
+
+  /*
+   * `why === 'queued'` KHÔNG được vào nút *Copy lại*: copy lại link của một
+   * trang đang nằm trong Hàng đợi chỉ dựng lại đúng cái Nguồn rỗng mà Hàng đợi
+   * sinh ra để tránh. Gộp hai lý do vào một con số thì hoán vị nào cũng xanh,
+   * nên phải ghim con số trên NÚT, không phải tổng số bị loại.
+   */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h, { drop: [threeUrls[0]], queue: [threeUrls[1]] });
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(250);
+
+    eq(h.clipboard.writes.length, 1, 'phần sạch vẫn phải tới clipboard — loại một phần không phải loại cả Bó');
+
+    const btn = h.panel('[data-act="recopy"]');
+    ok(btn && !btn.hidden, 'có trang bị loại vì đã copy thì nút Copy lại phải hiện');
+    ok(/Copy lại 1 link/.test(btn ? btn.textContent : ''),
+      `nút chỉ được đếm phần bị loại vì ĐÃ COPY, không gộp phần đang trong Hàng đợi — nhận: "${btn ? btn.textContent : ''}"`);
+
+    /*
+     * `h.click` NÉM khi phần tử vắng mặt, và một cú ném ở đây nuốt luôn dòng
+     * tổng kết của cả file — hoán vị "gỡ nút ×" khi ấy đo ra "không in được gì"
+     * thay vì một con số fail. Thiệt hại phải đếm được.
+     */
+    const x = h.panel('[data-act="recopy-dismiss"]');
+    ok(x && !x.hidden,
+      'phải có cách bỏ qua: nút Copy lại không tự tắt, nên không có nút × là nó ở lại vĩnh viễn');
+    if (x) {
+      h.click(x);
+      await h.tick(30);
+      ok(h.panel('[data-act="recopy"]').hidden && x.hidden,
+        'bấm × thì cả hai nút cùng biến — bỏ lại một dấu × mồ côi là để lại một cái bẫy');
+    }
+    h.close();
+  }
+
+  /*
+   * Cửa đo cho qua MỘT PHẦN ở lượt *Copy lại*: nút phải giữ đúng phần còn nợ.
+   *
+   * Buông sạch là mất những trang chưa tới clipboard; giữ nguyên cả danh sách là
+   * bắt người dùng copy trùng phần vừa copy xong. Hai hoán vị này chỉ phân biệt
+   * được khi cửa đo cho qua một phần — cho qua hết hoặc trượt hết đều xanh cả hai.
+   */
+  {
+    const h = loadDocsPage({ tree: threeTree() });
+    await openAndTickAll(h);
+    withPages(h, { drop: 'all' });
+    h.click('[data-act="all"]');
+    h.click('[data-act="copy"]');
+    await h.tick(200);
+
+    const btn = h.panel('[data-act="recopy"]');
+    ok(btn && new RegExp(`Copy lại ${threeUrls.length} link`).test(btn.textContent),
+      `ca dựng sai thì assertion sau vô nghĩa — nút phải đang giữ đủ ${threeUrls.length} link. Nhận: "${btn ? btn.textContent : ''}"`);
+
+    /*
+     * Lượt copy lại: `docs-spa-shell.html` trượt cửa đo (nó dựng thân bài bằng
+     * JavaScript), phần còn lại qua. Không cần dựng lỗi giả — fixture đó tồn tại
+     * đúng để làm ca này.
+     *
+     * `onFetch` chộp giao diện ĐANG GIỮA cửa đo: tiến độ là thứ chỉ tồn tại
+     * trong lúc đo, đọc sau khi xong là đọc chuỗi đã khôi phục.
+     */
+    const during = [];
+    withPages(h, {
+      drop: 'all',
+      onFetch: () => during.push({
+        recopy: h.panel('[data-act="recopy"]').textContent,
+        copy: h.panel('[data-act="copy"]').textContent,
+      }),
+    });
+    h.click('[data-act="recopy"]');
+    await h.tick(250);
+
+    ok(during.length > 0, 'ca dựng sai thì assertion sau vô nghĩa — cửa đo phải có chạy');
+    ok(during.some((u) => /Đang đo/.test(u.recopy)),
+      `tiến độ phải hiện trên chính nút vừa bấm — nhận: ${JSON.stringify(during[0])}`);
+    ok(during.every((u) => !/Đang đo/.test(u.copy)),
+      `và KHÔNG hiện trên nút Copy link, thứ người dùng không bấm — nhận: ${JSON.stringify(during[0])}`);
+
+    eq(h.clipboard.writes.length, 1, 'phần qua được cửa đo phải tới clipboard');
+    const after = h.panel('[data-act="recopy"]');
+    ok(after && !after.hidden && /Copy lại 1 link/.test(after.textContent),
+      `nút phải còn lại ĐÚNG phần chưa tới clipboard (1), không phải 0 và cũng không phải ${threeUrls.length} — nhận: "${after && !after.hidden ? after.textContent : '(đã ẩn)'}"`);
+    h.close();
+  }
+
+  // Đặt SAU mọi ca: tới đây `tick()` đã cho microtask queue chạy hết.
+  eq(rejections, [], 'không cú bấm nào được để lọt một promise rejection — đó là một cú bấm chết câm');
 
   console.log(`\n${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);

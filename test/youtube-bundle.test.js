@@ -391,8 +391,8 @@ async function run() {
 
     eq(h.clipboard.writes, [], '(a) video private KHÔNG được chạm clipboard');
     eq(enq(h).length, 1, '(a) video private phải rơi về Hàng đợi');
-    eq(enqItems(h), [{ videoId: 'aaaaaaaaaaa', title: undefined, privacy: 'unknown' }],
-      '(a) Mục rơi về Hàng đợi giữ nguyên videoId');
+    eq(enqItems(h), [{ videoId: 'aaaaaaaaaaa', title: 'Tiêu đề', privacy: 'private' }],
+      '(a) Mục rơi về Hàng đợi mang theo `meta` cửa 3 vừa mua được — không phải một dòng trống');
     ok(/private/.test(h.toast()), `(a) phải nói ra vì sao không copy được — nhận: "${h.toast()}"`);
     h.close();
   }
@@ -687,7 +687,10 @@ async function run() {
       describe: async (id) => meta({ videoId: id }),
       bridge: async () => ({ kind: 'other' }),
     });
+    // Đúng hình dạng service worker thật trả về khi chưa đặt notebook đích —
+    // `why` là thứ quyết định câu chỉ đường, nên fixture không được bỏ nó.
     h.jump.jumped = false;
+    h.jump.why = 'no-target';
     await h.tick(80);
     h.click('#nblm-copy-button');
     await h.tick(80);
@@ -866,6 +869,105 @@ async function run() {
       'video private đi qua nút Copy lại vẫn bị cửa 3 chặn — không có đường nào tới writeText mà không qua cửa 3');
     eq(enqItems(h, enq(h).length - 1).map((i) => i.videoId), ['vidprivat09'],
       'và nó phải rơi về Hàng đợi, không mất trắng');
+    /*
+     * Thẻ phải CÒN Ở ĐÓ. Lượt copy lại không đưa được gì lên clipboard, nên
+     * danh sách của nó chưa hết vai — gỡ thẻ ở đây là vứt bản duy nhất còn giữ
+     * nó, và người dùng không có đường nào lấy lại ngoài xoá sạch Sổ.
+     */
+    ok(!!h.$('#nblm-recopy'),
+      'copy lại KHÔNG copy được gì thì thẻ phải ở lại — nhánh skipDedupe không được tự gỡ thẻ của chính nó');
+    h.close();
+  }
+
+  /*
+   * Thẻ *Copy lại* sống qua cả cú chuyển trang và không tự tắt, nên nó phải tự
+   * nói được nó đang giữ link CỦA CÁI GÌ. "12 link" trên một playlist khác là
+   * một con số không truy được về đâu.
+   *
+   * Và nó phải đọc được bằng trình đọc màn hình: `role="status"` +
+   * `aria-live="polite"` để nói mà không cắt ngang, `aria-label` cho nút × —
+   * `×` là một ký tự nhân, không phải một cái tên.
+   */
+  {
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: listBody3,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async (kind) =>
+        kind === 'context'
+          ? { kind: 'playlist', playlistId: 'PL123', title: 'Khoá học Rust' }
+          : { items: [] },
+    });
+    h.reply(allDropped);
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    const chip = h.$('#nblm-recopy');
+    ok(!!chip, 'ca dựng sai thì mọi assertion sau vô nghĩa — thẻ phải có mặt');
+    const text = chip ? chip.textContent : '';
+    ok(/Khoá học Rust/.test(text),
+      `thẻ phải mang tên nguồn của danh sách nó đang giữ — nhận: "${text}"`);
+
+    eq(chip && chip.getAttribute('role'), 'status',
+      'thẻ báo một việc vừa xảy ra mà không ai yêu cầu — role="status"');
+    eq(chip && chip.getAttribute('aria-live'), 'polite',
+      'và "polite": đọc nốt câu đang đọc rồi mới nói, đừng cắt ngang');
+    const x = chip ? chip.querySelector('.nblm-recopy__x') : null;
+    ok(x && (x.getAttribute('aria-label') || '').length > 1,
+      'nút × phải có aria-label — không có thì trình đọc màn hình đọc ra "dấu nhân"');
+
+    /*
+     * Vị trí thẻ phải được TÍNH lúc chạy, không phải một con số cứng trong CSS.
+     * Bản tổng kết dài ngắn tuỳ lượt nên toast cao hai, ba, bốn dòng — một con
+     * số chọn cho hai dòng thì bốn dòng là chồng lên nhau, và thứ bị che là cái
+     * nút.
+     *
+     * PHẠM VI CA NÀY, nói thẳng: nó chỉ chứng nhận `bottom` được ghi INLINE bởi
+     * `layoutRecopy()` (24px — chỗ nghỉ khi không có toast). Nhánh "có toast thì
+     * cộng chiều cao thật" KHÔNG đo được ở đây vì hai lý do cộng lại: jsdom
+     * không tính layout (`getBoundingClientRect` ở harness trả height cố định
+     * 40), và harness bóp mọi `setTimeout` xuống ≤20ms nên hẹn giờ tắt toast
+     * 4200ms bắn xong trước khi assertion đọc tới. Chỗ chồng lấn thật phải chụp
+     * bằng trình duyệt thật mới thấy — đúng bài học đã ghi cho ca nút Dừng.
+     */
+    ok(chip && chip.style.bottom === '24px',
+      `\`bottom\` phải do layoutRecopy() ghi inline, không phải hằng số trong CSS — nhận: "${chip ? chip.style.bottom || '(không có style inline)' : ''}"`);
+    h.close();
+  }
+
+  /*
+   * Cửa 2 trả về một url KHÔNG khớp ứng viên nào.
+   *
+   * `filterBundle` hôm nay dựng `keep` từ chính chuỗi nó nhận, nên ca này chỉ tới
+   * được khi service worker phá hợp đồng của chính nó. Vẫn phải có đường ra: đây
+   * đúng là hình dạng "bỏ một mục mà không đếm" — thứ `sidebar.js` đã dính hai
+   * lần — và một con số nói ra được thì còn lần theo được.
+   */
+  {
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: listBody3,
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    h.reply((m) => {
+      if (m.type === 'bundle-filter') {
+        // Trả về một url chưa từng được gửi đi.
+        return { keep: ['https://www.youtube.com/watch?v=khonggui99'], dropped: [], counts: { copied: 0, queued: 0 } };
+      }
+      if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };
+      return { added: 1 };
+    });
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    eq(h.clipboard.writes, [], 'url lạ KHÔNG được đi tiếp — nó không phải ứng viên nào của lượt này');
+    ok(/không khớp ứng viên nào/.test(h.toast()),
+      `và số link rơi mất phải được NÓI RA, không im lặng bỏ — nhận: "${h.toast()}"`);
     h.close();
   }
 
@@ -957,6 +1059,36 @@ async function run() {
     h.close();
   }
 
+  /*
+   * Cửa 2 hỏng KHÔNG được xoá kết luận của cửa 1.
+   *
+   * Huy hiệu là quan sát tại chỗ, không phụ thuộc vào Sổ đã copy chút nào. Bỏ cả
+   * nhóm chỉ vì cửa 2 không tra được là vứt một kết luận đã có sẵn — và video
+   * private ấy biến mất khỏi mọi rổ: không clipboard, không Hàng đợi, không một
+   * con số nào.
+   */
+  {
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: [
+        videoCard('vidprivat07', 'Riêng tư', 'Private'),
+        videoCard('vidpublic08', 'Công khai'),
+      ].join(''),
+      describe: async (id) => meta({ videoId: id }),
+      bridge: async () => ({ kind: 'other' }),
+    });
+    h.reply((m) => (m.type === 'bundle-filter' ? { error: 'storage hỏng' } : { added: 1 }));
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    eq(h.clipboard.writes, [], 'ca dựng sai thì assertion sau vô nghĩa — cửa 2 hỏng thì không copy');
+    eq(enqItems(h, enq(h).length - 1).map((i) => i.videoId), ['vidprivat07'],
+      'video bị huy hiệu loại vẫn phải rơi về Hàng đợi — cửa 1 không cần cửa 2 để kết luận');
+    h.close();
+  }
+
   /* ================================================================== */
   /* router tin nhắn — ba content script gặp nhau trên một tab           */
   /* ================================================================== */
@@ -986,6 +1118,177 @@ async function run() {
       setTimeout(() => resolve(answered), 30);
     });
     ok(result === false, 'router KHÔNG được trả lời tin của content script khác (nlm-ping)');
+  }
+
+  /* ================================================================== */
+  /* cửa 1 — khử trùng theo videoId, và mục lệch khuôn                   */
+  /* ================================================================== */
+
+  /*
+   * Một playlist chứa CÙNG một video hai lần là chuyện thường, và đường quét
+   * InnerTube trả về đúng như thế — nó không đi qua `selected` (Map theo
+   * videoId) nên không có ai gộp hộ.
+   *
+   * Assertion phải là `asked`, KHÔNG phải clipboard: bỏ hẳn phép gộp thì
+   * clipboard vẫn ra một dòng (cửa 2 gộp theo `bundleKey`, `writeText` nhận
+   * mảng đã lọc), nên assert kết quả là một hoán vị xanh. Cái đắt tiền là
+   * SỐ LƯỢT HỎI, và chỉ nó mới phân biệt được hai nhánh.
+   */
+  {
+    const asked = [];
+    const filtered = [];
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: listBody2,
+      describe: async (id) => { asked.push(id); return meta({ videoId: id }); },
+      bridge: async (kind) =>
+        kind === 'context'
+          ? { kind: 'playlist', playlistId: 'PL123', title: 'Playlist thử' }
+          : {
+              items: [
+                { videoId: 'vidpublic01', title: 'Một', privacy: 'unknown', accessible: true },
+                { videoId: 'vidpublic01', title: 'Một (lặp)', privacy: 'unknown', accessible: true },
+                { videoId: 'vidprivat05', title: 'Riêng tư', privacy: 'private', accessible: true },
+                { videoId: 'vidprivat05', title: 'Riêng tư (lặp)', privacy: 'private', accessible: true },
+              ],
+            },
+    });
+    h.reply((m) => {
+      if (m.type === 'bundle-filter') {
+        filtered.push((m.urls || []).slice());
+        return { keep: m.urls || [], dropped: [], counts: { copied: 0, queued: 0 } };
+      }
+      if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
+      if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };
+      if (m.type === 'enqueue') return { added: (m.items || []).length };
+      return {};
+    });
+    await h.tick(80);
+    h.click('[data-act="all-import"]');
+    await h.tick(120);
+    h.click('.nblm-modal [data-act="copy"]');
+    await h.tick(150);
+
+    eq(asked, ['vidpublic01'],
+      'cùng một videoId hai lần trong playlist chỉ được tốn ĐÚNG một lượt hỏi player response');
+    eq(filtered, [['https://www.youtube.com/watch?v=vidpublic01']],
+      'và cửa 2 cũng chỉ nhận một url — gộp ở cửa 1 thì cửa dưới không phải gộp lại');
+
+    /*
+     * Vế thứ ba, và là vế duy nhất chỉ cửa 1 giữ được: video bị HUY HIỆU loại
+     * không đi qua cửa 2, nên phép gộp theo url ở đó không với tới nó. Bỏ `seen`
+     * ở cửa 1 là xếp cùng một video private vào Hàng đợi hai lần.
+     */
+    eq(enqItems(h, enq(h).length - 1).map((i) => i.videoId), ['vidprivat05'],
+      'video private lặp hai lần chỉ được xếp hàng MỘT Mục — cửa 2 không gộp hộ rổ này');
+    h.close();
+  }
+
+  /*
+   * Mục có `videoId` lệch khuôn: bỏ thì được, bỏ IM LẶNG thì không.
+   *
+   * `canonicalUrl(id)` chỉ nội suy chuỗi, còn `videoIdFrom` mới áp luật khuôn
+   * dạng — nên một id 9 ký tự dựng ra một url mà chính extension đọc lại không
+   * ra id. Nó rơi khỏi `keep`, rơi khỏi `dropped`, rơi khỏi mọi con số trong bản
+   * tổng kết. Đây đúng là lỗi `sidebar.js` đã dính hai lần.
+   */
+  {
+    const asked = [];
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: listBody2,
+      describe: async (id) => { asked.push(id); return meta({ videoId: id }); },
+      bridge: async (kind) =>
+        kind === 'context'
+          ? { kind: 'playlist', playlistId: 'PL123', title: 'Playlist thử' }
+          : {
+              items: [
+                { videoId: 'vidpublic01', title: 'Một', privacy: 'unknown', accessible: true },
+                { videoId: 'ngan', title: 'Lệch khuôn', privacy: 'unknown', accessible: true },
+              ],
+            },
+    });
+    await h.tick(80);
+    h.click('[data-act="all-import"]');
+    await h.tick(120);
+    h.click('.nblm-modal [data-act="copy"]');
+    await h.tick(150);
+
+    eq(asked, ['vidpublic01'], 'id lệch khuôn KHÔNG được tốn một lượt hỏi');
+    eq(enqItems(h, enq(h).length - 1).map((i) => i.videoId), ['ngan'],
+      'nhưng nó phải rơi về Hàng đợi, không bốc hơi — bỏ mà không đếm là lỗi đã dính hai lần');
+    h.close();
+  }
+
+  /* ================================================================== */
+  /* cửa 2 loại MỘT PHẦN, và hai lý do loại là hai lối đi                */
+  /* ================================================================== */
+
+  /*
+   * Ca hỗn hợp: một link đã có trong Sổ, một link đang trong Hàng đợi, một link
+   * sạch. Ba ca một lượt, vì chúng chỉ phân biệt được khi đứng cạnh nhau.
+   *
+   * `why === 'queued'` KHÔNG được vào nút *Copy lại*. Hầu hết Mục trong Hàng đợi
+   * vào đó do chính cửa 3 đẩy xuống, nên đưa chúng ngược lên cửa 3 là hỏi lại
+   * một câu vừa bị trả lời "không" — tốn tiền, và cái nút hứa một việc nó không
+   * làm được. Gộp cả hai lý do vào một con số thì hoán vị nào cũng xanh.
+   */
+  {
+    const asked = [];
+    const h = loadYouTubePage({
+      url: 'https://www.youtube.com/playlist?list=PL123',
+      body: [
+        videoCard('vidcopied01', 'Đã copy'),
+        videoCard('vidqueued02', 'Đang xếp hàng'),
+        videoCard('vidpublic03', 'Còn sạch'),
+      ].join(''),
+      describe: async (id) => { asked.push(id); return meta({ videoId: id }); },
+      bridge: async () => ({ kind: 'other' }),
+    });
+    h.reply((m) => {
+      if (m.type === 'bundle-filter') {
+        const keep = [], dropped = [];
+        for (const u of m.urls || []) {
+          if (u.includes('vidcopied01')) dropped.push({ url: u, why: 'copied' });
+          else if (u.includes('vidqueued02')) dropped.push({ url: u, why: 'queued' });
+          else keep.push(u);
+        }
+        return { keep, dropped, counts: { copied: 1, queued: 1 } };
+      }
+      if (m.type === 'bundle-copied') return { added: (m.urls || []).length };
+      if (m.type === 'jump-notebook') return { jumped: true, tabId: 1 };
+      if (m.type === 'enqueue') return { added: (m.items || []).length };
+      return {};
+    });
+    await h.tick(80);
+    tickAll(h);
+    h.click('[data-act="copy"]');
+    await h.tick(150);
+
+    eq(asked, ['vidpublic03'],
+      'ca dựng sai thì mọi assertion sau vô nghĩa — chỉ link qua cửa 2 mới được hỏi');
+    eq(h.clipboard.writes, ['https://www.youtube.com/watch?v=vidpublic03'],
+      'phần sạch vẫn phải tới clipboard — cửa 2 loại một phần không phải loại cả Bó');
+
+    const chip = h.$('#nblm-recopy');
+    ok(!!chip, 'có link bị loại vì đã copy thì phải có nút Copy lại');
+    const chipText = chip ? chip.textContent : '';
+    ok(/Copy lại 1 link/.test(chipText),
+      `nút Copy lại chỉ được đếm phần bị loại vì ĐÃ COPY (1), không gộp phần đang trong Hàng đợi — nhận: "${chipText}"`);
+
+    const s = summary(h);
+    ok(/1 bỏ vì đã có trong Sổ/.test(s),
+      `bản tổng kết phải nói riêng phần đã có trong Sổ — nhận: "${s}"`);
+    ok(/1 đang nằm trong Hàng đợi/.test(s),
+      `và nói riêng phần đang trong Hàng đợi, vì hai lý do dẫn tới hai việc khác nhau — nhận: "${s}"`);
+
+    asked.length = 0;
+    ok(clickRecopy(h), 'phải có nút Copy lại để bấm');
+    await h.tick(200);
+
+    eq(asked, ['vidcopied01'],
+      'Copy lại chỉ đưa phần bị loại vì đã copy lên cửa 3 — link đang trong Hàng đợi không đi lối này');
+    h.close();
   }
 
   console.log(`\n${pass} pass, ${fail} fail`);

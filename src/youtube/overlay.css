@@ -133,10 +133,15 @@
  * Nút "Copy lại" — đứng yên, không tự tắt. Nằm ngay TRÊN chỗ toast mọc ra
  * (bottom 24px + chiều cao toast) để hai thứ không chồng nhau khi cùng hiện.
  */
+/*
+ * `bottom` ở đây chỉ là chỗ nghỉ khi không có toast. Lúc có toast thì
+ * `layoutRecopy()` ghi đè bằng style inline, đo theo chiều cao THẬT của toast:
+ * bản tổng kết dài ngắn tuỳ lượt, nên không có con số cứng nào đúng cho mọi lượt.
+ */
 .nblm-recopy {
   position: fixed;
   right: 24px;
-  bottom: 96px;
+  bottom: 24px;
   z-index: 2147483002;
   display: flex;
   align-items: center;
@@ -311,6 +316,7 @@
 
 .nblm-panel__status[data-kind="error"] { color: #f28b82; }
 .nblm-panel__status[data-kind="ok"] { color: #81c995; }
+.nblm-panel__status[data-kind="warn"] { color: #fdd663; }
 
 .nblm-panel__list {
   flex: 1 1 auto;

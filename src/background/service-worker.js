@@ -269,9 +269,13 @@ async function jumpToNotebook(summary) {
     if (!tab) {
       // Mở thẳng ở chế độ active: cả lượt này chỉ tồn tại để đưa người dùng tới
       // đó. Không `waitTabComplete`, không chờ Angular — không có gì để chờ.
-      tab = tabs[0]
-        ? await chrome.tabs.update(tabs[0].id, { url: target, active: true })
-        : await chrome.tabs.create({ url: target, active: true });
+      try {
+        tab = tabs[0]
+          ? await chrome.tabs.update(tabs[0].id, { url: target, active: true })
+          : await chrome.tabs.create({ url: target, active: true });
+      } catch (_) {
+        tab = null;
+      }
     }
   } else {
     tab = inNotebook[0] || null;
@@ -279,10 +283,25 @@ async function jumpToNotebook(summary) {
 
   if (!tab) return { jumped: false, why: 'no-target' };
 
-  await chrome.tabs.update(tab.id, { active: true });
-  if (tab.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
-  if (summary) await note('Đã copy, Ctrl+V vào Thêm nguồn', summary);
-  return { jumped: true, tabId: tab.id };
+  /*
+   * `tabs.query` trả về một BẢN CHỤP. Giữa lúc chụp và lúc bật, người dùng đóng
+   * được tab đó — và `tabs.update` trên một tabId đã chết thì ném, chứ không trả
+   * về null. Ném ở đây là ném xuyên qua `sendResponse`, nên bên gọi nhận
+   * `undefined` và đọc thành "đã nhảy rồi": clipboard có nội dung, người dùng
+   * đứng nguyên tại chỗ, và không một dòng nào nói cho họ biết.
+   */
+  try {
+    await chrome.tabs.update(tab.id, { active: true });
+    if (tab.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
+  } catch (_) {
+    return { jumped: false, why: 'tab-gone' };
+  }
+
+  // `noted` được trả lên để bên gọi biết bản tổng kết có thật sự tới nơi không.
+  // Nhảy được nghĩa là tab này thành tab nền, nên thông báo hệ thống là đường
+  // duy nhất còn lại; nó câm thì bên gọi phải tự nói bằng toast của mình.
+  const noted = summary ? await note('Đã copy, Ctrl+V vào Thêm nguồn', summary) : true;
+  return { jumped: true, tabId: tab.id, noted };
 }
 
 /* -------------------------------------------------------------------- */
@@ -690,7 +709,28 @@ async function filterBundle(urls) {
  * Sổ trước khi copy xong là để Sổ nói dối. Lần sau nó sẽ lọc mất đúng những link
  * chưa bao giờ tới clipboard, và người dùng không có cách nào biết.
  */
-async function recordCopied(urls, from) {
+/**
+ * Hàng nối tiếp cho MỌI lượt ghi Sổ.
+ *
+ * `getCopiedLog()` → sửa mảng → `storage.local.set()` là đọc-sửa-ghi, và service
+ * worker phục vụ nhiều tab cùng lúc: hai tab bấm copy sát nhau thì cả hai đọc
+ * cùng một bản Sổ, mỗi bên thêm phần của mình vào bản chụp riêng, rồi bên ghi
+ * sau đè mất bên ghi trước. Sổ mất dòng mà không ai báo lỗi — và Sổ mất dòng
+ * nghĩa là lượt sau copy trùng đúng những link vừa mất.
+ *
+ * `chrome.storage` không có giao dịch, nên chỗ nối tiếp phải nằm ở đây.
+ */
+let copiedChain = Promise.resolve();
+
+function recordCopied(urls, from) {
+  const run = copiedChain.then(() => writeCopied(urls, from));
+  // Giữ dây sống kể cả khi một mắt xích ném — nếu không thì lượt hỏng đầu tiên
+  // biến `copiedChain` thành promise bị từ chối vĩnh viễn, và mọi lượt sau ném theo.
+  copiedChain = run.catch(() => {});
+  return run;
+}
+
+async function writeCopied(urls, from) {
   const log = await getCopiedLog();
   const known = new Set(log.map((row) => row.key).filter(Boolean));
   const at = Date.now();
@@ -1375,16 +1415,35 @@ async function runQueue() {
   return runner;
 }
 
+/**
+ * Bắn một thông báo hệ thống. Trả về `true` khi có cơ sở tin là nó tới nơi.
+ *
+ * Giá trị trả về mới là phần đáng kể: có chỗ trong luồng (cú nhảy sang notebook)
+ * mà thông báo này là đường DUY NHẤT còn lại để nói với người dùng, vì tab họ vừa
+ * bấm đã thành tab nền. Nuốt hết lỗi và không nói gì là để bản tổng kết bốc hơi.
+ *
+ * `getPermissionLevel()` là tín hiệu tốt nhất có sẵn, KHÔNG phải bằng chứng đủ:
+ * doc chính thức của Chrome nói nó trả về `"granted"` | `"denied"` cho quyền của
+ * extension, nhưng KHÔNG nói `create()` có ném hay không khi thông báo bị tắt ở
+ * tầng hệ điều hành. Nên `true` ở đây đọc là "không có dấu hiệu bị chặn", chứ
+ * không phải "người dùng đã nhìn thấy".
+ */
 async function note(title, message) {
   try {
+    if (chrome.notifications.getPermissionLevel) {
+      const level = await chrome.notifications.getPermissionLevel();
+      if (level !== 'granted') return false;
+    }
     await chrome.notifications.create({
       type: 'basic',
       iconUrl: chrome.runtime.getURL('icons/icon128.png'),
       title: `YouTube → NotebookLM — ${title}`,
       message: String(message).slice(0, 300),
     });
+    return true;
   } catch (_) {
-    /* thông báo không quan trọng tới mức làm hỏng luồng */
+    // Không làm hỏng luồng — nhưng cũng không giả vờ là đã báo được.
+    return false;
   }
 }
 

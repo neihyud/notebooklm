@@ -137,8 +137,17 @@
 
   async function copy() {
     const withTs = ensure().querySelector('.nblm-panel__ts').checked;
+    const text = F.toTxt(current.segments, { timestamps: withTs });
+    // Bó rỗng KHÔNG chạm clipboard, cùng một luật với Đường trao tay:
+    // `writeText('')` xoá trắng thứ người dùng đang giữ, và họ mất nó để đổi lấy
+    // một dòng "đã sao chép". `toTxt` trả về chuỗi rỗng khi transcript chưa tải
+    // xong hoặc bộ lọc cắt sạch đoạn — cả hai đều bấm được cái nút này.
+    if (!text) {
+      status('Chưa có gì để sao chép — transcript đang rỗng.', 'warn');
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(F.toTxt(current.segments, { timestamps: withTs }));
+      await navigator.clipboard.writeText(text);
       status('Đã sao chép transcript vào clipboard.', 'ok');
     } catch (e) {
       status(`Không sao chép được: ${(e && e.message) || e}`, 'error');

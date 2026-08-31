@@ -66,13 +66,19 @@
     if (!toastEl) {
       toastEl = document.createElement('div');
       toastEl.className = 'nblm-toast';
-      document.documentElement.appendChild(toastEl);
+      overlayRoot().appendChild(toastEl);
     }
     toastEl.textContent = message;
     toastEl.dataset.kind = kind;
     toastEl.classList.add('nblm-toast--show');
+    // Toast vừa đổi nội dung là vừa đổi chiều cao; thẻ *Copy lại* đứng trên nó
+    // phải đo lại, nếu không thì lượt sau nó nằm đè lên đúng bản tổng kết này.
+    layoutRecopy();
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('nblm-toast--show'), 4200);
+    toastTimer = setTimeout(() => {
+      toastEl.classList.remove('nblm-toast--show');
+      layoutRecopy();
+    }, 4200);
   }
 
   /* ------------------------------------------------------------------ */
@@ -108,24 +114,41 @@
   let lastDroppedFrom = '';
 
   /**
+   * Khuôn dạng videoId của YouTube. Cửa 1 ép nó vì mọi thứ dưới đây giả định
+   * `canonicalUrl(id)` rồi `videoIdFrom(...)` trả lại đúng `id` — mà `videoIdFrom`
+   * mới là bên áp luật này, `canonicalUrl` thì chỉ nội suy chuỗi. Không ép ở đây
+   * thì một id lệch khuôn sẽ rơi ra khỏi mọi rổ ở cửa 2 mà không ai đếm.
+   */
+  const VIDEO_ID = /^[\w-]{11}$/;
+
+  /**
    * Cửa 1 — huy hiệu trên thẻ video. Miễn phí, CHỈ ĐƯỢC LOẠI.
    *
    * Khử trùng lặp theo `videoId` ngay tại đây: một playlist có thể chứa cùng một
    * video hai lần, và không gộp thì cửa 3 trả tiền hai lượt hỏi cho cùng một câu.
+   *
+   * `invalid` được trả RIÊNG chứ không `continue` im lặng: bỏ một mục mà không
+   * đếm là đúng lỗi `sidebar.js` đã dính hai lần.
    */
   function badgeGate(candidates) {
     const restricted = [];
     const asking = [];
+    const invalid = [];
     const seen = new Set();
 
     for (const c of candidates) {
-      if (!c || !c.videoId || seen.has(c.videoId)) continue;
+      if (!c) continue;
+      if (!c.videoId || !VIDEO_ID.test(c.videoId)) {
+        if (c.videoId) invalid.push(c);
+        continue;
+      }
+      if (seen.has(c.videoId)) continue;
       seen.add(c.videoId);
       const privacy = c.privacy || c.privacyHint;
       if (badgeRejects({ privacy, accessible: c.accessible })) restricted.push(c);
       else asking.push(c);
     }
-    return { restricted, asking };
+    return { restricted, asking, invalid };
   }
 
   /**
@@ -166,10 +189,27 @@
     for (const { c, meta } of asked) {
       const { verdict } = bundleVerdict(c.videoId, meta);
       if (verdict === BUNDLE.ACCEPT) urls.push(canonicalUrl(c.videoId));
-      else if (verdict === BUNDLE.RESTRICTED) restricted.push(c);
-      else unknown.push(c);
+      else if (verdict === BUNDLE.RESTRICTED) restricted.push(withMeta(c, meta));
+      else unknown.push(withMeta(c, meta));
     }
     return { urls, restricted, unknown, tripped };
+  }
+
+  /**
+   * Rót `meta` cửa 3 vừa mua được vào ứng viên trước khi nó rơi xuống Hàng đợi.
+   *
+   * Ứng viên đi vào cửa 3 có thể chỉ mang mỗi `videoId` — nhánh *Copy lại* dựng
+   * chúng từ URL. Cửa 3 vừa trả tiền để biết tiêu đề và mức riêng tư thật; vứt
+   * đi rồi để Hàng đợi hiện một dòng trống là trả tiền hai lần cho cùng câu hỏi.
+   * Thứ ứng viên tự khai vẫn thắng: huy hiệu trên thẻ là quan sát tại chỗ.
+   */
+  function withMeta(c, meta) {
+    if (!meta) return c;
+    return {
+      ...c,
+      title: c.title || meta.title || '',
+      privacy: c.privacy || c.privacyHint || meta.privacy || PRIVACY.UNKNOWN,
+    };
   }
 
   /**
@@ -202,38 +242,65 @@
 
     // Cửa 2 — khử trùng. Service worker là chỗ duy nhất cầm luật khoá.
     let toAsk = gate1.asking;
-    let dropped = [];
+    let dropped = [];   // why === 'copied' — nút *Copy lại* đi tới được
+    let queued = [];    // why === 'queued'  — KHÔNG, xem ghi chú dưới đây
+    let lost = 0;       // url cửa 2 trả về mà không khớp ứng viên nào
     if (gate1.asking.length && !skipDedupe) {
-      const res = await send(MSG.BUNDLE_FILTER, { urls: gate1.asking.map((c) => canonicalUrl(c.videoId)) });
+      // Giữ ứng viên theo ĐÚNG chuỗi URL đã gửi đi, thay vì `videoIdFrom` chuỗi
+      // trả về rồi dò lại. Vòng `canonicalUrl` → `videoIdFrom` là hai phép chuẩn
+      // hoá của hai bên khác nhau; lệch một ký tự là ứng viên rơi khỏi mọi rổ mà
+      // không ai đếm — đúng cái bẫy `gate1.invalid` sinh ra để chặn.
+      const byUrl = new Map(gate1.asking.map((c) => [canonicalUrl(c.videoId), c]));
+      const res = await send(MSG.BUNDLE_FILTER, { urls: [...byUrl.keys()] });
       if (res && res.error) {
-        toast(`Không tra được Sổ đã copy: ${res.error}`, 'error');
-        return { copied: 0, error: res.error };
+        toast(`Không tra được Sổ đã copy: ${res.error} — chưa copy gì cả.`, 'error');
+        // Cửa 1 đã kết luận xong phần của nó rồi. Bỏ luôn cả nhóm này chỉ vì cửa
+        // 2 hỏng là vứt một kết luận không hề phụ thuộc vào cửa 2.
+        if (gate1.restricted.length) await enqueueLeftover(gate1.restricted);
+        return { copied: 0, error: res.error, restricted: gate1.restricted.length };
       }
-      const keepIds = new Set(((res && res.keep) || []).map((u) => videoIdFrom(u)).filter(Boolean));
-      dropped = (res && res.dropped) || [];
-      toAsk = gate1.asking.filter((c) => keepIds.has(c.videoId));
+      const out = ((res && res.dropped) || []).filter((d) => d && d.url);
+      dropped = out.filter((d) => d.why === 'copied');
+      queued = out.filter((d) => d.why !== 'copied');
+
+      const kept = (res && res.keep) || [];
+      toAsk = kept.map((u) => byUrl.get(u)).filter(Boolean);
+      // Một toast riêng ở đây bị chính bản tổng kết đè mất vài nhịp sau — cùng
+      // một phần tử toast. Con số đi CHUNG một câu thì mới đọc được.
+      lost = kept.length - toAsk.length;
     }
 
     // Cửa 3 — chỉ chạy trên thứ cửa 2 cho qua.
     const { urls: keep, restricted: askedOut, unknown, tripped } = await askGate(toAsk);
-    const restricted = gate1.restricted.concat(askedOut);
+    const restricted = gate1.restricted.concat(gate1.invalid, askedOut);
     const leftover = restricted.concat(unknown);
 
-    showRecopy(dropped.map((d) => d.url).filter(Boolean), label);
+    // Chỉ nhánh ĐI QUA cửa 2 mới được động vào tấm thẻ *Copy lại*. Nhánh
+    // `skipDedupe` chính là cú bấm nút đó; để nó tự dựng lại thẻ từ `dropped`
+    // rỗng của mình là để nút tự xoá mình ngay giữa lượt chạy nó vừa mở.
+    if (!skipDedupe) {
+      if (dropped.length) showRecopy(dropped.map((d) => d.url), label);
+      else hideRecopy();
+    }
 
     if (!keep.length) {
       const why = [];
       if (restricted.length) why.push(`${restricted.length} video private/unlisted`);
       if (unknown.length) why.push(`${unknown.length} video không hỏi được`);
-      if (dropped.length) why.push(`${dropped.length} link đã có trong Sổ hoặc Hàng đợi`);
+      if (dropped.length) why.push(`${dropped.length} link đã có trong Sổ đã copy`);
+      if (queued.length) why.push(`${queued.length} link đang nằm trong Hàng đợi`);
+      if (lost > 0) why.push(`${lost} link quay về không khớp ứng viên nào`);
       toast(
         why.length
-          ? `Không link nào vào được Bó: ${why.join(' · ')}.${dropped.length ? ' Dùng nút "Copy lại" ở góc màn hình để copy cả những cái đã có.' : ' Tất cả đã vào Hàng đợi.'}`
+          ? `Không link nào vào được Bó: ${why.join(' · ')}.${recopyHint(dropped, queued)}`
           : 'Không có video nào để copy.',
         'warn'
       );
       if (leftover.length) await enqueueLeftover(leftover);
-      return { copied: 0, restricted: restricted.length, unknown: unknown.length, dropped: dropped.length };
+      return {
+        copied: 0, restricted: restricted.length, unknown: unknown.length,
+        dropped: dropped.length, queued: queued.length,
+      };
     }
 
     try {
@@ -253,7 +320,11 @@
 
     // Ghi Sổ SAU khi clipboard đã nhận thật — ghi trước là để Sổ nói dối, và lần
     // sau nó lọc mất đúng những link chưa bao giờ tới clipboard.
-    await send(MSG.BUNDLE_COPIED, { urls: keep, from: label });
+    //
+    // Kết quả phải được ĐỌC. Sổ hỏng là hỏng câm: lượt này vẫn xong, chỉ lượt
+    // sau mới copy trùng, và lúc đó không còn gì trỏ về đây nữa.
+    const book = await send(MSG.BUNDLE_COPIED, { urls: keep, from: label });
+    const bookErr = (book && book.error) || (book ? '' : 'không có hồi âm');
 
     /*
      * Bản tổng kết phải dựng TRƯỚC cú nhảy, vì cú nhảy là thứ quyết định nó được
@@ -267,13 +338,21 @@
     if (restricted.length) parts.push(`${restricted.length} private/unlisted → Hàng đợi`);
     if (unknown.length) parts.push(`${unknown.length} không hỏi được → Hàng đợi`);
     if (dropped.length) parts.push(`${dropped.length} bỏ vì đã có trong Sổ — nút "Copy lại" ở góc màn hình`);
+    if (queued.length) parts.push(`${queued.length} đang nằm trong Hàng đợi — mở popup để xử lý`);
+    if (lost > 0) parts.push(`${lost} link quay về không khớp ứng viên nào — đã bỏ qua`);
     if (tripped) parts.push('đã dừng hỏi vì YouTube liên tục từ chối');
+    if (bookErr) parts.push(`chưa ghi được Sổ đã copy (${bookErr}) — lần sau có thể copy trùng`);
 
     const jump = await send(MSG.JUMP_NOTEBOOK, { summary: parts.join(' · ') });
     if (!jump || !jump.jumped) {
       // Im lặng ở đây là im lặng sai: clipboard đã có nội dung mà người dùng không
       // biết mang đi đâu, và không có cú nhảy nào để tự nói hộ.
-      parts.push('chưa đặt notebook đích — mở notebook rồi Ctrl+V');
+      parts.push(jumpWhy(jump));
+      toast(parts.join(' · '), 'warn');
+    } else if (bookErr || jump.noted === false) {
+      // Nhảy được thì bản tổng kết đi bằng thông báo hệ thống — trừ khi thông báo
+      // không tới nơi (`noted === false`), hoặc trong đó có tin xấu về Sổ. Cả hai
+      // ca đều phải để lại vết trên chính tab này, vì tab kia không mang chúng.
       toast(parts.join(' · '), 'warn');
     }
 
@@ -283,8 +362,33 @@
       restricted: restricted.length,
       unknown: unknown.length,
       dropped: dropped.length,
+      queued: queued.length,
       tripped,
     };
+  }
+
+  /** Vì sao không đứng trước ô "Thêm nguồn" — nói ra đường thủ công tương ứng. */
+  function jumpWhy(jump) {
+    const why = jump && jump.why;
+    if (why === 'tab-gone') return 'tab notebook đã đóng — mở lại rồi Ctrl+V';
+    if (why === 'no-target') return 'chưa đặt notebook đích — mở notebook rồi Ctrl+V';
+    return 'không sang được notebook — mở notebook rồi Ctrl+V';
+  }
+
+  /**
+   * Câu chỉ đường sau một lượt không copy được gì.
+   *
+   * *Copy lại* chỉ nhận thứ bị loại vì ĐÃ COPY. Thứ bị loại vì đang nằm trong
+   * Hàng đợi thì hầu hết vào đó do chính cửa 3 đẩy xuống, nên đưa chúng ngược
+   * lên cửa 3 là hỏi lại một câu vừa bị trả lời "không" — mất tiền, và cái nút
+   * hứa một việc nó không làm được.
+   */
+  function recopyHint(dropped, queued) {
+    const say = [];
+    if (dropped.length) say.push('Dùng nút "Copy lại" ở góc màn hình để copy cả những cái đã có trong Sổ.');
+    if (queued.length) say.push('Phần đang nằm trong Hàng đợi thì mở popup để xử lý.');
+    if (!say.length) say.push('Tất cả đã vào Hàng đợi.');
+    return ` ${say.join(' ')}`;
   }
 
   /**
@@ -301,28 +405,55 @@
    * đó lúc họ quay lại, và chỉ biến mất khi họ bấm.
    */
   let recopyEl = null;
+
+  /**
+   * Số thế hệ của tấm thẻ. Tăng mỗi lần thẻ được dựng lại hoặc bị gỡ.
+   *
+   * Nó tồn tại vì `onRecopyClick` `await` một lượt `handOff` dài, và trong lúc
+   * chờ, người dùng vẫn bấm được *Copy link công khai* ở chỗ khác — lượt đó có
+   * `dropped` của riêng nó và có quyền thay thẻ. Cú `finally` của lượt cũ không
+   * được phép dựng lại danh sách đã chết đè lên danh sách đang sống; so thế hệ
+   * là cách duy nhất nó biết mình đã hết lượt.
+   */
+  let recopyGen = 0;
+
+  /**
+   * Dựng thẻ. KHÔNG bao giờ tự gỡ — danh sách rỗng là không có gì để nói, không
+   * phải mệnh lệnh xoá thứ đang hiện. Chỉ `hideRecopy` mới được gỡ.
+   */
   function showRecopy(urls, from) {
-    lastDropped = Array.isArray(urls) ? urls : [];
+    const list = (Array.isArray(urls) ? urls : []).filter(Boolean);
+    if (!list.length) return;
+
+    lastDropped = list;
     lastDroppedFrom = from || '';
-    if (!lastDropped.length) return hideRecopy();
+    recopyGen++;
 
     if (!recopyEl) {
       recopyEl = document.createElement('div');
       recopyEl.id = 'nblm-recopy';
       recopyEl.className = 'nblm-recopy';
-      document.documentElement.appendChild(recopyEl);
+      // Thẻ báo một việc vừa xảy ra mà không ai yêu cầu, nên `status`/`polite`:
+      // đọc nốt câu đang đọc rồi mới nói, đừng cắt ngang.
+      recopyEl.setAttribute('role', 'status');
+      recopyEl.setAttribute('aria-live', 'polite');
+      overlayRoot().appendChild(recopyEl);
     }
 
     const text = document.createElement('span');
     text.className = 'nblm-recopy__text';
-    text.textContent = `${lastDropped.length} link đã có trong Sổ hoặc Hàng đợi`;
+    // Kèm nguồn: thẻ sống qua cả cú chuyển trang, nên "12 link" không nói được
+    // 12 link CỦA CÁI GÌ khi người dùng đã sang playlist khác.
+    text.textContent = lastDroppedFrom
+      ? `${lastDropped.length} link từ "${short(lastDroppedFrom)}" đã có trong Sổ đã copy`
+      : `${lastDropped.length} link đã có trong Sổ đã copy`;
 
     const go = document.createElement('button');
     go.type = 'button';
     go.className = 'nblm-recopy__go';
     go.dataset.act = 'recopy';
     go.textContent = `Copy lại ${lastDropped.length} link`;
-    go.title = 'Copy cả những link đã có trong Sổ đã copy hoặc Hàng đợi';
+    go.title = 'Copy cả những link đã có trong Sổ đã copy';
     go.addEventListener('click', onRecopyClick);
 
     const x = document.createElement('button');
@@ -331,42 +462,95 @@
     x.dataset.act = 'dismiss';
     x.textContent = '×';
     x.title = 'Bỏ qua';
+    // `×` là một ký tự nhân, không phải một cái tên. Trình đọc màn hình đọc nó
+    // đúng như thế nếu không có nhãn.
+    x.setAttribute('aria-label', 'Bỏ qua thẻ Copy lại');
     x.addEventListener('click', hideRecopy);
 
     recopyEl.replaceChildren(text, go, x);
+    layoutRecopy();
   }
 
   function hideRecopy() {
     lastDropped = [];
     lastDroppedFrom = '';
+    recopyGen++;
     if (recopyEl) {
       recopyEl.remove();
       recopyEl = null;
     }
   }
 
+  /** Cắt nguồn cho vừa một dòng — tiêu đề playlist của YouTube dài tuỳ ý. */
+  function short(s, max = 42) {
+    const t = String(s || '').trim();
+    return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+  }
+
   async function onRecopyClick(event) {
     const el = event.currentTarget;
     if (el.disabled) return;
-    // Chụp lại TRƯỚC khi `handOff` gọi `showRecopy` và ghi đè `lastDropped`.
+    // Chụp lại TRƯỚC khi bất cứ ai ghi đè `lastDropped`.
     const urls = lastDropped.slice();
     const from = lastDroppedFrom;
     if (!urls.length) return hideRecopy();
 
+    const gen = recopyGen;
     el.disabled = true;
     el.textContent = 'Đang hỏi…';
+
+    let res = null;
     try {
-      await handOff(
+      res = await handOff(
         urls.map((u) => ({ videoId: videoIdFrom(u) })).filter((c) => c.videoId),
         { verb: 'Đã copy lại', from, skipDedupe: true }
       );
     } finally {
-      // Lượt bình thường: `handOff` đã gọi `showRecopy([])` nên phần tử tự gỡ.
-      // Còn sống nghĩa là lượt này ném giữa chừng — dựng lại nguyên trạng, đừng
-      // bỏ một cái nút "Đang hỏi…" đứng đó vĩnh viễn.
-      if (recopyEl && recopyEl.contains(el)) showRecopy(urls, from);
+      // Nhánh `skipDedupe` không động vào thẻ, nên số phận của thẻ là việc của
+      // đúng chỗ này. Ba ca, và ca giữa mới là ca hay bị bỏ quên:
+      //   - lượt này đã hết thời (`gen` cũ) → không đụng vào thẻ của lượt khác
+      //   - copy được hết → gỡ thẻ
+      //   - copy được MỘT PHẦN, hoặc ném giữa chừng → dựng lại đúng phần còn nợ
+      if (recopyGen === gen) {
+        if (res && res.copied) hideRecopy();
+        else showRecopy(urls, from);
+      }
     }
   }
+
+  /**
+   * Đặt thẻ ngay trên toast, đo theo chiều cao THẬT của toast.
+   *
+   * Khoảng cách cứng không làm được việc này: toast mang bản tổng kết nhiều vế
+   * ("12 private/unlisted → Hàng đợi · 3 không hỏi được…") nên nó cao hai, ba,
+   * bốn dòng tuỳ lượt. Một con số chọn cho hai dòng thì bốn dòng là chồng lên
+   * nhau, và thứ bị che là cái nút.
+   */
+  function layoutRecopy() {
+    if (!recopyEl) return;
+    const up = toastEl && toastEl.isConnected && toastEl.classList.contains('nblm-toast--show');
+    const h = up && toastEl.getBoundingClientRect ? toastEl.getBoundingClientRect().height : 0;
+    // 24px là mép dưới của toast trong overlay.css; 12px là khe giữa hai thẻ.
+    // Toast tắt rồi thì thẻ tụt xuống chỗ của nó — không có gì để tránh nữa.
+    recopyEl.style.bottom = `${Math.round(h ? 24 + h + 12 : 24)}px`;
+  }
+
+  /**
+   * Chỗ treo overlay. Fullscreen dựng một tầng riêng: mọi thứ ngoài phần tử
+   * fullscreen đều không vẽ, kể cả `position: fixed` trên `<html>`. Phải treo
+   * vào chính phần tử đó thì thẻ mới còn nhìn thấy được.
+   */
+  function overlayRoot() {
+    return document.fullscreenElement || document.documentElement;
+  }
+
+  document.addEventListener('fullscreenchange', () => {
+    const root = overlayRoot();
+    for (const el of [toastEl, recopyEl]) {
+      if (el && el.isConnected && el.parentNode !== root) root.appendChild(el);
+    }
+    layoutRecopy();
+  });
 
   /** Xếp hàng phần bị loại, im lặng — người dùng đã đọc con số ở bản tổng kết rồi. */
   async function enqueueLeftover(items) {
