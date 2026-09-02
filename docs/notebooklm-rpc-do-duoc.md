@@ -1,5 +1,10 @@
 # Hình dạng batchexecute đo được từ một extension đang chạy thật
 
+> **Đọc `notebooklm-rpc-do-duoc-2.md` cùng file này.** Doc đó đọc thêm một extension thứ
+> hai, và khi đọc LẠI chính bản 1.5.4 dưới đây thì thấy phần quan trọng nhất doc này bỏ
+> sót: các hàm dựng payload ở đây **có tên gốc**, nên phân xử được ba chỗ doc này để treo
+> — `ozz5Z`, `slots.url`, và loại nguồn nào ứng với hình dạng `args` nào.
+
 - nguồn: extension `gcglcbfmophnppdlbhckfmfiofaajibm` ("Youtube Summary with AI", publisher
   ytuong.ai), bản **1.5.4**, tải từ Chrome Web Store và giải nén ngày 2026-08-24.
 - đây là **đặc tả giao thức đọc ra được**, không phải code chép về. Giao thức là của Google;

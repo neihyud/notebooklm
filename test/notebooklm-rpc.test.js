@@ -177,7 +177,19 @@ function decode(call) {
     ok(f.domCalls.length === 0, `RPC thành công thì KHÔNG được chạy thêm đường DOM, đã gọi: ${JSON.stringify(f.domCalls.map((c) => c.ten))}`);
   }
 
-  /* ---- URL thường và URL YouTube phải đi vào hai ô khác nhau ---- */
+  /*
+   * ---- Mỗi loại URL vào đúng ô mà bản mô tả khai ----
+   *
+   * Bản trước của khối này khẳng định `slots.url !== slots.youtubeUrl` —
+   * "hai ô URL phải là hai vị trí khác nhau, nếu không hai loại Nguồn nhập làm
+   * một". Đó là một GIẢ THUYẾT về giao thức của Google khoác áo assertion, và
+   * hai oracle độc lập đã bác nó: cả hai đặt URL đơn, YouTube hay không, vào
+   * cùng một ô (`docs/notebooklm-rpc-do-duoc-2.md`). Nên nó bị gỡ, không bị sửa
+   * cho xanh — thứ nó canh không tồn tại.
+   *
+   * Cái thay thế không ghim con số nào, và vẫn có răng ở CẢ HAI thế giới: hôm
+   * nay hai ô trùng nhau, ngày Google tách chúng ra thì assertion tự đổi vế.
+   */
   {
     const mk = async (url) => {
       const f = scene();
@@ -190,18 +202,54 @@ function decode(call) {
       return { d: decode(f.calls[0]), slots: f.R.config.slots, cfg: f.R.config };
     };
 
-    const web = await mk('https://example.com/bai-viet');
-    const yt = await mk('https://www.youtube.com/watch?v=abcdefghijk');
+    const WEB = 'https://example.com/bai-viet';
+    const YT = 'https://www.youtube.com/watch?v=abcdefghijk';
+    const web = await mk(WEB);
+    const yt = await mk(YT);
 
-    const oCoGiaTri = (params, slots, cfg) =>
-      Object.keys(slots).filter((k) => k !== 'kind' && specOf(params, cfg)[slots[k]] != null);
+    const oCua = (r, ten) => specOf(r.d.params, r.cfg)[r.slots[ten]];
 
-    ok(deepEq(oCoGiaTri(web.d.params, web.slots, web.cfg), ['url']), `URL thường chỉ được điền ô 'url', nhận: ${JSON.stringify(oCoGiaTri(web.d.params, web.slots, web.cfg))}`);
-    ok(deepEq(oCoGiaTri(yt.d.params, yt.slots, yt.cfg), ['youtubeUrl']), `URL YouTube chỉ được điền ô 'youtubeUrl', nhận: ${JSON.stringify(oCoGiaTri(yt.d.params, yt.slots, yt.cfg))}`);
-    ok(
-      web.slots.url !== web.slots.youtubeUrl,
-      'hai ô URL phải là hai vị trí khác nhau, nếu không hai loại Nguồn nhập làm một'
-    );
+    ok(deepEq(oCua(web, 'url'), [WEB]),
+      `URL thường phải tới đúng ô slots.url trỏ vào (${web.slots.url}), nhận: ${JSON.stringify(oCua(web, 'url'))}`);
+    ok(deepEq(oCua(yt, 'youtubeUrl'), [YT]),
+      `URL YouTube phải tới đúng ô slots.youtubeUrl trỏ vào (${yt.slots.youtubeUrl}), nhận: ${JSON.stringify(oCua(yt, 'youtubeUrl'))}`);
+
+    // Cặp CÒN nguy hiểm sau khi hai ô URL nhập làm một: URL rơi vào ô văn bản.
+    // Hoán vị `slots.url` với `slots.text` thì hai dòng này đỏ, và đó là cặp
+    // duy nhất trong nhóm này còn quan sát được.
+    ok(oCua(web, 'text') == null, 'nguồn URL thường KHÔNG được chạm ô văn bản');
+    ok(oCua(yt, 'text') == null, 'nguồn URL YouTube KHÔNG được chạm ô văn bản');
+  }
+
+  /* ---- hai ô URL trùng nhau phải là chủ ý, và phải có hệ quả kiểm được ---- */
+  {
+    // Cùng MỘT chuỗi url, ép qua hai `kind` khác nhau. `addUrlSource` tự rẽ theo
+    // `isYouTubeUrl` nên không gửi cùng một url qua cả hai nhánh được — gọi
+    // thẳng `tryRpc` mới quan sát được đúng thứ đang hỏi.
+    const URL_CHUNG = 'https://example.com/mot-duong-dan';
+    const mkKind = async (kind) => {
+      const f = scene({ plan: [(u, init) => {
+        const id = JSON.parse(new URLSearchParams(init.body).get('f.req'))[0][0][0];
+        return { status: 200, text: async () => envelope([wrb(id, OK_PAYLOAD)]) };
+      }] });
+      await f.R.tryRpc({ kind, url: URL_CHUNG });
+      return { params: decode(f.calls[0]).params, cfg: f.R.config };
+    };
+
+    const a = await mkKind('url');
+    const b = await mkKind('youtube');
+    const cungO = a.cfg.slots.url === a.cfg.slots.youtubeUrl;
+
+    if (cungO) {
+      ok(deepEq(a.params, b.params),
+        'hai ô URL trỏ cùng chỗ thì hai `kind` phải dựng ra payload GIỐNG HỆT nhau — ' +
+        'lệch nhau nghĩa là còn một chỗ phân biệt hai loại mà config không nói ra: ' +
+        `${JSON.stringify(a.params)} so với ${JSON.stringify(b.params)}`);
+    } else {
+      ok(!deepEq(a.params, b.params),
+        'hai ô URL trỏ khác chỗ thì hai `kind` PHẢI dựng ra payload khác nhau, ' +
+        'nếu không việc tách hai ô là vô nghĩa');
+    }
   }
 
   /* ---- hình dạng request: hai tầng JSON, và notebook id lấy từ URL ---- */

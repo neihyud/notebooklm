@@ -12,18 +12,21 @@
  * ────────────────────────────────────────────────────────────────────────
  * CÁI GÌ Ở ĐÂY LÀ GIẢ THUYẾT, CÁI GÌ KHÔNG
  *
- * Giả thuyết — TOÀN BỘ lấy từ tài liệu cộng đồng (`notebooklm-py`,
- * `notebooklm-mcp-cli`), CHƯA đo trên một request thật của owner:
+ * Giả thuyết — lấy từ tài liệu cộng đồng (`notebooklm-py`,
+ * `notebooklm-mcp-cli`) và từ hai extension đang bán đã giải nén đọc
+ * (`docs/notebooklm-rpc-do-duoc.md`, `-2.md`). CHƯA cái nào đo trên một request
+ * thật của owner:
  *
- *   - hai rpc id `ozz5Z`/`izAoDd` và thứ tự thử chúng;
+ *   - rpc id `izAoDd`;
  *   - đường `/_/LabsTailwindUi/data/batchexecute`;
  *   - việc notebook id phải nằm TRONG `args` chứ không chỉ ở query;
  *   - vị trí URL / cặp [tiêu đề, nội dung] / mã loại BÊN TRONG `spec`, và ô
  *     hằng số ở cuối `spec`;
  *   - hai khối hằng số ở đuôi `args` mà ta chép nguyên và KHÔNG biết nghĩa;
  *   - **cách nhóm `args`** — hai oracle bên thứ ba MÂU THUẪN nhau ở đúng chỗ
- *     này (4 ô/bọc đơn so với 3 ô/bọc đôi). Đây là giả thuyết lớn nhất, và là
- *     lý do `argsShape` là dữ liệu owner sửa được chứ không phải cấu trúc cứng.
+ *     này, và chỉ với nguồn VĂN BẢN (4 ô so với 3 ô). Đây là giả thuyết lớn
+ *     nhất, và là lý do `argsShape` là dữ liệu owner sửa được chứ không phải
+ *     cấu trúc cứng.
  *     Khác mọi giả thuyết trên: hình dạng sai KHÔNG dò được lúc chạy, vì nó cho
  *     frame rỗng → `unknown` → dừng hẳn, không phải `rpc-id-stale` → thử tiếp.
  *
@@ -62,31 +65,49 @@
      * nên không có nguy cơ ghi trùng. Vòng lặp dừng ngay khi một id cho kết quả
      * khác `not-sent`.
      *
-     * THỨ TỰ có chủ ý, và đây là chỗ dễ đặt ngược. Id KHÔNG tồn tại cho tài
-     * khoản này thì server không trả frame nào khớp → `rpc-id-stale` →
-     * `not-sent` → thử id kế tiếp: đó là ca ta xử lý được. Còn id có tồn tại mà
-     * từ chối thì rất có thể trả về một frame rỗng → `unknown` → DỪNG hẳn, và
-     * id sau không bao giờ tới lượt. Nên id nhiều khả năng đúng phải đứng trước.
+     * THỨ TỰ có chủ ý khi mảng có từ hai phần tử — owner dán thêm ứng viên thì
+     * gặp lại chuyện này. Id KHÔNG tồn tại cho tài khoản này thì server không
+     * trả frame nào khớp → `rpc-id-stale` → `not-sent` → thử id kế tiếp: đó là
+     * ca ta xử lý được. Còn id có tồn tại mà từ chối thì rất có thể trả về một
+     * frame rỗng → `unknown` → DỪNG hẳn, và id sau không bao giờ tới lượt. Nên
+     * id nhiều khả năng đúng phải đứng trước.
      *
-     * Bằng chứng mạnh nhất hiện có xếp `izAoDd` trước: một extension đang bán,
-     * build 04/2026, vẫn dùng nó (`docs/notebooklm-rpc-do-duoc.md`). `ozz5Z`
-     * chỉ có trong changelog của một thư viện — giữ lại làm ứng viên dự phòng
-     * chứ không cho đứng đầu.
+     * MẢNG một phần tử, và nó là một mảng vì owner thêm được ứng viên mới lên
+     * đầu từ trang Cài đặt khi Google xoay id — không phải vì ta đang giữ sẵn
+     * một ứng viên thứ hai.
+     *
+     * `ozz5Z` từng đứng ở ô thứ hai và đã bị GỠ (`docs/notebooklm-rpc-do-duoc-2.md`).
+     * Lý do giữ nó — "chỉ có trong changelog của một thư viện, để làm dự phòng"
+     * — bị hai oracle phản chứng: bảng 40 rpc id CÓ TÊN của một extension đang
+     * bán không có nó, còn một extension khác chú nó là lệnh SINH AUDIO OVERVIEW.
+     *
+     * Và đó cũng phá luôn lập luận an toàn ở đầu comment này. "Id sai thì server
+     * không chạy gì cả" đúng với id KHÔNG TỒN TẠI. Với một id có tồn tại và làm
+     * việc khác, thứ ta gửi là một lệnh thật kèm tham số rác: kết cục hợp lý
+     * nhất vẫn là bị từ chối, nhưng "hợp lý nhất" không phải "chắc chắn", và cái
+     * đem ra cược là một tác vụ sinh Audio Overview trên notebook thật của owner.
+     *
+     * `izAoDd` thì được CẢ HAI oracle xác nhận, một trong hai gọi thẳng tên nó
+     * là `ADD_SOURCES`.
      */
-    addSourceIds: ['izAoDd', 'ozz5Z'],
+    addSourceIds: ['izAoDd'],
     /**
      * CÁCH NHÓM `args`, dưới dạng dữ liệu chứ không phải cấu trúc cứng.
      *
-     * Hai oracle bên thứ ba mâu thuẫn nhau ở đúng chỗ này, và KHÔNG oracle nào
-     * là một request thật của owner:
+     * Ba oracle, KHÔNG cái nào là một request thật của owner. Chúng đồng ý với
+     * nhau nhiều hơn là bản trước tưởng — chỗ mâu thuẫn duy nhất còn lại là
+     * khối thứ tư của nguồn VĂN BẢN:
      *
-     *   - extension "Youtube Summary with AI" 1.5.4 (bán trên Web Store, build
-     *     04/2026, `docs/notebooklm-rpc-do-duoc.md`): 4 ô, nguồn bọc ĐƠN —
-     *     `[ [spec], notebookId, [2], [1,null×9,[1]] ]`. Đây là mặc định.
-     *   - `notebooklm-py` (tài liệu cộng đồng): 3 ô, nguồn bọc ĐÔI —
-     *     `[ [[spec]], notebookId, [2,null,null,[1,null×9,[1]]] ]`. Dán vào
-     *     `rpcOverrides.argsShape` để đổi sang biến thể này:
-     *     `[{dat:'sources',boc:2},{dat:'notebookId'},{hang:[2,null,null,[1,null,null,null,null,null,null,null,null,null,[1]]]}]`
+     *   - extension "Youtube Summary with AI" 1.5.4 (`-do-duoc.md`): 4 ô, bọc
+     *     ĐƠN, cho CẢ BA loại nguồn — văn bản, URL, YouTube. Đây là mặc định.
+     *   - extension "Sourclip" 1.8.0 (`-do-duoc-2.md`): 4 ô bọc ĐƠN cho URL
+     *     (khớp), nhưng **3 ô** cho văn bản — không có khối thứ tư. Dán vào
+     *     `rpcOverrides.argsShape` để thử biến thể đó:
+     *     `[{dat:'sources',boc:1},{dat:'notebookId'},{hang:[2]}]`
+     *   - `notebooklm-py` (tài liệu cộng đồng): 3 ô, nguồn bọc ĐÔI. Bọc đôi giờ
+     *     KHÔNG còn oracle nào đỡ — cả hai extension đang chạy thật đều bọc đơn.
+     *
+     * Giữ mặc định 4 ô là chọn bên có hai phiếu, không phải chọn bên đọc sau.
      *
      * Vì sao là dữ liệu chứ không phải `if`: hình dạng sai thì server trả frame
      * rỗng → `unknown` → DỪNG hẳn, nên KHÔNG dò được lúc chạy như dò rpc id. Ta
@@ -100,8 +121,29 @@
       { hang: [2] },
       { hang: [1, null, null, null, null, null, null, null, null, null, [1]] },
     ],
-    /** Vị trí trong `spec`, tức `params[0][0][0]`. */
-    slots: { text: 1, url: 2, kind: 3, youtubeUrl: 7 },
+    /**
+     * Vị trí trong `spec`, tức `params[0][0][0]`.
+     *
+     * `url` và `youtubeUrl` TRỎ CÙNG MỘT Ô, và đó là kết quả đo chứ không phải
+     * sơ suất. Hai oracle độc lập — `addWebSource`/`addSource` của một extension
+     * đang bán, và đường URL của một extension khác — đều đặt URL đơn, YouTube
+     * hay không, vào ô 7. Không oracle nào dùng ô 2 cho nguồn ĐƠN.
+     *
+     * Ô 2 có thật, nhưng thuộc hình dạng khác: nó chỉ xuất hiện ở đường NHIỀU
+     * URL một request (`addUrlsToSource`). Con số 2 mà bản trước để ở đây gần
+     * như chắc chắn là đọc từ đúng chỗ đó rồi đặt nhầm ngữ cảnh.
+     * Xem `docs/notebooklm-rpc-do-duoc-2.md`.
+     *
+     * Hệ quả phải nói ra thay vì để người sau tự phát hiện: trên đường RPC,
+     * `kind:'url'` và `kind:'youtube'` dựng ra payload GIỐNG HỆT nhau (cùng ô,
+     * và cả hai `kindCodes` đều `null`). Phân biệt hai loại vẫn phải giữ vì
+     * đường DOM cần nó để chọn chip "Trang web" hay chip YouTube — nhưng ở tầng
+     * payload thì nó là phân biệt không có hiệu lực.
+     *
+     * Hai khoá vẫn để riêng chứ không gộp làm một: owner ghi đè được từng cái,
+     * và ngày Google tách lại làm hai ô thì chỗ sửa là dữ liệu, không phải code.
+     */
+    slots: { text: 1, url: 7, kind: 3, youtubeUrl: 7 },
     /** `spec` là mảng 11 phần tử, phần thừa để `null`. */
     specLength: 11,
     /**

@@ -143,8 +143,14 @@ So sánh alternatives + ghi rõ điều kiện đảo ngược trước khi vi�
   nhầm thì hỏng thật. Ở acceptance, hỏi peer: *hoán vị cặp này thì test nào chết?*
   1. `addTextSource(title, text)` — hai string. Hoán vị → mỗi Nguồn có tiêu đề là cả bản
      transcript. Suite không chạm hàm này.
-  2. Trong payload RPC sắp viết: URL sources đặt url ở `params[0][2]`, YouTube đặt ở `params[0][7]`
-     — cùng kiểu, cùng giá trị. Hoán vị → sai loại Nguồn mà request vẫn 200.
+  2. Trong payload RPC: URL sources đặt url ở `params[0][2]`, YouTube đặt ở `params[0][7]`.
+     **KHÔNG CÒN LÀ CẶP** (2026-09-02) — và cách nó đóng lại đáng giữ hơn kết quả.
+     Hai oracle độc lập (`docs/notebooklm-rpc-do-duoc-2.md`) cho thấy cả hai loại URL đơn đều đi
+     vào ô **7**; ô 2 chỉ thuộc đường *nhiều URL một request*. `slots.url` đã đổi 2 → 7, nên hai
+     vế giờ trỏ **cùng một ô** và hoán vị chúng là no-op — đo thật: mutation đổi nhánh YouTube
+     sang ghi bằng `slots.url` cho **0 đỏ**, vì nó là mutation tương đương chứ không phải chỗ hở.
+     Đây là *sự thật về giao thức*, cùng loại với cặp #8 bên dưới, không phải thiếu test.
+     Cặp thay thế, còn nguy hiểm và có lưới: `slots.url ↔ slots.text` — hoán vị cho **2 đỏ**.
   3. `{ ok, error, limit }` trả từ automation (`src/notebooklm/content.js:78`) — `error` và `limit`
      quyết định "dừng cả lượt chạy" hay "bỏ qua mục này".
   4. `MSG.NLM_ADD_URL` vs `MSG.NLM_ADD_TEXT` — **ĐÃ CÓ LƯỚI Ở CẢ HAI TẦNG** (2026-08-23).
@@ -157,7 +163,10 @@ So sánh alternatives + ghi rõ điều kiện đảo ngược trước khi vi�
   5. **Một hình dạng hở mà nghi thức hoán vị KHÔNG đóng được** (đo trên ticket 001-RPC, 2026-08-24).
      Khi cả hai vế của cặp đều là *bản đồ ngoại sinh của chính ta* — `paramSlots.sources ↔
      notebookId` (0↔1), `slots.url ↔ slots.youtubeUrl` (2↔7) — mọi assertion buộc phải đọc lại
-     chính bản đồ vừa bị hoán vị, nên hoán vị không sinh ra đỏ. Ghim con số vào test chỉ là chép
+     chính bản đồ vừa bị hoán vị, nên hoán vị không sinh ra đỏ.
+     **Ví dụ thứ hai đã hết hiệu lực 2026-09-02** (xem cặp #2), nhưng hình dạng thì không, và
+     đơn thuốc kê ở đoạn dưới đã được nghiệm thu bằng chính ca đó: thứ đóng được nó là *một
+     oracle độc lập nói con số đó đúng*, không phải thêm assertion. Lần này có hai. Ghim con số vào test chỉ là chép
      tay hằng số khoác áo test, và ràng buộc "không ghim id" cấm đúng việc đó.
      Ở acceptance **đừng đòi peer bịt bằng test**. Đòi hai thứ khác: một oracle độc lập nói con số
      đó đúng, và một cơ chế phát hiện lúc chạy khi nó sai. "Không đóng được bằng test" là câu trả
