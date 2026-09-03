@@ -68,8 +68,20 @@ Ghi thêm cho rõ: đổi định nghĩa `done` nằm trong mục **Đề xuất
 
 ### Bước 1 — đo, không phải viết. Đây là toàn bộ phạm vi được giao lần này.
 
-Mở rộng `tools/probe-notebooklm.mjs` để một lượt chạy của owner trên **notebook nháp** trả lời
-đúng ba câu, theo thứ tự:
+> **Cập nhật 2026-09-03 (`05b01a3`): công cụ đã có, và đường đo đã đổi.**
+> `tools/probe-notebooklm.mjs` giờ bắt luôn hình dạng batch — nhưng **thụ động**: bước 5 trong
+> hướng dẫn của nó bảo owner dán hai URL vào chính hộp thoại "Trang web" của NotebookLM, rồi
+> script nghe cái mà giao diện Google gửi đi.
+>
+> Điều đó **thay thế** câu 1 và câu 2 bên dưới, và nó tốt hơn hẳn: hai câu ấy vốn đòi ta **tự
+> gửi** một payload đoán mò lên notebook của owner để xem ô url ở 7 hay ở 2. Quan sát bản đúng
+> thì không phải đoán, và không phải ghi gì cả.
+>
+> Nếu hộp thoại **chỉ nhận một URL**, script in ra đúng điều đó — và đó cũng là một câu trả lời:
+> giao diện không batch, hình dạng batch chỉ còn hai oracle mâu thuẫn đỡ, và Bước 2 phải chọn
+> đường **(C)**.
+
+Ba câu gốc, giữ lại làm biên bản:
 
 1. Gửi hai spec URL trong một `izAoDd`, ô url ở **7** → notebook có thêm **2** Nguồn không?
 2. Nếu không: cùng payload đó với ô url ở **2** → có thêm 2 Nguồn không?

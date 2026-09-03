@@ -81,6 +81,12 @@ Oracle B gọi thật ở **hai chỗ độc lập**, và hai chỗ **đồng ý
 
 Cả hai: `rpcids=tGMBJ`, `source-path=/notebook/<notebookId>`.
 
+**Phiếu thứ ba lấy được mà không phải trả giá nào** (2026-09-03, `05b01a3`):
+`tools/probe-notebooklm.mjs` bước 4 bảo owner **xoá một Nguồn mốc bằng chính giao diện
+NotebookLM**, rồi script nghe. Ta đọc được hình dạng `tGMBJ` thật mà **không tự gửi lệnh xoá
+nào** — điều quan trọng với đúng ticket này hơn bất kỳ ticket nào khác, vì đây là ticket phá
+huỷ. Chạy probe trước khi viết dòng code đầu tiên.
+
 Tức hình dạng là `[[[id₁],[id₂],…],[2]]`. Con số `50` là **quan sát về lựa chọn của oracle B**,
 không phải giới hạn đo được của server — đừng ghi nó vào code như một sự thật.
 

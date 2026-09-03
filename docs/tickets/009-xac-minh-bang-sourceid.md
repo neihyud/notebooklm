@@ -107,6 +107,10 @@ thành một ca hỏng nặng hơn hiện trạng.
 
 1. **Owner chạy `tools/probe-notebooklm.mjs`** trên notebook nháp, ghi lại payload thật của một
    lượt `izAoDd` thành công. Không có bước này thì đừng bắt đầu bước 2.
+   *(2026-09-03, `05b01a3`: công cụ đã in sẵn phần này — chuỗi trong phản hồi bị che thành
+   `str(<độ dài>)` nhưng **cấu trúc mảng thì giữ nguyên**, mà cấu trúc đúng là thứ ticket này
+   hỏi. Bonus: payload đã che là fixture **an toàn để commit**, vì nó không mang id thật nào —
+   đúng thứ thay được `OK_PAYLOAD` bịa ở bước 2.)*
 2. **Thay `OK_PAYLOAD` bằng payload đã ghi**, và chạy `bash test/run.sh` **trước khi** viết code
    moi id. Nếu suite đỏ ở đâu đó thì chỗ đó là một assertion đang ghim hình dạng bịa — sửa nó
    trước, riêng ra, và nói tên nó.
