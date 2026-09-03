@@ -997,14 +997,20 @@ kbd {
 .notebook__create input { flex: 1 1 auto; min-width: 0; }
 
 /* Hàng chọn tài khoản Google — ticket 013. Cùng nhịp với .notebook__pick. */
-.notebook__account {
-  display: flex;
-  gap: 6px;
+.notebook__row {
   margin-bottom: 6px;
 }
-.notebook__account .notebook__select {
-  flex: 1;
-  min-width: 0;
+/*
+ * Nhãn con cho từng dropdown. Nhỏ và mờ hơn nhãn mục, vì nó phân biệt hai
+ * dòng BÊN TRONG một mục chứ không mở một mục mới.
+ */
+.notebook__sublabel {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
 }
 /*
  * Câu "đang dùng tài khoản mặc định". Cố ý KHÔNG dùng màu lỗi: đây không phải

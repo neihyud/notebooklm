@@ -205,3 +205,25 @@ Lưu ý khi chạy: cửa sổ phải đủ rộng (`--window-size=1680,1050`). 
 Chuyển các file `.txt` **do extension tải** sang `.md`. Khác `subs-to-md.mjs` ở chỗ file `.txt` của extension không mang videoId trong tên, nên nó dò ngược metadata từ hàng đợi trong storage của extension, khớp theo tiêu đề.
 
 Dùng khi bạn đã có file `.txt` từ extension và muốn thêm bản `.md` có link nguồn. Với file từ yt-dlp thì dùng `subs-to-md.mjs`.
+
+## `chup-popup.mjs` — chụp popup thật bằng Brave headless
+
+`test/popup-ui.test.js` chạy trên jsdom, và **jsdom không có cascade CSS**: nó dựng đúng cây DOM
+nhưng không biết cái gì thật sự nhìn thấy được, cái gì tràn, cái gì trắng trơn. Repo đã trả giá
+một lần cho đúng chuyện đó. Công cụ này là mắt.
+
+```fish
+node tools/chup-popup.mjs                 # mọi cảnh, ảnh vào .anh-popup/
+node tools/chup-popup.mjs 2-tai-khoan     # một cảnh
+env DOM=1 node tools/chup-popup.mjs       # kèm dump trạng thái các <select>
+```
+
+**Không gọi mạng, không cần tài khoản**: `chrome.*` là stub tiêm trước mọi script của trang, nên
+dựng được cả những cảnh khó tạo tay (tài khoản đã đăng xuất, tên notebook dài, 0 notebook).
+
+Hai lỗi tìm được ngay lượt đầu dùng nó (2026-09-03), cả hai jsdom đều báo xanh: dropdown tài khoản
+hiện ra **trắng trơn** khi tài khoản đã chọn không còn đăng nhập, và hai dropdown dùng chung một
+nhãn nên email đọc ra như thể nó *là* notebook đích.
+
+Cạm bẫy khi sửa file này: phần stub nằm trong một **template literal**, nên đừng viết backtick
+trong comment ở đó — nó cắt đứt chuỗi và Node báo lỗi cú pháp ở một dòng trông vô can.

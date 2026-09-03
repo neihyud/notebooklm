@@ -31,9 +31,12 @@ function renderPopup(queue, opts = {}) {
     runtime: {
       sendMessage: async (msg) => {
         sent.push(msg.type);
-        return msg.type === 'get-state'
-          ? { queue, settings: { notebookUrl: '' }, running: !!opts.running, copied: opts.copied }
-          : {};
+        if (msg.type === 'get-state') {
+          return { queue, settings: { notebookUrl: '' }, running: !!opts.running, copied: opts.copied };
+        }
+        if (msg.type === 'list-accounts') return opts.accounts || { ok: false, accounts: [], selected: null };
+        if (msg.type === 'list-notebooks') return opts.notebooks || { ok: false, needsTab: true, notebooks: [] };
+        return {};
       },
       onMessage: { addListener() {} },
       openOptionsPage() {},
@@ -354,6 +357,94 @@ const V = (id, over) => Object.assign({ id, videoId: id.padEnd(11, 'x'), title: 
     await settle();
     ok(win.__sent.includes('clear-copied'), 'cú bấm THỨ HAI mới thật sự xoá Sổ');
     eq(btn.textContent, 'Xoá sổ', 'xoá xong nút phải trở lại nhãn thường');
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Dropdown tài khoản — ticket 013                                    */
+  /* ---------------------------------------------------------------- */
+  {
+    /*
+     * Tài khoản đã chọn KHÔNG còn trong danh sách trả về.
+     *
+     * Khuyết tật đã đo (chụp bằng Brave thật, `tools/chup-popup.mjs`): gán
+     * `sel.value` cho một giá trị không option nào mang thì `selectedIndex`
+     * thành -1 và dropdown hiện ra TRẮNG TRƠN — trông như hỏng, trong khi sự
+     * thật là "tài khoản kia đã đăng xuất". jsdom không thấy chỗ trắng, nhưng
+     * NÓ THẤY `selectedIndex`, nên lưới đặt được ở đây.
+     */
+    const win = renderPopup([], {
+      accounts: {
+        ok: true,
+        selected: 'da-dang-xuat@gmail.com',
+        accounts: [
+          { email: 'con@gmail.com', name: 'Con', index: 0, isDefault: true },
+          { email: 'khac@gmail.com', name: 'Khac', index: 1, isDefault: false },
+        ],
+      },
+      notebooks: { ok: true, needsTab: false, notebooks: [], account: { source: 'chosen-missing', authuser: null } },
+    });
+    await settle();
+    click(win, win.document.getElementById('notebook-refresh'));
+    await settle();
+
+    const sel = win.document.getElementById('account-select');
+    ok(sel.selectedIndex !== -1, 'tài khoản biến mất: dropdown KHÔNG được rỗng lựa chọn (-1 = hiện ra trắng trơn)');
+    // `?.` chứ không phải truy cập thẳng: selectedIndex = -1 thì `options[-1]`
+    // là undefined và cả FILE test chết, cho 0 dòng đỏ — mà 0 dòng đỏ vì sập
+    // không phải là xanh. Phải đỏ tử tế thì phép đo mới đọc được.
+    const dangChon = sel.options[sel.selectedIndex];
+    ok(/không còn đăng nhập/.test(dangChon?.textContent || ''),
+      'tài khoản biến mất: ô hiện NÓI RA lý do, không im lặng');
+    ok(dangChon?.disabled === true,
+      'tài khoản biến mất: mục đó khoá lại, không chọn lại được');
+    ok([...sel.options].some((o) => o.value === 'con@gmail.com'),
+      'tài khoản biến mất: các tài khoản còn sống vẫn chọn được');
+  }
+
+  {
+    // Một tài khoản thì hàng chọn PHẢI ẩn — dropdown một dòng không cho quyết
+    // định gì, chỉ chiếm chỗ trong popup 400px.
+    const win = renderPopup([], {
+      accounts: { ok: true, selected: null, accounts: [{ email: 'chu@gmail.com', name: 'C', index: 0, isDefault: true }] },
+      notebooks: { ok: true, needsTab: false, notebooks: [], account: { source: 'tab', authuser: '0' } },
+    });
+    await settle();
+    click(win, win.document.getElementById('notebook-refresh'));
+    await settle();
+    ok(win.document.getElementById('notebook-account-row').hidden === true, 'một tài khoản: hàng chọn ẩn');
+  }
+
+  {
+    // Hai tài khoản thì hiện, và chọn đúng cái đang lưu.
+    const win = renderPopup([], {
+      accounts: {
+        ok: true, selected: 'khac@gmail.com',
+        accounts: [
+          { email: 'chu@gmail.com', name: 'C', index: 0, isDefault: true },
+          { email: 'khac@gmail.com', name: 'K', index: 1, isDefault: false },
+        ],
+      },
+      notebooks: { ok: true, needsTab: false, notebooks: [], account: { source: 'chosen', authuser: '1' } },
+    });
+    await settle();
+    click(win, win.document.getElementById('notebook-refresh'));
+    await settle();
+    const sel = win.document.getElementById('account-select');
+    ok(win.document.getElementById('notebook-account-row').hidden === false, 'hai tài khoản: hàng chọn hiện');
+    ok(sel.value === 'khac@gmail.com', 'hai tài khoản: chọn đúng cái đang lưu, không rơi về mặc định');
+    ok(win.document.getElementById('account-note').hidden === true, 'đã chọn tài khoản thì KHÔNG hiện câu cảnh báo');
+  }
+
+  {
+    // Mỗi dropdown phải có nhãn RIÊNG trỏ đúng vào nó. Không có nhãn thì email
+    // đọc ra như thể nó là "notebook đích" — đo bằng ảnh chụp Brave thật.
+    const win = renderPopup([]);
+    await settle();
+    const d = win.document;
+    const nhan = (id) => [...d.querySelectorAll('label')].find((l) => l.getAttribute('for') === id);
+    ok(!!nhan('account-select'), 'dropdown tài khoản có nhãn riêng');
+    ok(!!nhan('notebook-select'), 'dropdown notebook có nhãn riêng');
+    ok(nhan('account-select') !== nhan('notebook-select'), 'hai dropdown KHÔNG dùng chung một nhãn');
   }
 
   console.log(`${pass} pass, ${fail} fail`);

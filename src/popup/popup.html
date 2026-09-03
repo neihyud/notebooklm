@@ -19,16 +19,28 @@
       <label for="notebook-url" class="notebook__label">Notebook đích</label>
       <button type="button" id="use-current" class="btn-text">Dùng tab hiện tại</button>
     </div>
-    <div class="notebook__account" id="notebook-account-row" hidden>
-      <select id="account-select" class="notebook__select" aria-label="Tài khoản NotebookLM"></select>
+    <!--
+      Mỗi dropdown một NHÃN RIÊNG. Bản đầu để cả hai nằm chung dưới mỗi chữ
+      "Notebook đích", và chụp bằng Brave thật (tools/chup-popup.mjs) cho thấy
+      email đọc ra như thể nó LÀ notebook đích. Oracle B tách hai nhãn
+      ("NotebookLM account" / "Send to") vì đúng lý do này.
+    -->
+    <div class="notebook__row" id="notebook-account-row" hidden>
+      <label for="account-select" class="notebook__sublabel">Tài khoản</label>
+      <div class="notebook__pick">
+        <select id="account-select" class="notebook__select"></select>
+      </div>
     </div>
     <p class="notebook__note" id="account-note" hidden></p>
-    <div class="notebook__pick">
-      <select id="notebook-select" class="notebook__select" aria-label="Chọn notebook từ danh sách" disabled>
-        <option value="">Bấm ↻ để nạp danh sách</option>
-      </select>
-      <button type="button" id="notebook-refresh" class="btn btn--sm btn--icon"
-              title="Nạp danh sách notebook" aria-label="Nạp danh sách notebook">↻</button>
+    <div class="notebook__row">
+      <label for="notebook-select" class="notebook__sublabel">Gửi tới</label>
+      <div class="notebook__pick">
+        <select id="notebook-select" class="notebook__select" disabled>
+          <option value="">Bấm ↻ để nạp danh sách</option>
+        </select>
+        <button type="button" id="notebook-refresh" class="btn btn--sm btn--icon"
+                title="Nạp danh sách notebook" aria-label="Nạp danh sách notebook">↻</button>
+      </div>
     </div>
     <div class="notebook__create" id="notebook-create" hidden>
       <input type="text" id="notebook-name" placeholder="Tên notebook mới" spellcheck="false" maxlength="120">

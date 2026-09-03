@@ -167,7 +167,26 @@
       o.textContent = a.isDefault ? `${a.email} (mặc định)` : a.email;
       sel.append(o);
     }
-    sel.value = r.selected || (list.find((a) => a.isDefault) || list[0]).email;
+    /*
+     * Tài khoản đã chọn KHÔNG còn trong danh sách (đăng xuất ở nơi khác).
+     *
+     * Gán thẳng `sel.value` cho một giá trị không có option nào mang thì
+     * `selectedIndex` thành -1 và dropdown hiện ra TRẮNG TRƠN — chụp bằng
+     * Brave thật mới thấy, jsdom báo xanh. Trắng trơn là câu tệ nhất có thể:
+     * nó trông như hỏng, trong khi sự thật là "tài khoản kia đã đăng xuất".
+     * Nên nói ra bằng một option riêng, khoá lại để không chọn lại được.
+     */
+    const co = list.some((a) => a.email === r.selected);
+    if (r.selected && !co) {
+      const o = document.createElement('option');
+      o.value = '';
+      o.disabled = true;
+      o.textContent = `${r.selected} — không còn đăng nhập`;
+      sel.prepend(o);
+      sel.selectedIndex = 0;
+    } else {
+      sel.value = r.selected || (list.find((a) => a.isDefault) || list[0]).email;
+    }
     row.hidden = false;
   }
 
