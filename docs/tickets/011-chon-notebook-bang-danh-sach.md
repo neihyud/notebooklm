@@ -68,7 +68,7 @@ không phải chỉ là chốt cái gì.
 | Chốt 1 — cache token như Sourclip? | **KHÔNG** | dropdown cần một tab `notebooklm.google.com` đang mở; `rpc.js:10` giữ nguyên |
 | Chốt 2 — tự mở tab nền khi bấm làm mới? | **CHƯA — làm (a) trước** | không mở tab nào; không có tab sẵn thì dropdown ẩn |
 | (Lead quyết) gắn sau `rpcEnabled`? | **không**, đổi lại buộc ràng buộc cử chỉ | mở popup không phát request nào |
-| Chốt 3 — có `+ Tạo notebook mới` trong dropdown? | **CHƯA CHỐT** (mở 2026-09-03) | xem mục *Chốt 3* |
+| Chốt 3 — có `+ Tạo notebook mới` trong dropdown? | **CÓ** (owner chốt 2026-09-03) | ticket có thêm một lượt **GHI** (`CCqFvf`); xem mục *Chốt 3* |
 
 Peer **không** được lật một trong ba dòng này mà không hỏi lại — đặc biệt dòng thứ ba, vì hai vế
 của nó là một cặp: bỏ `rpcEnabled` chỉ hợp lệ **kèm** ràng buộc cử chỉ.
@@ -121,7 +121,7 @@ nào để canh. Gắn nó sau `rpcEnabled` là giấu tính năng khỏi đúng
 dropdown, hoặc bấm làm mới). Không chạy lúc popup mở, không chạy theo `alarms`. Owner lật quyết
 định này được — nhưng lật thì phải lật cả ràng buộc cử chỉ, không lật riêng một nửa.
 
-### Chốt 3 — có `+ Tạo notebook mới` ngay trong dropdown không? Đề xuất: **CÓ.**
+### Chốt 3 — có `+ Tạo notebook mới` ngay trong dropdown không? Đề xuất: **CÓ.** → owner chốt: **CÓ**
 
 Mở 2026-09-03, sau khi owner gửi ảnh chụp popup Sourclip. Ticket này ban đầu coi dropdown là
 **chỉ đọc** và đẩy việc tạo notebook sang "sau" — ảnh chụp cho thấy đó là chỗ tôi cắt phạm vi
@@ -145,8 +145,12 @@ cái ngõ cụt mà `resolveNotebookTab()` đang ném hôm nay.
 **Cái giá, và vì sao đây là quyết định của owner chứ không phải của Lead:** `CCqFvf` là một lượt
 **GHI** lên tài khoản owner — `WORKSPACE_PROTOCOL.md` → *external side effects*. Nó nhẹ hơn hẳn
 thêm Nguồn (một notebook rỗng thì xoá được, và không có nội dung nào để mất), nhưng nó **không
-phải chỉ đọc** như phần còn lại của ticket này. Nếu owner chốt KHÔNG thì phần còn lại của ticket
-vẫn chạy độc lập, chỉ là trạng thái "0 notebook" quay về ngõ cụt.
+phải chỉ đọc** như phần còn lại của ticket này.
+
+Owner đã chốt **CÓ**. Hệ quả phải ghi ra cho peer, vì nó đổi tính chất của cả ticket: 011 **không
+còn là một ticket chỉ-đọc**. Câu ở Chốt 1 (*"hình dạng sai thì cùng lắm dropdown rỗng"*) chỉ còn
+đúng cho `wXbhsf`; với `CCqFvf` thì hình dạng sai có thể tạo ra một notebook rác trong tài khoản
+owner. Mọi ràng buộc ở mục *Kết quả cần có → 5* là để chặn đúng chuyện đó.
 
 Bằng chứng cho `CCqFvf` ghi ở `docs/notebooklm-rpc-do-duoc-2.md` → *Bổ sung 2026-09-03*, mục 2.
 Cùng hình dạng bằng chứng với `wXbhsf`: oracle A cho tên, oracle B cho args và đường đọc.
@@ -192,6 +196,28 @@ hơn: `notebookUrl` là thứ owner **đã gõ tay**.
 nó**. Hai lý do, cả hai đã đo được: `wXbhsf` là *"recently viewed"* nên không đảm bảo đủ; và ô
 dán URL là đường duy nhất còn chạy khi RPC hỏng.
 
+### 5. `+ Tạo notebook mới` — đường GHI duy nhất của ticket, và bốn ràng buộc của nó
+
+```js
+createNotebook: {
+  rpcId: 'CCqFvf',
+  sourcePath: '/',
+  /** [title, null, null, [2], [1,null×9,[1]]] — args dựng từ `title`, không ghim. */
+  slots: { id: 2 },   // notebookId = payload[0][2], lùi về payload[2]
+},
+```
+
+1. **Không bao giờ tạo ngầm.** Chỉ tạo khi owner chọn đúng mục đó **và** đã nhập một cái tên. Mở
+   popup, mở dropdown, làm mới danh sách — không cái nào được phát một `CCqFvf`.
+2. **Không tự đặt tên.** Không lấy tiêu đề nguồn đầu hàng đợi, không `"Notebook 2026-09-03"`. Một
+   cái tên tự sinh là một notebook mà owner không nhận ra là của mình trong danh sách tháng sau.
+3. **Tạo xong thì ghi thẳng vào `settings.notebookUrl`.** Nếu không, owner bấm tạo lần nữa và tài
+   khoản có hai notebook rỗng. Đây là chế độ hỏng dễ xảy ra nhất của mục này.
+4. **`payload == null` nghĩa là CHẠM TRẦN, không phải lỗi parse.** Oracle B đọc frame `CCqFvf` có
+   `e[2] == null` thành *"hết quota notebook"* (`docs/notebooklm-rpc-do-duoc-2.md` → *Bổ sung
+   2026-09-03*, mục 3). Hiểu nhầm nó thành "parse hỏng" rồi lùi về `payload[2]` sẽ cho ra
+   `undefined`, và ràng buộc 3 sẽ ghi `undefined` vào `notebookUrl`.
+
 ## Điều kiện đảo ngược
 
 Bắt buộc với class *architecture lock-in*. Gỡ tính năng này khi bất kỳ điều nào đúng:
@@ -202,6 +228,9 @@ Bắt buộc với class *architecture lock-in*. Gỡ tính năng này khi bất
    một dropdown thiếu lựa chọn tệ hơn không có dropdown.
 3. Google đổi `source-path` hoặc `rpcids` → cùng chế độ hỏng với `izAoDd`; khi đó gỡ dropdown rẻ
    hơn sửa nó.
+4. **Riêng cho `CCqFvf`:** một lượt tạo trả về id đọc được nhưng notebook **không xuất hiện** trong
+   `wXbhsf` lượt sau, hoặc tạo ra notebook mà owner không mở được. Gỡ ngay mục tạo mới, giữ phần
+   còn lại — hai đường độc lập nhau, đó là lý do chúng là hai entry riêng trong `BASE`.
 
 Gỡ = xoá `listNotebooks` khỏi `BASE` + ẩn dropdown. Ô dán URL không phụ thuộc gì vào nó, hàng đợi
 không phụ thuộc gì vào nó, `notebookUrl` không đổi hình dạng. **Đảo ngược là một commit, không
@@ -213,12 +242,15 @@ phải một cuộc di trú** — và đó là khác biệt lớn nhất giữa 
    `tabs` và `scripting` đã có. Nếu peer thấy cần thêm quyền thì **dừng lại và hỏi** —
    `Authority` xếp việc đó vào **Human must decide**.
 2. Không lưu `at`, không lưu `bl`, không dựng `rpcContext`. Xem Chốt 1.
-3. Danh sách notebook (id + tiêu đề) giữ trong bộ nhớ popup thì được. Ghi nó vào
+3. **Thử `CCqFvf` thì tạo notebook thật, không có "notebook nháp" cho thao tác này** — bản thân
+   nó chính là thao tác tạo. Nên: thử tối thiểu, xoá tay sau khi xong, và **không** chạy thử
+   trong vòng lặp. `Authority` → *external side effects*.
+4. Danh sách notebook (id + tiêu đề) giữ trong bộ nhớ popup thì được. Ghi nó vào
    `chrome.storage` thì **phải nói ra trong handback**: đó là tên notebook riêng của owner, không
    phải hằng số ngoại sinh.
-4. Không sửa câu ném trong `resolveNotebookTab()` ở ticket này. Nó vẫn đúng cho ca không có gì để
+5. Không sửa câu ném trong `resolveNotebookTab()` ở ticket này. Nó vẫn đúng cho ca không có gì để
    liệt kê. Viết lại câu đó cho hợp dropdown là việc **sau khi** dropdown chạy thật.
-5. Chọn (a) thì không mở tab nào — kể cả "chỉ một lần lúc khởi động".
+6. Chọn (a) thì không mở tab nào — kể cả "chỉ một lần lúc khởi động".
 
 ## Kiểm chứng
 
@@ -246,5 +278,26 @@ Mỗi câu nói rõ **chiều nào phải đỏ**.
    Chiều phải đỏ: **bản hoán vị**, nếu có test ghim rằng mở popup không phát request nào. Nếu
    không có thì nói ra — đó là ràng buộc đổi lấy việc **không** gắn sau `rpcEnabled`, nên nó
    không có lưới nào khác đỡ.
+
+5. **Đảo `notebookId` mới tạo với `title` vừa nhập** ở chỗ ghi vào `settings.notebookUrl`. Chiều
+   phải đỏ: **bản hoán vị**. Lại đúng hình dạng *đường dữ liệu song song* — hai chuỗi, một cái
+   owner gõ vào, một cái server trả về, gặp nhau trong đúng một hàm. Đảo chúng thì popup vẫn báo
+   "đã tạo", `notebookUrl` vẫn là một chuỗi, và lượt import kế tiếp mới hỏng. Fixture phải có
+   title và id **khác nhau rõ rệt**.
+
+6. **Cho `payload == null` đi vào nhánh thành công** (hiểu là "parse hỏng, lùi về `payload[2]`").
+   Chiều phải đỏ: **bản hoán vị**. Đây là ca hỏng tệ nhất của Chốt 3: owner chạm trần notebook,
+   ta ghi `undefined` vào `notebookUrl`, và mọi lượt import sau đó nhắm vào hư không. Assert phải
+   ghim: `payload == null` ⇒ `settings.notebookUrl` **không đổi**, và thông báo nói đúng chữ
+   "chạm trần" chứ không phải "lỗi".
+
+7. **Cho lượt tạo chạy mà không có cử chỉ chọn** (ví dụ lúc mở dropdown, hoặc lúc nạp lại danh
+   sách). Chiều phải đỏ: **bản hoán vị**. Assert phải đếm **cú gửi `CCqFvf`**, không phải kết
+   quả trả về — theo đúng bài học `hoan-vi-nut-can-ghi-lai-cu-bam`: hai nhánh cùng trả về một
+   object hình dạng giống nhau thì assert kết quả xanh cả hai chiều.
+
+8. **Tạo xong nhưng KHÔNG ghi `settings.notebookUrl`.** Chiều phải đỏ: **bản hoán vị**. Không có
+   assert này thì chế độ hỏng là im lặng và tích luỹ: mỗi lần owner bấm là thêm một notebook rỗng
+   trong tài khoản, và giao diện không có gì sai để nhìn ra.
 
 Câu nào trả lời là "không test nào" vẫn là kết quả hợp lệ — **nhưng phải nói ra**.
