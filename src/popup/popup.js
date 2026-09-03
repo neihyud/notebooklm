@@ -100,6 +100,9 @@
    * bằng `needsTab`; nếu popup gộp lại thì phần phân biệt ấy vứt đi.
    *
    * Nhãn lúc hỏng nói VIỆC CẦN LÀM, không nói "Lỗi".
+   *
+   * @returns id notebook mà hàm này TỰ chọn thay owner và vì thế caller phải
+   *   ghi lại vào `notebookUrl`; `null` khi không có gì phải ghi.
    */
   function renderNotebookSelect(state, data) {
     const sel = els.notebookSelect;
@@ -126,14 +129,54 @@
       sel.disabled = true;
       return;
     }
-    // Từ đây trở xuống là hai ca "với tới được backend". Mục tạo mới đứng ĐẦU
-    // ở cả hai, và chính nó khiến ca "0 notebook" không còn là ngõ cụt.
-    sel.append(opt('', 'Chọn notebook…'));
+    /*
+     * Hai ca "với tới được backend". Mục tạo mới đứng ĐẦU ở cả hai — Chốt 3 của
+     * ticket 011 — và chính nó khiến ca "0 notebook" không còn là ngõ cụt.
+     *
+     * KHÔNG có placeholder "Chọn notebook…". Nó từng chiếm đúng chỗ đầu tiên
+     * mà Chốt 3 dành cho mục tạo mới, và nó là một dòng chết: chọn nó không
+     * làm gì cả. Oracle B cũng không có placeholder — danh sách của họ bắt đầu
+     * thẳng bằng `+ Create new notebook`.
+     */
+    const list = (data && data.notebooks) || [];
     sel.append(opt(TAO_MOI, '+ Tạo notebook mới'));
-    for (const nb of (data && data.notebooks) || []) {
+    for (const nb of list) {
       sel.append(opt(nb.id, nb.title || `(không tên) ${nb.id.slice(0, 8)}`));
     }
     sel.disabled = false;
+
+    /*
+     * Chọn sẵn cái nào.
+     *
+     * Ưu tiên notebook đang lưu trong `notebookUrl`; nó không còn trong danh
+     * sách thì lùi về notebook THẬT đầu tiên chứ không để mục tạo mới đứng
+     * hiện — cùng cách oracle B làm, và vì cùng lý do: mục tạo mới đứng hiện
+     * mà owner đã có notebook thì cú bấm kế tiếp tạo ra một sổ rỗng thừa.
+     *
+     * Chỉ khi KHÔNG có notebook nào thì mục tạo mới mới là cái đang hiện.
+     */
+    const dangLuu = (/\/notebook\/([^/?#]+)/.exec(els.notebookUrl.value.trim()) || [])[1];
+    const khop = dangLuu && list.some((nb) => nb.id === dangLuu);
+    if (khop) {
+      sel.value = dangLuu;
+      return null;
+    }
+    if (list.length) {
+      sel.selectedIndex = 1; // mục ngay sau TAO_MOI
+      return sel.value;
+    }
+    sel.selectedIndex = 0;
+    return null;
+  }
+
+  /**
+   * Ghi notebook đích. Một chỗ duy nhất biết hình dạng URL, vì giờ có HAI
+   * đường tới đây: owner tự chọn trong dropdown, và dropdown tự chọn hộ.
+   */
+  async function datNotebook(id) {
+    const clean = `https://notebooklm.google.com/notebook/${id}`;
+    els.notebookUrl.value = clean;
+    await globalThis.NBLM.setSettings({ notebookUrl: clean });
   }
 
   function moKhungTao(mo) {
@@ -256,10 +299,27 @@
       els.notebookHint.textContent = 'Không đọc được danh sách notebook — vẫn dán URL vào ô dưới được.';
       return;
     }
-    renderNotebookSelect('co-tab', r);
-    els.notebookHint.textContent = r.notebooks.length
-      ? ''
-      : 'Tài khoản chưa có notebook nào. Chọn “+ Tạo notebook mới”.';
+    /*
+     * Dropdown có thể TỰ chọn một notebook thay owner (khi cái đang lưu không
+     * còn trong danh sách). Không ghi lại thì nhãn “Gửi tới” nói một đằng,
+     * lượt import chạy một nẻo — backend đọc `notebookUrl`, không đọc dropdown.
+     * Oracle B ghi ngay tại đúng hai nhánh fallback này, vì cùng lý do.
+     */
+    const canGhi = renderNotebookSelect('co-tab', r);
+    if (canGhi) await datNotebook(canGhi);
+
+    if (r.notebooks.length) {
+      els.notebookHint.textContent = '';
+      return;
+    }
+    /*
+     * 0 notebook: mục tạo mới là mục ĐANG HIỆN, nên bảo owner “chọn” nó là một
+     * ngõ cụt: chọn lại cái đang chọn không phát `change`. Mở thẳng khung tạo.
+     * Chỉ làm ở đây chứ không trong render: nhánh `!r.ok` bên trên cũng dựng
+     * danh sách rỗng, nhưng ở đó ta KHÔNG biết tài khoản có notebook hay không.
+     */
+    els.notebookHint.textContent = 'Tài khoản chưa có notebook nào — đặt tên rồi bấm Tạo.';
+    moKhungTao(true);
   }
 
   /* ---------------------------------------------------------------- */
@@ -829,9 +889,7 @@
     }
     moKhungTao(false);
     await withActionLock(async () => {
-      const clean = `https://notebooklm.google.com/notebook/${v}`;
-      els.notebookUrl.value = clean;
-      await globalThis.NBLM.setSettings({ notebookUrl: clean });
+      await datNotebook(v);
       refresh();
     });
   });

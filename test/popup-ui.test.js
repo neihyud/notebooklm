@@ -27,12 +27,13 @@ function renderPopup(queue, opts = {}) {
   const win = dom.window;
 
   const sent = [];
+  const ghi = [];
   win.chrome = {
     runtime: {
       sendMessage: async (msg) => {
         sent.push(msg.type);
         if (msg.type === 'get-state') {
-          return { queue, settings: { notebookUrl: '' }, running: !!opts.running, copied: opts.copied };
+          return { queue, settings: { notebookUrl: opts.notebookUrl || '' }, running: !!opts.running, copied: opts.copied };
         }
         if (msg.type === 'list-accounts') return opts.accounts || { ok: false, accounts: [], selected: null };
         if (msg.type === 'list-notebooks') return opts.notebooks || { ok: false, needsTab: true, notebooks: [] };
@@ -49,8 +50,9 @@ function renderPopup(queue, opts = {}) {
         return opts.activeUrl ? [{ url: opts.activeUrl, title: 'tab' }] : [];
       },
     },
-    storage: { local: { get: async () => ({}), set: async () => {} } },
+    storage: { local: { get: async () => ({}), set: async (o) => { ghi.push(o); } } },
   };
+  win.__ghi = ghi;
 
   win.eval(fs.readFileSync(path.join(ROOT, 'src/common/shared.js'), 'utf8'));
   win.eval(fs.readFileSync(path.join(ROOT, 'src/popup/popup.js'), 'utf8'));
@@ -445,6 +447,88 @@ const V = (id, over) => Object.assign({ id, videoId: id.padEnd(11, 'x'), title: 
     ok(!!nhan('account-select'), 'dropdown tài khoản có nhãn riêng');
     ok(!!nhan('notebook-select'), 'dropdown notebook có nhãn riêng');
     ok(nhan('account-select') !== nhan('notebook-select'), 'hai dropdown KHÔNG dùng chung một nhãn');
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Dropdown notebook: thứ tự mục, mục chọn sẵn, và ghi xuống settings */
+  /* ---------------------------------------------------------------- */
+
+  /** Chạy một lượt ↻ rồi trả về dropdown notebook + sổ ghi settings. */
+  async function napXong(opts) {
+    const win = renderPopup([], opts);
+    await settle();
+    click(win, win.document.getElementById('notebook-refresh'));
+    await settle();
+    const sel = win.document.getElementById('notebook-select');
+    // `__ghi` là mọi lượt chrome.storage.local.set; chỉ lấy phần notebookUrl.
+    const urls = win.__ghi.filter((o) => o.settings).map((o) => o.settings.notebookUrl);
+    return { win, sel, urls, nhan: [...sel.options].map((o) => o.textContent) };
+  }
+
+  const NB2 = { ok: true, needsTab: false, notebooks: [{ id: 'nb-mot', title: 'Ghi chép luận văn' }, { id: 'nb-hai', title: 'Đọc tuần này' }] };
+
+  {
+    // Chưa lưu notebook nào. Mục tạo mới đứng ĐẦU (Chốt 3 của ticket 011),
+    // nhưng mục ĐANG HIỆN là notebook thật đầu tiên — để cú bấm kế tiếp không
+    // tạo ra một sổ rỗng thừa. Ghim theo SLOT, vì hai mục này hoán vị cho nhau
+    // vẫn ra một danh sách đọc hợp lý.
+    const { sel, urls, nhan } = await napXong({ notebooks: NB2 });
+    eq(sel.options.length, 3, 'ba mục: tạo mới + hai notebook');
+    eq(nhan[0], '+ Tạo notebook mới', 'slot 0 là mục tạo mới');
+    eq(sel.options[1].value, 'nb-mot', 'slot 1 là notebook thật đầu tiên');
+    eq(sel.selectedIndex, 1, 'mục đang hiện là notebook thật, KHÔNG phải mục tạo mới');
+
+    // Placeholder chết đã gỡ: nó từng chiếm đúng slot 0 mà Chốt 3 dành cho mục
+    // tạo mới, và chọn nó không làm gì cả.
+    ok(![...sel.options].some((o) => o.value === ''), 'không còn mục rỗng nào trong danh sách');
+
+    // Dropdown tự chọn hộ thì PHẢI ghi xuống settings. Không ghi thì nhãn
+    // "Gửi tới" hiện một notebook mà lượt import không hề đi tới.
+    eq(urls.length, 1, 'lựa chọn tự động được ghi xuống settings đúng một lần');
+    eq(urls[0], 'https://notebooklm.google.com/notebook/nb-mot', 'ghi đúng id của mục đang hiện');
+  }
+
+  {
+    // Đã lưu một notebook CÒN trong danh sách: giữ nguyên nó, và không ghi lại
+    // gì cả. Cặp này tách "trả về id đang chọn" khỏi "trả về id cần ghi".
+    const { sel, urls } = await napXong({
+      notebooks: NB2,
+      notebookUrl: 'https://notebooklm.google.com/notebook/nb-hai',
+    });
+    eq(sel.value, 'nb-hai', 'notebook đang lưu thắng, không rơi về mục đầu danh sách');
+    eq(urls.length, 0, 'đang khớp sẵn thì KHÔNG ghi đè settings');
+  }
+
+  {
+    // Đã lưu một notebook KHÔNG còn trong danh sách (đổi tài khoản, hoặc đã
+    // xoá). Rơi về notebook thật đầu tiên, và ghi lại — nếu chỉ rơi mà không
+    // ghi thì settings vẫn trỏ vào cái đã mất.
+    const { sel, urls } = await napXong({
+      notebooks: NB2,
+      notebookUrl: 'https://notebooklm.google.com/notebook/nb-da-mat',
+    });
+    eq(sel.selectedIndex, 1, 'notebook đã mất: rơi về notebook thật đầu tiên');
+    eq(urls[0], 'https://notebooklm.google.com/notebook/nb-mot', 'và ghi đè cái đã mất trong settings');
+  }
+
+  {
+    // Tài khoản không có notebook nào. Đây là ca DUY NHẤT mục tạo mới đứng hiện
+    // — và vì chọn lại cái đang chọn không phát `change`, popup phải tự mở
+    // khung tạo. Bảo owner "chọn + Tạo notebook mới" là một ngõ cụt.
+    const { win, sel, urls, nhan } = await napXong({
+      notebooks: { ok: true, needsTab: false, notebooks: [] },
+    });
+    eq(sel.options.length, 1, '0 notebook: chỉ còn mục tạo mới');
+    eq(nhan[0], '+ Tạo notebook mới', 'và nó là mục tạo mới');
+    eq(win.document.getElementById('notebook-create').hidden, false, '0 notebook: khung tạo tự mở, không đợi một cú change không bao giờ tới');
+    eq(urls.length, 0, '0 notebook: không ghi gì xuống settings');
+  }
+
+  {
+    // Không đọc được danh sách cũng dựng ra một danh sách rỗng, nhưng ở đó ta
+    // KHÔNG biết tài khoản có notebook hay không — mở khung tạo là đoán mò.
+    const { win } = await napXong({ notebooks: { ok: false, needsTab: false, notebooks: [] } });
+    eq(win.document.getElementById('notebook-create').hidden, true, 'list hỏng: KHÔNG tự mở khung tạo');
   }
 
   console.log(`${pass} pass, ${fail} fail`);

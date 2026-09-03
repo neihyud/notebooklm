@@ -169,6 +169,44 @@ owner. Mọi ràng buộc ở mục *Kết quả cần có → 5* là để ch�
 Bằng chứng cho `CCqFvf` ghi ở `docs/notebooklm-rpc-do-duoc-2.md` → *Bổ sung 2026-09-03*, mục 2.
 Cùng hình dạng bằng chứng với `wXbhsf`: oracle A cho tên, oracle B cho args và đường đọc.
 
+#### Bổ sung 2026-09-04 — "đứng đầu danh sách" KHÔNG có nghĩa là "mục đang hiện"
+
+Bảng trên dựng từ **ảnh chụp** popup oracle B, và nó đúng về THỨ TỰ nhưng câm về chuyện mục nào
+đang hiện. Bản đầu của ta có thêm một placeholder `"Chọn notebook…"` chiếm mất slot 0 — đúng chỗ
+Chốt 3 dành cho mục tạo mới — nên khi owner hỏi có đổi theo họ không, tôi đề xuất đưa
+`+ Tạo notebook mới` lên làm **mục đang hiện**. Đọc `popup.js` của họ thì đề xuất đó sai:
+
+```js
+Z.innerHTML = `<option value="new">+ Create new notebook</option>`;   // slot 0, luôn luôn
+for (let t of e) { ... Z.appendChild(e) }
+// khôi phục: Z.value = lastNotebookId
+// trượt → findIndex(o => o.value !== 'new'), rồi selectedIndex = e
+```
+
+Họ **preselect một notebook THẬT**; `+ Create new notebook` chỉ là mục đang hiện khi tài khoản có
+**0 notebook** — đúng cảnh trong ảnh owner gửi. Lý do rõ khi viết ra: mục tạo mới đứng hiện mà
+owner đã có notebook thì cú bấm kế tiếp đẻ ra một sổ rỗng thừa.
+
+Chốt 3 giữ nguyên (mục tạo mới ở slot 0, mọi trạng thái với tới được backend). Placeholder gỡ hẳn.
+
+**Hai chỗ hở do chính thay đổi này mở ra, đều đã bịt:**
+
+1. **Dropdown nói dối.** Preselect notebook thật mà không ghi xuống `notebookUrl` thì nhãn
+   *"Gửi tới"* hiện một notebook, còn lượt import đi tới một chỗ khác — backend đọc `notebookUrl`,
+   không đọc dropdown. jsdom báo xanh; **ảnh chụp Brave** cho thấy dropdown ghi "Ghi chép luận văn"
+   trong khi ô URL ngay dưới nó rỗng. Oracle B ghi `lastNotebookId` ngay tại cả hai nhánh fallback,
+   vì cùng lý do. Ta ghi trong `napDanhSach`, không trong hàm render — chỉ khi dropdown tự chọn
+   **hộ** owner, chứ không ghi đè mỗi lượt ↻.
+2. **Ca 0 notebook thành ngõ cụt.** Mục tạo mới đứng hiện, mà chọn lại cái đang chọn thì **không
+   phát `change`** — trong khi hint lại viết *"Chọn '+ Tạo notebook mới'"*. Oracle B không dính vì
+   họ đọc `Z.value` lúc **bấm gửi**, ta đọc lúc `change`. Bịt bằng cách mở thẳng khung tạo, và chỉ
+   ở nhánh `r.ok && notebooks.length === 0` — nhánh `!r.ok` cũng dựng danh sách rỗng nhưng ở đó ta
+   *không biết* tài khoản có notebook hay không, mở khung tạo ở đó là đoán mò.
+
+Đo: `test/popup-ui.test.js` 92 pass (thêm 16). Năm hoán vị, exit=1 cả năm, tổng 92 nguyên vẹn —
+mục tạo mới xuống cuối (4 đỏ), mục đang hiện rơi về mục tạo mới (4), bỏ lượt ghi tự động (3),
+nhánh khớp lại ghi đè (1), 0 notebook không mở khung tạo (1).
+
 ### Không hỏi: có bộ chọn TÀI KHOẢN như họ không? — Quyết: **không.** ĐÃ LẬT, xem ticket 013
 
 Ảnh chụp của owner có thêm dropdown *"NotebookLM account"*. Lúc viết, tôi bỏ nó với lý do nó đứng
