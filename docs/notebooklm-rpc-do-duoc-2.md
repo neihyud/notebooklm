@@ -235,3 +235,57 @@ trang Cài đặt mà không cần bản mới:
   kiểm. Trả về bằng `rpcOverrides.slots = {"url": 2}`.
 - `izAoDd` bị xoay → `rpc-id-stale` → `not-sent` → rơi xuống đường DOM, owner chỉ thấy chậm hơn.
   Thêm id mới bằng `rpcOverrides.addSourceIds` (luật GỘP THÊM, id owner dán vào đứng trước).
+
+## Bổ sung 2026-09-03 — đọc lại oracle B sau khi owner chỉ vào giao diện của nó
+
+Owner gửi ảnh chụp popup Sourclip (hai dropdown *NotebookLM account* / *Send to*) và hỏi lại cho
+chắc là nó có import thẳng không. Có — và lượt đọc lại này moi thêm bốn thứ **chưa từng ghi ở
+đâu trong repo**.
+
+### 1. Bốn hàm thêm nguồn, không hàm nào đụng DOM
+
+Toàn bộ nằm trong service worker, `fetch` thẳng tới `batchexecute`. Không content script, không
+hộp thoại, không click.
+
+| hàm | loại | args |
+|---|---|---|
+| `dl(text, title, nbId)` | văn bản | `[[[null,[title,text],null,2,null×6,1]], nbId, [2]]` — **3 ô** |
+| `fl(url, nbId)` | URL đơn | `[[[null×7,[url],null,null,1]], nbId, [2], [1,null×9,[1]]]` — 4 ô |
+| `ml(urls, nbId)` | URL batch | `[urls.map(u => [null×7,[u],null,null,1]), nbId, [2], [1,null×9,[1]]]` — 4 ô |
+| `gl(ids, nbId)` | xoá | `[ids.map(i => [i]), [2]]`, cắt mẻ 50 |
+
+Hai điều đã ghi ở chỗ khác, xác nhận lại chứ không mới: biến thể **3 ô cho văn bản** (bảng ở
+trên, dòng *văn bản dán*), và **ô url = 7 kể cả trong batch** của oracle B
+(`docs/tickets/008-*.md`). Mâu thuẫn với `addUrlsToSource` của oracle A (ô 2) **vẫn còn nguyên**.
+
+### 2. `CCqFvf` — tạo notebook. Chưa ghi ở đâu.
+
+```js
+async function ul(title) {
+  args        = [title, null, null, [2], [1,null×9,[1]]]
+  rpcids      = CCqFvf
+  source-path = /                          // gốc, giống wXbhsf
+  // đọc: notebookId = payload[0][2]  (fallback payload[2])
+}
+```
+
+### 3. Hai tín hiệu "đã đụng trần" — và cách chúng được dò
+
+Đáng ghi vì cả hai là **cơ chế phát hiện lúc chạy**, đúng thứ `rpc.js` ưu tiên hơn assertion:
+
+- **trần số Nguồn của một notebook**: oracle B tìm chuỗi `reached its source limit` **trong thân
+  phản hồi thô**, trước cả khi parse frame. Thô, nhưng không phụ thuộc hình dạng mảng nào.
+- **trần số notebook của tài khoản**: frame `CCqFvf` trả về mà `e[2] == null` → hiểu là hết quota
+  notebook. Nghĩa là `null` ở ô payload **không** phải lỗi parse; nó mang nghĩa.
+
+Ta hiện **không** dò được ca nào trong hai ca này. Cả hai đều rơi vào `unknown` → dừng lượt, và
+owner phải tự mở notebook đoán vì sao.
+
+### 4. Khử trùng theo `title_type_charcount`
+
+Oracle B gom nguồn trùng bằng khoá **(tiêu đề, loại, số ký tự)**, giữ bản có `arrayIndex` nhỏ
+nhất, trả `duplicateIds` để xoá. Đây là câu trả lời của họ cho đúng chỗ mà `service-worker.js`
+đang ghi *"bản trùng phải xoá tay"* — xem `docs/tickets/012-*.md`.
+
+Ghi lại chứ **không** đề xuất chép: khoá đó cần đọc được danh sách nguồn kèm số ký tự, tức cần
+đúng thứ `docs/tickets/005-*.md` đang chặn.

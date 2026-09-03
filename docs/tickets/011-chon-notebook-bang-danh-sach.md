@@ -68,6 +68,7 @@ không phải chỉ là chốt cái gì.
 | Chốt 1 — cache token như Sourclip? | **KHÔNG** | dropdown cần một tab `notebooklm.google.com` đang mở; `rpc.js:10` giữ nguyên |
 | Chốt 2 — tự mở tab nền khi bấm làm mới? | **CHƯA — làm (a) trước** | không mở tab nào; không có tab sẵn thì dropdown ẩn |
 | (Lead quyết) gắn sau `rpcEnabled`? | **không**, đổi lại buộc ràng buộc cử chỉ | mở popup không phát request nào |
+| Chốt 3 — có `+ Tạo notebook mới` trong dropdown? | **CHƯA CHỐT** (mở 2026-09-03) | xem mục *Chốt 3* |
 
 Peer **không** được lật một trong ba dòng này mà không hỏi lại — đặc biệt dòng thứ ba, vì hai vế
 của nó là một cặp: bỏ `rpcEnabled` chỉ hợp lệ **kèm** ràng buộc cử chỉ.
@@ -119,6 +120,43 @@ nào để canh. Gắn nó sau `rpcEnabled` là giấu tính năng khỏi đúng
 Đổi lại, ràng buộc thay thế phải cứng: **lượt liệt kê chỉ chạy sau một cử chỉ của owner** (mở
 dropdown, hoặc bấm làm mới). Không chạy lúc popup mở, không chạy theo `alarms`. Owner lật quyết
 định này được — nhưng lật thì phải lật cả ràng buộc cử chỉ, không lật riêng một nửa.
+
+### Chốt 3 — có `+ Tạo notebook mới` ngay trong dropdown không? Đề xuất: **CÓ.**
+
+Mở 2026-09-03, sau khi owner gửi ảnh chụp popup Sourclip. Ticket này ban đầu coi dropdown là
+**chỉ đọc** và đẩy việc tạo notebook sang "sau" — ảnh chụp cho thấy đó là chỗ tôi cắt phạm vi
+sai, vì mục *"+ Create new notebook"* của họ **đứng đầu danh sách, ở mọi trạng thái**, và nó
+chính là câu trả lời cho cái giá đã ghi ở Chốt 1 (*"lượt đầu dropdown vẫn rỗng"*).
+
+Máy trạng thái của họ đọc được nguyên vẹn từ `popup.js` — **bốn** trạng thái, mỗi trạng thái một
+việc làm được khác nhau, và không trạng thái nào là ngõ cụt:
+
+| trạng thái | dropdown hiện | bật? |
+|---|---|---|
+| đang tải | `Loading notebooks…` | tắt |
+| có context RPC, **0 notebook** | chỉ `+ Create new notebook` | **bật** — người mới vẫn đi tiếp được |
+| **không** có context RPC | `Open NotebookLM to load notebooks` | tắt — nói thẳng phải làm gì |
+| có notebook | `+ Create new notebook` **rồi mới tới danh sách** | bật |
+
+Chỗ đáng học nhất là hàng thứ ba: khi hỏng, nhãn không phải *"Lỗi"* mà là **việc cần làm**. Và
+hàng thứ hai là lý do tôi đổi đề xuất — nếu bỏ mục tạo mới thì trạng thái đó thành ngõ cụt, đúng
+cái ngõ cụt mà `resolveNotebookTab()` đang ném hôm nay.
+
+**Cái giá, và vì sao đây là quyết định của owner chứ không phải của Lead:** `CCqFvf` là một lượt
+**GHI** lên tài khoản owner — `WORKSPACE_PROTOCOL.md` → *external side effects*. Nó nhẹ hơn hẳn
+thêm Nguồn (một notebook rỗng thì xoá được, và không có nội dung nào để mất), nhưng nó **không
+phải chỉ đọc** như phần còn lại của ticket này. Nếu owner chốt KHÔNG thì phần còn lại của ticket
+vẫn chạy độc lập, chỉ là trạng thái "0 notebook" quay về ngõ cụt.
+
+Bằng chứng cho `CCqFvf` ghi ở `docs/notebooklm-rpc-do-duoc-2.md` → *Bổ sung 2026-09-03*, mục 2.
+Cùng hình dạng bằng chứng với `wXbhsf`: oracle A cho tên, oracle B cho args và đường đọc.
+
+### Không hỏi: có bộ chọn TÀI KHOẢN như họ không? — Quyết: **không.**
+
+Ảnh chụp của owner có thêm dropdown *"NotebookLM account"*. Bỏ, vì nó đứng trên đúng cơ chế mà
+ticket này đã từ chối ở Chốt 1: oracle B gọi `accounts.google.com/ListAccounts` để liệt kê **mọi
+tài khoản Google trên máy** rồi ghim `authuser` vào mọi request. Đó là một bề mặt mạng mới, tới
+một origin mới, để giải một bài toán mà một công cụ cá nhân không có.
 
 ## Kết quả cần có
 
