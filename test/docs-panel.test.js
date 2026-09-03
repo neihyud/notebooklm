@@ -93,6 +93,30 @@ async function run() {
     h.close();
   }
 
+  /*
+   * Mặc định production — đọc thẳng `NBLM.DEFAULTS`, không đọc lại fixture.
+   *
+   * `loadDocsPage` cố ý BẬT nút để phần lớn test dưới đây bấm được vào nó. Nếu
+   * không có khối này thì fixture là một đường dữ liệu song song: nó chạy cạnh
+   * mặc định thật, mang giá trị cùng kiểu, và không assertion nào đối chiếu —
+   * ai đổi `DEFAULTS.docsLauncher` về `true` sẽ thấy cả suite vẫn xanh.
+   *
+   * Vì sao mặc định là TẮT: `detect()` không có ngưỡng điểm, nên nút hiện trên
+   * BBC News và Wikipedia (đo 2026-09-03, brave headless — bảng trong
+   * `src/common/shared.js`). Đây là setting của CHÍNH ta, không phải hằng số
+   * ngoại sinh của Google, nên ghim nó là ghim một hợp đồng ta sở hữu.
+   */
+  {
+    const h = loadDocsPage({ tree: tree() });
+    await h.tick(80);
+    ok(
+      h.win.NBLM.DEFAULTS.docsLauncher === false,
+      '(d) nút nổi phải TẮT SẴN trong production — bật sẵn thì nó tự mời trên ' +
+        `mọi trang có 3 link cùng host, nhận: ${JSON.stringify(h.win.NBLM.DEFAULTS.docsLauncher)}`
+    );
+    h.close();
+  }
+
   /* ---------------------------------------------------------------- */
   /* bảng chọn: phẳng hoá, tick lan truyền                             */
   /* ---------------------------------------------------------------- */

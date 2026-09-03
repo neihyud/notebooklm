@@ -152,8 +152,37 @@
 
     /* --- trang tài liệu --------------------------------------------- */
 
-    /** Hiện nút mở bảng chọn link khi dò thấy sidebar tài liệu. */
-    docsLauncher: true,
+    /**
+     * Hiện nút nổi mở bảng chọn link khi dò thấy sidebar tài liệu.
+     *
+     * TẮT SẴN, và đây là kết luận của một phép đo chứ không phải sự thận trọng.
+     * `sidebar.js` chấm điểm ứng viên nhưng `detect()` KHÔNG có ngưỡng điểm —
+     * nó trả về ứng viên cao điểm nhất, mà `rate()` chỉ loại khi dưới 3 link.
+     * Nên nút hiện trên gần như mọi trang có một `nav`/`aside`/`[class*=sidebar]`
+     * chứa 3 link cùng host.
+     *
+     * Đo 2026-09-03, brave headless + CDP, `detect()` thật trên trang thật:
+     *
+     *   | trang              | nút hiện | count | onCurrentPage | bề ngang |
+     *   |--------------------|----------|-------|---------------|----------|
+     *   | vitepress (docs)   | có       |    17 | có            |      15% |
+     *   | docusaurus (docs)  | có       |     9 | có            |      23% |
+     *   | MDN (docs)         | có       |   182 | có            |      99% |
+     *   | BBC News           | CÓ ✗     |    24 | có            |      99% |
+     *   | Wikipedia          | CÓ ✗     |   750 | có            |      57% |
+     *   | Hacker News        | không    |     - | -             |        - |
+     *
+     * Vì sao KHÔNG chữa bằng một ngưỡng: bộ tín hiệu hiện có không tách được.
+     * `onCurrentPage` — thứ comment trong `rate()` gọi là "dấu hiệu mạnh nhất" —
+     * đúng ở CẢ BBC (nav có link "News" trong khi ta đang ở `/news`) lẫn
+     * Wikipedia (navbox chứa link tới chính bài đang đọc). Bề ngang loại được
+     * hai trang đó nhưng giết luôn MDN. Thêm ngưỡng là chỉnh số trên 8 mẫu.
+     *
+     * Ba lối gọi khác đã có sẵn và đã ghi trong chính trang Cài đặt:
+     * `Alt+Shift+D`, popup, và chuột phải → *Chọn link tài liệu…*. Nên tắt sẵn
+     * không mất tính năng nào; nó chỉ thôi tự mời trên trang bạn không hỏi.
+     */
+    docsLauncher: false,
     /**
      * Cách đưa một trang tài liệu vào NotebookLM.
      * 'text'          -> luôn trích nội dung tại máy rồi dán (mặc định: NotebookLM

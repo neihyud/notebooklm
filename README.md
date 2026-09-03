@@ -60,7 +60,7 @@ Yêu cầu: Chrome 111+ (dùng content script `world: "MAIN"`), và bạn đang 
 
 **Chuột phải** — trên một link YouTube bất kỳ, hoặc bôi đen một đoạn text chứa nhiều link.
 
-**Trang tài liệu** — mở trang docs bất kỳ. Extension dò sidebar và hiện nút nổi **→ NotebookLM · N trang** ở góc dưới bên phải; bấm vào để mở bảng chọn. Bảng dựng lại đúng cây mục lục của sidebar, có ô lọc, tick theo nhánh (tick mục cha là chọn cả nhánh con), rồi bấm *Thêm N trang*. Không thấy nút thì gọi bằng phím tắt `Alt+Shift+D`, popup, hoặc chuột phải → *Chọn link tài liệu…*.
+**Trang tài liệu** — mở trang docs bất kỳ, rồi gọi bảng chọn bằng phím tắt `Alt+Shift+D`, popup, hoặc chuột phải → *Chọn link tài liệu…*. Bảng dựng lại đúng cây mục lục của sidebar, có ô lọc, tick theo nhánh (tick mục cha là chọn cả nhánh con), rồi bấm *Thêm N trang*. Không thấy nút thì gọi bằng phím tắt `Alt+Shift+D`, popup, hoặc chuột phải → *Chọn link tài liệu…*.
 
 Hàng đợi chạy tuần tự, lưu bền qua các lần khởi động lại, và xem/dừng/thử-lại được từ popup. Cả hai loại nguồn dùng chung một hàng đợi.
 

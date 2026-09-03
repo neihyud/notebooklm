@@ -477,7 +477,12 @@ const WATCH_ROW = '<div id="top-level-buttons-computed"></div>';
 function loadDocsPage({
   url = 'https://docs.example.dev/guide/intro',
   tree = null,
-  settings = null,
+  // Fixture BẬT nút nổi, trong khi production TẮT SẴN (`DEFAULTS.docsLauncher`).
+  // Khai ở đây chứ không im lặng thừa hưởng: phần lớn test dưới đây mở bảng chọn
+  // BẰNG cách bấm nút, nên chúng cần nút tồn tại — đó là lựa chọn của fixture,
+  // không phải phát biểu về mặc định. Mặc định thật do một test riêng ghim, đọc
+  // thẳng `NBLM.DEFAULTS` (`test/docs-panel.test.js`, khối "mặc định production").
+  settings = { docsLauncher: true },
   extract = null,
 } = {}) {
   const dom = new JSDOM('<!doctype html><html><body><main><h1>Trang tài liệu</h1></main></body></html>', {

@@ -21,6 +21,16 @@ nó hỏng theo cả hai kiểu cùng lúc:
 Đường chữa đã có nguyên vẹn: trích ngay trong trình duyệt bạn, nơi trang đã render đầy đủ và bạn
 đã đăng nhập. Đó là câu mở đầu README, áp cho một loại trang mà extension chưa nhắm tới.
 
+> **Cập nhật 2026-09-03 — nửa đầu Bước 0 đã đo, và kết quả rộng hơn ticket này.**
+> Owner báo nút nổi hiện trên *mọi* trang, không riêng site chat. Đo bằng brave headless + CDP
+> (`detect()` thật trên trang thật): BBC News hiện nút với 24 "trang", Wikipedia với **750**.
+> Nguyên nhân: `detect()` không có ngưỡng điểm — `rate()` tính điểm rồi `detect()` **vứt đi**,
+> chỉ giữ `container`. Đã xử lý bằng cách **tắt sẵn** `docsLauncher` (bảng đo đầy đủ trong
+> `src/common/shared.js`), *không* bằng ngưỡng: `onCurrentPage` đúng ở cả BBC lẫn Wikipedia,
+> bề ngang thì giết MDN. Nghĩa là mục 4 dưới đây (**số phận nút docs trên site chat**) **mất
+> tính khẩn** — nút không còn tự hiện ở đâu nữa. Phần còn lại của Bước 0 vẫn cần đo: khi owner
+> **bật lại** nút, nó dựng cây gì trên chatgpt.com.
+
 ## Bước 0 — cái phải đo TRƯỚC, vì đường docs có thể đang chạy ở đó rồi
 
 Content script docs khớp `http://*/*` + `https://*/*`, và `exclude_matches` chỉ loại YouTube,
