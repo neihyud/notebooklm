@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Đo BA thứ mà chỉ tab NotebookLM đã đăng nhập của owner mới trả lời được, và
+ * Đo những thứ mà chỉ tab NotebookLM đã đăng nhập của owner mới trả lời được, và
  * `src/notebooklm/rpc.js` hiện đang phải ĐOÁN:
  *
  *   1. rpc id thật của "thêm nguồn", và đường batchexecute thật.
@@ -9,9 +9,31 @@
  *   3. Token `at` lấy được từ đường nào: đọc chữ của <script> trong DOM (đường
  *      mà content script ISOLATED world dùng được), hay bắt buộc phải có cầu nối
  *      MAIN world kiểu `src/youtube/page-bridge.js`.
+ *   4. Vị trí `sourceId` trong PHẢN HỒI của `izAoDd`        → ticket 009
+ *   5. Hình dạng args của `wXbhsf` (liệt kê notebook)        → ticket 011
+ *   6. Hình dạng args của `tGMBJ` (xoá nguồn)                → ticket 012
+ *   7. Hình dạng args khi MỘT `izAoDd` mang nhiều nguồn      → ticket 008
  *
  * Tiện thể dump luôn cấu trúc DANH SÁCH NGUỒN cho `docs/tickets/005-*.md`, vì
  * nó nằm trong cùng một phiên đăng nhập và không tốn thêm thao tác nào.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * MỤC 4-7 KHÔNG LÀM CÔNG CỤ NÀY NGUY HIỂM HƠN
+ *
+ * Script này THỤ ĐỘNG: nó không tự gửi một request batchexecute nào. Mọi thứ nó
+ * biết đều là request mà chính giao diện NotebookLM gửi đi, bắt lại bằng cách
+ * bọc `fetch`/`XMLHttpRequest`. Bốn mục mới cũng vậy — chúng chỉ là bốn thao tác
+ * owner làm trong giao diện (xoá một Nguồn, dán hai URL, bấm về trang chủ), và
+ * script đứng nghe.
+ *
+ * Điều đó quan trọng với ticket 008 và 012 hơn là với công cụ này. Cả hai ticket
+ * đang chặn vì phương án còn lại là TỰ GỬI một payload đoán mò lên notebook của
+ * owner — thêm nguồn thì không idempotent, xoá nguồn thì không hoàn tác được.
+ * Quan sát giao diện làm việc đó thay ta gỡ đúng chỗ chặn ấy mà không phải trả
+ * giá nào.
+ *
+ * Chuỗi vẫn bị che thành `str(<độ dài>)` như cũ, và điều đó không cản việc đo:
+ * bốn mục mới hỏi về VỊ TRÍ và HÌNH DẠNG, không hỏi về giá trị.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * NÓ KHÔNG IN RA CÁI GÌ
@@ -64,6 +86,25 @@ const MARKER = {
   title: `nblm-probe-title-${rnd}`,
   text: `nblm-probe-text-${rnd} noi dung mau de do hinh dang payload`,
 };
+
+/*
+ * Những rpc id mà một lượt chạy này CÓ THỂ trả lời, và ticket nào đang chờ.
+ *
+ * Tất cả đều bắt được THỤ ĐỘNG: chính giao diện NotebookLM gửi chúng, script chỉ
+ * nghe. Không lượt nào dưới đây do script tự gửi — đó là lý do thêm ba mục tiêu
+ * mới không làm tăng rủi ro của công cụ này một chút nào.
+ *
+ * Chuỗi trong payload vẫn bị che thành `str(<độ dài>)`, và điều đó KHÔNG cản
+ * việc đo: ba ticket dưới đây hỏi về VỊ TRÍ và HÌNH DẠNG, không hỏi về giá trị.
+ */
+const MUC_TIEU = [
+  { id: 'izAoDd', ticket: '008 + 009', vi: 'thêm nguồn — hình dạng args, và vị trí `sourceId` trong phản hồi' },
+  { id: 'wXbhsf', ticket: '011', vi: 'liệt kê notebook — args, và vị trí id/title trong phản hồi' },
+  { id: 'tGMBJ', ticket: '012', vi: 'xoá nguồn — hình dạng args' },
+];
+
+/** Chờ thêm bao lâu sau khi đã bắt đủ hai Nguồn mốc, để nhặt nốt các rpc id còn thiếu. */
+const CHO_THEM_MS = Number(process.env.NBLM_GRACE_MS || 90 * 1000);
 
 /* ------------------------------------------------------------------ */
 /* trình duyệt                                                         */
@@ -283,7 +324,7 @@ async function main() {
   console.log(` Trình duyệt: ${CHROME}`);
   console.log(` Hồ sơ:       ${PROFILE}   (GIỮ LẠI để lần sau khỏi đăng nhập)`);
   console.log('════════════════════════════════════════════════════════════════');
-  console.log('\nLÀM THEO ĐÚNG BA BƯỚC, trong cửa sổ vừa mở:\n');
+  console.log('\nBA BƯỚC BẮT BUỘC, trong cửa sổ vừa mở:\n');
   console.log('  1. Đăng nhập Google nếu nó hỏi.');
   console.log('  2. Tạo MỘT NOTEBOOK NHÁP mới (đừng dùng notebook thật — thêm Nguồn không');
   console.log('     hoàn tác được, phải xoá tay).');
@@ -292,8 +333,28 @@ async function main() {
   console.log(`       • loại "Văn bản đã sao chép":`);
   console.log(`           tiêu đề:  ${MARKER.title}`);
   console.log(`           nội dung: ${MARKER.text}`);
-  console.log(`\n     (tuỳ chọn, nếu giao diện của bạn có nút YouTube riêng: ${MARKER.youtube})\n`);
-  console.log('Script đang nghe. Mỗi lần bắt được một request batchexecute nó in ngay ra đây.');
+  console.log(`\n     (tuỳ chọn, nếu giao diện của bạn có nút YouTube riêng: ${MARKER.youtube})`);
+
+  console.log('\nBA BƯỚC THÊM — mỗi bước gỡ một ticket đang chặn. Bỏ qua được, nhưng bỏ');
+  console.log('bước nào thì ticket đó vẫn chặn, và cuối lượt script sẽ nói rõ thiếu cái gì.\n');
+  console.log('  4. [ticket 012] XOÁ một trong hai Nguồn mốc vừa thêm, bằng chính giao diện');
+  console.log('     NotebookLM (menu ba chấm trên thẻ Nguồn → Xoá).');
+  console.log('     → bắt được `tGMBJ`, tức hình dạng thật của lệnh xoá. Script KHÔNG tự gửi');
+  console.log('       lệnh xoá nào; nó chỉ nghe lệnh mà giao diện của Google gửi.');
+  console.log('');
+  console.log('  5. [ticket 008] Thử thêm HAI URL trong MỘT lần: mở lại "Trang web" và dán');
+  console.log('     cả hai dòng dưới đây cùng lúc, rồi bấm thêm.');
+  console.log(`         ${MARKER.url}/a`);
+  console.log(`         ${MARKER.url}/b`);
+  console.log('     → nếu giao diện chấp nhận, ta bắt được hình dạng BATCH thật, và ticket 008');
+  console.log('       không còn phải tự gửi payload đoán mò lên notebook của bạn nữa.');
+  console.log('     CHƯA KIỂM CHỨNG là giao diện có nhận nhiều URL một lần hay không — nếu ô');
+  console.log('     chỉ nhận một dòng thì bỏ qua bước này, đó cũng là một kết quả.');
+  console.log('');
+  console.log('  6. [ticket 011] Bấm về trang chủ NotebookLM (logo góc trên) một lần.');
+  console.log('     → bắt được `wXbhsf`, tức lệnh liệt kê notebook.');
+
+  console.log('\nScript đang nghe. Mỗi lần bắt được một request batchexecute nó in ngay ra đây.');
   console.log(`Xong thì Ctrl-C. Tự dừng sau ${Math.round(CHO_TOI_DA_MS / 60000)} phút.\n`);
 
   // Mốc "đã in tới đâu" phải gồm CẢ thế hệ của bộ ghi, không chỉ số lượng.
@@ -307,6 +368,9 @@ async function main() {
                 // nhau sau một lần reload trông y như output bị lặp.
   const hetGio = Date.now() + CHO_TOI_DA_MS;
   const daThayMarker = new Set();
+  const daThayRpc = new Set();
+  let batchThay = null;   // hình dạng args của một lượt izAoDd mang từ 2 nguồn trở lên
+  let hetAn = null;       // mốc hết thời gian ân hạn, đặt khi hai Nguồn mốc đã xong
 
   while (Date.now() < hetGio) {
     const raw = (await ev('JSON.stringify(window.__nblmProbe || null)')) || 'null';
@@ -325,16 +389,53 @@ async function main() {
       const chuoi = JSON.stringify(c.req.params || null);
       for (const k of Object.keys(MARKER)) if (chuoi.includes(`MARKER:${k}`)) daThayMarker.add(k);
       const dangQuanTam = chuoi.includes('MARKER:');
+
+      const rid = c.req.rpcId || (c.req.query && c.req.query.rpcids) || null;
+      if (rid) for (const r of String(rid).split(',')) daThayRpc.add(r.trim());
+
+      /*
+       * Hình dạng BATCH của `izAoDd` — câu 1+2 của ticket 008. Bắt được ở đây
+       * nghĩa là ticket đó không còn phải tự gửi payload đoán mò lên notebook
+       * của owner: chính giao diện Google vừa gửi bản đúng, và ta chép hình
+       * dạng chứ không chép giá trị.
+       */
+      const ps = c.req.params;
+      if (c.req.rpcId === 'izAoDd' && Array.isArray(ps) && Array.isArray(ps[0]) && ps[0].length >= 2 && !batchThay) {
+        batchThay = ps[0];
+        console.log(`\n★★ BẮT ĐƯỢC HÌNH DẠNG BATCH (${ps[0].length} nguồn trong một izAoDd) — ticket 008`);
+      }
+
       tong++;
-      console.log(`\n── request #${tong}${dangQuanTam ? '   ★ CÓ CHUỖI MỐC' : ''}`);
+      console.log(`\n── request #${tong}${dangQuanTam ? '   ★ CÓ CHUỖI MỐC' : ''}${rid ? '   [' + rid + ']' : ''}`);
       console.log(JSON.stringify(c, null, 2));
     }
     daIn = list.length;
 
-    if (daThayMarker.has('url') && (daThayMarker.has('title') || daThayMarker.has('text'))) {
-      console.log('\n✅ Đã bắt được cả nguồn URL lẫn nguồn văn bản. Sang phần đo token và danh sách Nguồn.\n');
+    const xongNguonMoc = daThayMarker.has('url') && (daThayMarker.has('title') || daThayMarker.has('text'));
+    const thieu = MUC_TIEU.filter((m) => !daThayRpc.has(m.id));
+
+    if (xongNguonMoc && hetAn === null) {
+      if (thieu.length === 0) {
+        console.log('\n✅ Đã bắt đủ hai Nguồn mốc VÀ cả ba rpc id mục tiêu. Sang phần đo token.\n');
+        break;
+      }
+      /*
+       * KHÔNG thoát ngay khi hai Nguồn mốc đã xong — đó là hành vi cũ, và nó cắt
+       * đúng lúc owner đang định làm bước 4/5/6. Nhưng cũng không chờ vô hạn:
+       * bước 4-6 là tuỳ chọn, và một script treo im lặng thì owner sẽ Ctrl-C,
+       * mất luôn phần đo token phía sau.
+       */
+      hetAn = Date.now() + CHO_THEM_MS;
+      console.log(`\n✅ Hai Nguồn mốc xong. Còn thiếu: ${thieu.map((m) => m.id).join(', ')}.`);
+      console.log(`   Đang chờ thêm ${Math.round(CHO_THEM_MS / 1000)} giây cho bước 4-6 — làm hay bỏ qua đều được.\n`);
+    }
+
+    if (hetAn !== null && (thieu.length === 0 || Date.now() > hetAn)) {
+      if (thieu.length) console.log(`\n⏭  Hết giờ chờ. Vẫn thiếu: ${thieu.map((m) => m.id).join(', ')}. Đi tiếp.\n`);
+      else console.log('\n✅ Đã bắt đủ cả ba rpc id mục tiêu. Sang phần đo token.\n');
       break;
     }
+
     await sleep(2000);
   }
 
@@ -426,9 +527,30 @@ async function main() {
     console.log('countSources() đọc được → hai mảng sourceList/sourceItem hiện đang ĐÚNG.');
   }
 
+  console.log('\n════════════ bảng đối chiếu: lượt này gỡ được ticket nào ════════════\n');
+  for (const m of MUC_TIEU) {
+    const co = daThayRpc.has(m.id);
+    console.log(`  [${co ? 'x' : ' '}] ${m.id.padEnd(8)} ticket ${m.ticket.padEnd(10)} ${m.vi}`);
+  }
+  console.log(`  [${batchThay ? 'x' : ' '}] batch    ticket 008        hình dạng args khi MỘT izAoDd mang nhiều nguồn`);
+
+  const thieuCuoi = MUC_TIEU.filter((m) => !daThayRpc.has(m.id));
+  if (thieuCuoi.length || !batchThay) {
+    console.log('\nCòn thiếu — và thiếu là một kết quả hợp lệ, không phải lỗi của lượt chạy:');
+    for (const m of thieuCuoi) console.log(`  • ${m.id}: ticket ${m.ticket} vẫn chặn. Bước tương ứng ở đầu lượt chưa chạy.`);
+    if (!batchThay) {
+      console.log('  • batch: không thấy izAoDd nào mang từ 2 nguồn trở lên.');
+      console.log('    Nếu bạn ĐÃ thử bước 5 mà ô chỉ nhận một URL, thì đó là câu trả lời cho');
+      console.log('    ticket 008: giao diện không batch, nên hình dạng batch chỉ còn hai oracle');
+      console.log('    mâu thuẫn đỡ — và ticket đó phải chọn đường (C).');
+    }
+  } else {
+    console.log('\nĐủ cả. Bốn dòng trên là toàn bộ dữ kiện mà 008/009/011/012 đang chờ.');
+  }
+
   console.log('\n════════════ xong ════════════');
   console.log(`Hồ sơ trình duyệt còn ở ${PROFILE} — xoá tay nếu máy dùng chung.`);
-  console.log('Nhớ xoá mấy Nguồn mốc trong notebook nháp (thêm Nguồn không hoàn tác được).\n');
+  console.log('Nhớ xoá nốt mấy Nguồn mốc còn lại trong notebook nháp — bước 4 mới xoá một cái.\n');
 }
 
 main()
