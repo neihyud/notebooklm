@@ -226,3 +226,43 @@ cái biến kia không ai đọc. Đúng ca *hoán vị xanh giả vì code ch�
 3. **Cho TTL vô hạn.** Phải đỏ ở phép kiểm token hết hạn.
 4. **Bỏ bước xoá cache khi đổi tài khoản.** Phải đỏ. Trùng đích với câu 1 nhưng đi từ đường khác:
    câu 1 canh chỗ đọc, câu 4 canh chỗ chuyển.
+
+
+## Tự soát sau khi giao — 2026-09-03
+
+Không có review seat độc lập cho ticket này, nên tôi đọc lại chính code vừa viết. **Hai khuyết
+tật thật, cả hai do commit đầu của ticket này tạo ra**, cả hai đều thuộc đúng loại mà repo sợ
+nhất: hỏng im lặng.
+
+### 1. `createNotebook` lùi sang đường tab một cách mù quáng
+
+Bản đầu viết `if (!r.ok) { …lùi sang tab… }`. Nhưng `created-but-no-id` nghĩa là notebook **có thể
+đã tạo xong rồi** mà ta không đọc được id — lùi lúc đó là tạo cái **thứ hai**, và owner phải xoá
+tay. Tạo notebook không idempotent, y hệt thêm Nguồn; `README.md` đã ghi đúng bài học này cho
+đường Nguồn mà tôi vẫn lặp lại ở đây. `notebook-limit` thì lùi cũng vô ích: trần là của tài
+khoản, không phải của đường đi.
+
+Sửa: chỉ lùi với những trạng thái **chứng minh được là chưa có byte nào rời máy**.
+
+### 2. Đường lùi nhận bất kỳ tab NotebookLM nào
+
+`anyNotebookLmTab()` không biết gì về tài khoản. Nên: owner chọn tài khoản A, đường thẳng hỏng,
+ta lùi sang một tab đang mở ở tài khoản B, và trả về danh sách notebook của B **trong khi dropdown
+vẫn hiện A**. Đó đúng là chế độ hỏng mà cả ticket này tồn tại để chặn — tôi dựng ràng buộc
+token↔`authuser` rất kỹ ở tầng dưới rồi để hở nó ở tầng trên.
+
+Sửa: `anyNotebookLmTab(wantAuthuser)` lọc tab theo `authuser`; không biết đang nhắm ai thì **không
+lùi**, trả về `chosen-missing` để giao diện nói ra.
+
+### Đo — `test/service-worker-accounts.test.js`, gốc 22 pass / 0 fail
+
+| đột biến | kết quả |
+|---|---|
+| M1 — lùi mù quáng như bản cũ | 18 pass, **4 đỏ** |
+| M2 — đường lùi nhận tab bất kỳ | 19 pass, **3 đỏ** |
+
+Một chỗ suýt xanh-giả trong chính test này, ghi lại vì nó là bài học chứ không phải sự cố: stub
+`chrome.tabs.sendMessage` ban đầu trả lời **cả ping của `ensureScripts`** bằng cùng một câu, nên
+phép đếm "có lùi sang đường tab không" đếm nhầm cả bước dò script. Ba ca C/D/E khi đó xanh vì lý
+do sai. Stub giờ tách ping riêng, và có một assertion neo `MSG_PING` vào hằng thật của repo để
+việc đổi tên không lặng lẽ mở lại lỗ đó.

@@ -198,8 +198,21 @@ async function ensureScripts(tabId, kind) {
  *   - **Không cần `/notebook/<id>`.** Hai lượt gốc gửi `source-path=/`, nên
  *     trang chủ NotebookLM cũng đủ.
  */
-async function anyNotebookLmTab() {
-  const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+async function anyNotebookLmTab(wantAuthuser) {
+  let tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+  /*
+   * Lọc theo tài khoản khi biết mình đang nhắm tài khoản nào.
+   *
+   * Đường tab dùng token của CHÍNH tab đó, nên nó luôn ghi vào tài khoản của
+   * tab — không có cách nào bảo nó nhắm tài khoản khác. Lùi từ đường thẳng
+   * sang đường tab mà không lọc chỗ này là: owner chọn tài khoản A, dropdown
+   * hiện A, còn danh sách bên dưới là của B. Đúng kiểu hỏng im lặng mà
+   * ticket 013 tồn tại để chặn.
+   */
+  if (wantAuthuser != null) {
+    const want = String(wantAuthuser);
+    tabs = tabs.filter((t) => (authuserFromUrl(t.url || '') || '0') === want);
+  }
   if (!tabs.length) return null;
   // Ưu tiên tab đang ở trong một notebook: nó chắc chắn đã nạp xong phiên và có
   // `WIZ_global_data`. Trang chủ vẫn dùng được, chỉ là lựa chọn thứ hai.
@@ -319,13 +332,19 @@ async function listNotebooks() {
   // đường tab không phụ thuộc `ListAccounts` lẫn token cache — nó là lưới an
   // toàn cho cả hai điều kiện đảo ngược 1 và 2 của ticket 013.
   const direct = await rootCall((o) => RPC.listNotebooks(o));
+  const acc = direct.account || null;
   if (direct.ok) {
-    return { ok: true, notebooks: direct.notebooks || [], needsTab: false, status: 'ok', account: direct.account };
+    return { ok: true, notebooks: direct.notebooks || [], needsTab: false, status: 'ok', account: acc };
   }
 
-  const tabId = await anyNotebookLmTab();
+  // Chỉ nhận tab CÙNG tài khoản đang nhắm. Không biết nhắm ai (`account-missing`)
+  // thì không lọc được, và cũng không được đoán bừa — trả về để owner chọn lại.
+  if (!acc || acc.authuser == null) {
+    return { ok: false, notebooks: [], needsTab: false, status: direct.status || 'account-missing', account: acc };
+  }
+  const tabId = await anyNotebookLmTab(acc.authuser);
   if (tabId == null) {
-    return { ok: false, notebooks: [], needsTab: true, status: direct.status || 'no-tab', account: direct.account };
+    return { ok: false, notebooks: [], needsTab: true, status: direct.status || 'no-tab', account: acc };
   }
   try {
     const r = await sendToTab(tabId, { type: MSG.NLM_LIST_NOTEBOOKS }, 20000);
@@ -334,9 +353,10 @@ async function listNotebooks() {
       notebooks: (r && r.notebooks) || [],
       needsTab: false,
       status: (r && r.status) || 'no-reply',
+      account: acc,
     };
   } catch (e) {
-    return { ok: false, notebooks: [], needsTab: false, status: 'tab-error' };
+    return { ok: false, notebooks: [], needsTab: false, status: 'tab-error', account: acc };
   }
 }
 
@@ -355,14 +375,34 @@ async function createNotebook(title) {
 
   let r = await rootCall((o) => RPC.createNotebook(name, o));
   if (!r.ok) {
-    const tabId = await anyNotebookLmTab();
+    /*
+     * LÙI CÓ ĐIỀU KIỆN, và điều kiện chặt hơn ở đường liệt kê rất nhiều.
+     *
+     * Tạo notebook KHÔNG idempotent. `created-but-no-id` nghĩa là notebook có
+     * thể đã tạo xong rồi mà ta không đọc được id; lùi sang đường tab lúc đó là
+     * tạo cái thứ HAI, và owner phải xoá tay. `notebook-limit` thì lùi cũng vô
+     * ích vì trần là của tài khoản, không phải của đường đi.
+     *
+     * Nên chỉ lùi với những trạng thái CHỨNG MINH được là chưa có byte nào rời
+     * máy. Cùng một luật mà `outcomeFor` áp cho đường thêm Nguồn, chỉ khác là ở
+     * đây viết ra tường minh vì từ vựng trạng thái của lượt tạo khác.
+     */
+    const CHUA_GUI = new Set(['no-fetch', 'no-at-token', 'rpc-id-stale', 'http-client-error', 'not-batchexecute']);
+    const acc = r.account || null;
+    if (!CHUA_GUI.has(r.status) || !acc || acc.authuser == null) {
+      return {
+        ok: false, notebookId: null, limit: !!r.limit,
+        status: r.status || 'no-reply', account: acc,
+      };
+    }
+    const tabId = await anyNotebookLmTab(acc.authuser);
     if (tabId == null) {
-      return { ok: false, notebookId: null, needsTab: true, status: r.status || 'no-tab' };
+      return { ok: false, notebookId: null, needsTab: true, status: r.status || 'no-tab', account: acc };
     }
     try {
       r = await sendToTab(tabId, { type: MSG.NLM_CREATE_NOTEBOOK, title: name }, 30000);
     } catch (_) {
-      return { ok: false, notebookId: null, status: 'tab-error' };
+      return { ok: false, notebookId: null, status: 'tab-error', account: acc };
     }
   }
   if (!r || !r.ok || typeof r.notebookId !== 'string' || !r.notebookId) {
