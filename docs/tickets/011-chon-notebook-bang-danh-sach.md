@@ -1,6 +1,8 @@
 # 011 — Chọn notebook bằng danh sách, thay vì bắt owner đi dán URL
 
-- status: **sẵn sàng giao** — hai chỗ chờ owner đã được chốt 2026-09-03, xem *Quyết định của owner*.
+- status: **đã làm** (commit `766a0be`) — hai chỗ chờ owner đã được chốt 2026-09-03, xem *Quyết
+  định của owner*. Một câu quyết trong ticket (chọn tài khoản) đã bị **lật** sau đó — xem ghi chú
+  ngay tại chỗ đó, và ticket 013.
 - class: **architecture lock-in** (`WORKSPACE_PROTOCOL.md` xếp *"hướng RPC batchexecute"* vào hạng
   này → so sánh alternatives + ghi rõ điều kiện đảo ngược **trước khi** viết code) **+
   cross-module** (chạm `MSG.*` và `src/background/service-worker.js`). Cũng chạm
@@ -167,12 +169,20 @@ owner. Mọi ràng buộc ở mục *Kết quả cần có → 5* là để ch�
 Bằng chứng cho `CCqFvf` ghi ở `docs/notebooklm-rpc-do-duoc-2.md` → *Bổ sung 2026-09-03*, mục 2.
 Cùng hình dạng bằng chứng với `wXbhsf`: oracle A cho tên, oracle B cho args và đường đọc.
 
-### Không hỏi: có bộ chọn TÀI KHOẢN như họ không? — Quyết: **không.**
+### Không hỏi: có bộ chọn TÀI KHOẢN như họ không? — Quyết: **không.** ĐÃ LẬT, xem ticket 013
 
-Ảnh chụp của owner có thêm dropdown *"NotebookLM account"*. Bỏ, vì nó đứng trên đúng cơ chế mà
-ticket này đã từ chối ở Chốt 1: oracle B gọi `accounts.google.com/ListAccounts` để liệt kê **mọi
-tài khoản Google trên máy** rồi ghim `authuser` vào mọi request. Đó là một bề mặt mạng mới, tới
-một origin mới, để giải một bài toán mà một công cụ cá nhân không có.
+Ảnh chụp của owner có thêm dropdown *"NotebookLM account"*. Lúc viết, tôi bỏ nó với lý do nó đứng
+trên đúng cơ chế mà ticket này đã từ chối ở Chốt 1: oracle B gọi `accounts.google.com/ListAccounts`
+để liệt kê **mọi tài khoản Google trên máy** rồi ghim `authuser` vào mọi request — một bề mặt mạng
+mới, tới một origin mới, để giải một bài toán mà một công cụ cá nhân không có.
+
+**Lý do đó sai tầng, và câu quyết ở đây KHÔNG còn đứng.** Owner chỉ đúng vào chỗ tôi lạc: câu hỏi
+thật không phải "có làm cái dropdown không" mà là "request của ta rơi vào tài khoản nào" —
+`authuser` là tham số trên MỌI request, dropdown chỉ là chỗ chọn giá trị. Đo lại thì ta chưa từng
+gửi `authuser`, tức không kiểm soát được điều đó. Ticket `013-chon-tai-khoan-va-authuser.md` lật
+quyết định này (owner chốt "y hệt Sourclip" 2026-09-03) và cài cả `ListAccounts` lẫn `authuser`.
+Giữ nguyên đoạn lập luận cũ ở trên — không xoá — vì nó là bằng chứng cho cách một quyết định đúng
+cục bộ (Chốt 1: không cache token) có thể kéo theo một quyết định sai tầng ở ngay bên cạnh.
 
 ## Kết quả cần có
 
