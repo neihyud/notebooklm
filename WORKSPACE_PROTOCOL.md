@@ -198,6 +198,29 @@ So sánh alternatives + ghi rõ điều kiện đảo ngược trước khi vi�
      HV1 của nó. Bài học ngược lại: hình dạng dưới đây là **chỗ để tìm**, không phải lời tiên
      đoán chắc chắn — khi peer đã biết hình dạng đó thì nó bịt được.
 
+  12. `listNotebooks.slots.id` ↔ `.title` — ticket 011, 2026-09-03. **KHÔNG đóng được bằng test**,
+     cùng hình dạng với cặp #5: cả hai vế là *bản đồ ngoại sinh của chính ta*, nên mọi fixture
+     dựng lại theo `slots` và hoán vị nó thì hai vế đảo cùng nhau — đo thật **45 pass / 0 fail**.
+     Đơn thuốc của cặp #5 áp đúng: không ghim tay một con số ô. Thứ đứng thay là runtime detection
+     — `idPattern` (regex hình dạng id) từ chối một chuỗi có khoảng trắng làm id, nên đọc nhầm ô
+     cho dropdown rỗng chứ không ghi một tiêu đề vào `notebookUrl`. Mutation trên chính cơ chế đó:
+     nhận-tất → 4 đỏ, mẫu-hỏng-thì-nhận → 1 đỏ.
+
+  13. `NBLM_ACCOUNTS.accountSlots.email` ↔ `.name` — ticket 013, 2026-09-03. **Cùng bệnh, cùng
+     đơn thuốc** như cặp #12, đo trước khi viết test nên không mất công dò lại: 0 đỏ khi hoán vị.
+     Cơ chế thay thế là `looksLikeEmail()` (regex nhận diện email) — 1 đỏ khi mẫu hỏng thì nhận
+     thay vì từ chối. Đáng ghi vì đây là **lần thứ hai liên tiếp cùng một lớp hằng số ngoại sinh
+     (một mảng tuple từ backend Google, vị trí ô do ta suy luận) tái diễn đúng hình dạng** — bản
+     đồ ngoại sinh của ta luôn dễ vỡ theo cách này, không phải một sự cố cá biệt.
+
+  14. **Trọng tâm thật của ticket 013**: token `at` ↔ `authuser` trong `google-accounts.js`.
+     KHÁC hai cặp trên — đây **ĐÃ CÓ LƯỚI**, vì hai giá trị này không ra từ cùng một bản đồ ngoại
+     sinh; chúng là hai kết quả của hai lượt mạng khác nhau mà không có gì trong kiểu dữ liệu
+     buộc chúng khớp. Gỡ phép khớp `authuser` trong `usable()` → **5 đỏ** trên
+     `google-accounts.test.js` + `notebooklm-notebooks.test.js` (gốc 94/0). Đây cũng là cặp mà
+     `anyNotebookLmTab()` phía service worker suýt lặp lại hở — tự soát sau khi giao bắt được nó
+     (xem cuối ticket 013), lưới riêng ở `service-worker-accounts.test.js` (gốc 22/0, đỏ 3–4).
+
 ### Hình dạng lỗi mà nghi thức hoán vị của peer bỏ sót
 
 Đo hai lượt liên tiếp (002 và 003, 2026-08-23). Cả hai lần, peer thử 23 cặp và bịt hết; cả hai
