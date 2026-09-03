@@ -1,13 +1,13 @@
 # 011 — Chọn notebook bằng danh sách, thay vì bắt owner đi dán URL
 
-- status: draft — **chưa giao**
+- status: **sẵn sàng giao** — hai chỗ chờ owner đã được chốt 2026-09-03, xem *Quyết định của owner*.
 - class: **architecture lock-in** (`WORKSPACE_PROTOCOL.md` xếp *"hướng RPC batchexecute"* vào hạng
   này → so sánh alternatives + ghi rõ điều kiện đảo ngược **trước khi** viết code) **+
   cross-module** (chạm `MSG.*` và `src/background/service-worker.js`). Cũng chạm
   independent-review trigger *"thêm bề mặt mạng mới"* → cần review seat độc lập.
 - tách từ: lượt đọc UX của Sourclip 1.8.0, 2026-09-03. Không commit nào đã làm gì cho việc này.
-- blocked-by: **một quyết định của owner, không phải một phép đo.** Khác 008/009 ở đúng chỗ đó —
-  xem "Hai chỗ owner phải chốt".
+- blocked-by: **không còn.** Chỗ chặn là một quyết định của owner, không phải một phép đo — khác
+  008/009 ở đúng chỗ đó — và owner đã chốt cả hai ngày 2026-09-03.
 - không đụng: `automation.js`, `selectors.js`, đường DOM, `manifest.json`.
 
 ## Bối cảnh — chỗ đau, đọc ra từ code chứ không từ cảm giác
@@ -57,9 +57,24 @@ Ba thứ đọc ra được và đáng ghi riêng:
 3. `[null,1,null,[2]]` là **hằng số ngoại sinh chưa hiểu**. Không ai biết `1` và `[2]` nghĩa gì.
    Nó vào `BASE`/`rpcOverrides` như mọi giả thuyết ngoại sinh khác, không vào thân hàm.
 
-## Hai chỗ owner phải chốt — và đây là lý do ticket chưa giao
+## Quyết định của owner — 2026-09-03
 
-### Chốt 1 — có cache token như Sourclip không? Đề xuất: **KHÔNG.**
+Cả hai chỗ dưới đây **đã được chốt**, đúng theo đề xuất đã ghi sẵn trong từng mục. Giữ nguyên
+phần lập luận chứ không xoá: nếu sau này ai muốn lật, thứ họ cần đọc là **vì sao** chốt thế, chứ
+không phải chỉ là chốt cái gì.
+
+| chỗ chốt | quyết định | hệ quả trực tiếp |
+|---|---|---|
+| Chốt 1 — cache token như Sourclip? | **KHÔNG** | dropdown cần một tab `notebooklm.google.com` đang mở; `rpc.js:10` giữ nguyên |
+| Chốt 2 — tự mở tab nền khi bấm làm mới? | **CHƯA — làm (a) trước** | không mở tab nào; không có tab sẵn thì dropdown ẩn |
+| (Lead quyết) gắn sau `rpcEnabled`? | **không**, đổi lại buộc ràng buộc cử chỉ | mở popup không phát request nào |
+
+Peer **không** được lật một trong ba dòng này mà không hỏi lại — đặc biệt dòng thứ ba, vì hai vế
+của nó là một cặp: bỏ `rpcEnabled` chỉ hợp lệ **kèm** ràng buộc cử chỉ.
+
+## Hai chỗ owner phải chốt — lập luận đầy đủ
+
+### Chốt 1 — có cache token như Sourclip không? Đề xuất: **KHÔNG.** → owner chốt: **KHÔNG**
 
 Sourclip lấy token trong service worker: `fetch('https://notebooklm.google.com/?authuser=N&pageId=none',
 {credentials:'include'})`, regex `"SNlM0e":"([^"]+)"` và `"cfb2h":"([^"]+)"` ra khỏi HTML, rồi
@@ -81,7 +96,7 @@ thì lượt đầu vẫn rỗng" như thể đó là giới hạn của giao th
 **lựa chọn bảo mật của ta**. Sourclip đã trả tiền để không có nó, và cái giá họ trả là lưu token
 xuống đĩa. Ta không trả giá đó — nhưng phải biết mình đang từ chối cái gì.
 
-### Chốt 2 — được tự mở tab NotebookLM khi owner bấm "làm mới" không?
+### Chốt 2 — được tự mở tab NotebookLM khi owner bấm "làm mới" không? → owner chốt: **(a)**
 
 Với Chốt 1 = KHÔNG, dropdown cần một tab. Hai đường:
 
