@@ -9,6 +9,9 @@
 - blocked-by: **một payload thật.** Xem "Vì sao chưa giao được ngay" — chỗ tắc không phải code.
 - liên quan: `docs/tickets/008-mot-request-nhieu-nguon.md` phụ thuộc ticket này, không phải
   ngược lại. Làm 008 trước 009 là làm ngược.
+- **`docs/tickets/012-hoan-tac-luot-vua-chay.md` cũng phụ thuộc ticket này, và phụ thuộc cứng**
+  (thêm 2026-09-03): không có `sourceId` thì đường hoàn tác chỉ còn cách đoán nguồn nào là của
+  mình theo tiêu đề — tức xoá nhầm nguồn owner tự thêm. Thứ tự đúng: **009 → 012 → 008**.
 
 ## Bối cảnh
 
