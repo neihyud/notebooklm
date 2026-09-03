@@ -57,6 +57,8 @@
     IMPORT_PLAYLIST: 'import-playlist',       // import toàn bộ playlist/kênh của tab hiện tại
     LIST_NOTEBOOKS: 'list-notebooks',         // popup xin danh sách notebook cho dropdown
     CREATE_NOTEBOOK: 'create-notebook',       // popup xin tạo notebook mới (lượt GHI duy nhất)
+    LIST_ACCOUNTS: 'list-accounts',           // popup xin danh sách tài khoản Google (ticket 013)
+    SELECT_ACCOUNT: 'select-account',         // popup chọn tài khoản; kéo theo việc vứt token cache
   };
 
   /** Loại nguồn trong hàng đợi. */
@@ -137,6 +139,21 @@
      * nên dán id mới vào là nó được thử trước còn id cũ vẫn nằm đó làm dự phòng.
      */
     rpcOverrides: null,
+    /**
+     * Email tài khoản Google mà mọi request NotebookLM nhắm tới (ticket 013).
+     *
+     * `null` nghĩa là "chưa chọn" — KHÔNG nghĩa là tài khoản mặc định. Phân
+     * biệt hai thứ đó là chủ ý: chưa chọn thì ta lùi về `authuser` của tab đang
+     * mở, và chỉ khi không có tab nào mới rơi về `0`; giao diện phải nói ra
+     * rằng đang dùng mặc định chứ không im lặng.
+     */
+    nlmAccount: null,
+    /**
+     * Ghi đè hình dạng `ListAccounts` + ngữ cảnh token (JSON), cùng luật với
+     * `rpcOverrides`. Đặt `{"ttlMs": 0}` là tắt hẳn việc lưu token xuống đĩa —
+     * một trong bốn điều kiện đảo ngược của ticket 013, và cố ý chỉ có một chỗ.
+     */
+    accountOverrides: null,
     /** Hiện checkbox chọn hàng loạt trên trang danh sách. */
     bulkSelectUI: true,
     /**

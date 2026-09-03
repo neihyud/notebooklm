@@ -304,6 +304,38 @@
           <p class="hint" id="rpcJsonStatus"></p>
         </div>
       </div>
+
+      <div class="field">
+        <div class="field__label">
+          <label for="nlmAccount">Tài khoản NotebookLM</label>
+          <p class="field__desc">
+            Email tài khoản Google nhận mọi request. Thường chọn bằng dropdown trong popup;
+            ô này để xem lại và để xoá. Bỏ trống = dùng tài khoản của tab đang mở, không có
+            tab thì dùng tài khoản mặc định.
+          </p>
+        </div>
+        <div class="field__control">
+          <input type="text" id="nlmAccount" spellcheck="false" placeholder="ban@gmail.com">
+        </div>
+      </div>
+
+      <div class="field field--wide">
+        <div class="field__label">
+          <label for="accountOverrides">Ghi đè hình dạng ListAccounts / ngữ cảnh token</label>
+          <p class="field__desc">
+            Hình dạng phản hồi của <code>ListAccounts</code> chỉ có MỘT nguồn xác nhận và
+            Google đổi nó không báo trước. Sửa ở đây thay vì chờ bản mới.
+            <strong>"ttlMs": 0</strong> tắt hẳn việc lưu token xuống đĩa.
+          </p>
+        </div>
+        <div class="field__control">
+          <textarea id="accountOverrides" rows="5" spellcheck="false" placeholder='{
+  "accountSlots": { "email": 3, "index": 7 },
+  "ttlMs": 43200000
+}'></textarea>
+          <p class="hint" id="accountJsonStatus"></p>
+        </div>
+      </div>
     </section>
 
     <section>

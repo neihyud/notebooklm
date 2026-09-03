@@ -17,7 +17,17 @@
  */
 // srt.js là thuần hàm (không đụng DOM) nên dùng lại được ở đây để định dạng
 // file tải về — khỏi phải nhân bản bộ chuyển đổi sang service worker.
-importScripts('/src/common/shared.js', '/src/youtube/srt.js');
+importScripts(
+  '/src/common/shared.js',
+  '/src/youtube/srt.js',
+  // Ba file dưới đây để service worker gọi thẳng batchexecute được, KHÔNG cần
+  // một tab NotebookLM nào đang mở (ticket 013). `rpc.js` nạp được ở đây vì nó
+  // không đụng `document` lúc nạp — chỉ trong thân hàm, và luôn qua tham số ghi
+  // đè được. `selectors.js` đi kèm vì `rpc.js` dùng đúng hàm `merge` của nó.
+  '/src/notebooklm/selectors.js',
+  '/src/notebooklm/rpc.js',
+  '/src/common/google-accounts.js'
+);
 
 const {
   MSG, STATUS, PRIVACY, KIND, KEYS, DEFAULTS,
@@ -202,6 +212,101 @@ async function anyNotebookLmTab() {
   return tab.id;
 }
 
+/* ------------------------------------------------------------------ */
+/* tài khoản Google và `authuser` — ticket 013                          */
+/* ------------------------------------------------------------------ */
+
+const ACC = self.NBLM_ACCOUNTS;
+const RPC = self.NBLM_RPC;
+
+/** Đẩy `accountOverrides` của owner vào module trước mỗi lượt dùng. */
+async function configureAccounts() {
+  const s = await getSettings();
+  ACC.configure(s.accountOverrides);
+  return s;
+}
+
+/**
+ * Danh sách tài khoản Google đang đăng nhập.
+ *
+ * Mảng rỗng KHÔNG phải lỗi cần báo động: nó chỉ nghĩa là dropdown tài khoản ẩn
+ * đi và mọi thứ còn lại chạy y như trước ticket 013. Đây là điều kiện đảo ngược
+ * số 1 — `ListAccounts` đổi hình dạng thì ta lùi chứ không hỏng.
+ */
+async function listAccounts() {
+  const s = await configureAccounts();
+  const r = await ACC.detectAccounts();
+  return {
+    ok: r.ok,
+    accounts: r.accounts,
+    selected: s.nlmAccount || null,
+    status: r.status,
+  };
+}
+
+/** `authuser` đọc ra từ URL của một tab, hoặc `null`. */
+function authuserFromUrl(url) {
+  try {
+    const v = new URL(url).searchParams.get('authuser');
+    return v == null || v === '' ? null : v;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Tài khoản nào sẽ nhận request — và ta biết chắc tới đâu.
+ *
+ * Ba mức, cố ý phân biệt rõ vì chúng dẫn tới ba câu khác nhau trong giao diện:
+ *   - `chosen`  — owner đã chọn, và `ListAccounts` ánh xạ được ra chỉ số.
+ *   - `tab`     — chưa chọn, nhưng có tab đang mở và tab đó nói `authuser` nào.
+ *   - `default` — không biết gì; dùng `0` và PHẢI nói ra là đang dùng mặc định.
+ */
+async function resolveAuthuser() {
+  const s = await configureAccounts();
+  const want = (s.nlmAccount || '').toLowerCase();
+  if (want) {
+    const r = await ACC.detectAccounts();
+    const hit = r.accounts.find((a) => a.email === want);
+    if (hit) return { authuser: String(hit.index), source: 'chosen', email: hit.email };
+    // Đã chọn mà không tìm thấy: tài khoản đã đăng xuất, hoặc ListAccounts hỏng.
+    // KHÔNG lặng lẽ rơi về `0` — đó đúng là ca ghi vào nhầm tài khoản.
+    return { authuser: null, source: 'chosen-missing', email: want };
+  }
+  const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+  for (const t of tabs) {
+    const au = authuserFromUrl(t.url || '');
+    if (au != null) return { authuser: au, source: 'tab', email: null };
+  }
+  return { authuser: '0', source: 'default', email: null };
+}
+
+/**
+ * Gọi một lượt RPC GỐC thẳng từ service worker — không cần tab nào mở.
+ *
+ * Đây là thứ ticket 013 mua bằng việc lưu token: `getRpcContext()` trả token
+ * ĐÃ GẮN với đúng `authuser` này, và `rootAttempt` nhận cả hai cùng lúc nên
+ * không có khe nào để chúng lệch nhau.
+ */
+async function rootCall(run) {
+  const who = await resolveAuthuser();
+  if (who.authuser == null) {
+    return { ok: false, status: 'account-missing', account: who };
+  }
+  const ctx = await ACC.getRpcContext(who.authuser);
+  if (!ctx.ok) return { ok: false, status: ctx.status, account: who };
+
+  const r = await run({
+    at: ctx.at,
+    authuser: ctx.authuser,
+    origin: ACC.config.origins[0],
+    // Cross-origin từ service worker, nên BUỘC phải 'include'. Đường content
+    // script vẫn giữ 'same-origin' — xem `attemptOnce`.
+    credentials: 'include',
+  });
+  return Object.assign({ account: who }, r);
+}
+
 /**
  * Danh sách notebook cho dropdown trong popup.
  *
@@ -210,8 +315,18 @@ async function anyNotebookLmTab() {
  * notebook nào" — hai câu dẫn tới hai hành động khác nhau của owner.
  */
 async function listNotebooks() {
+  // Đường thẳng trước: không cần tab nào mở. Hỏng thì lùi về đường tab, vì
+  // đường tab không phụ thuộc `ListAccounts` lẫn token cache — nó là lưới an
+  // toàn cho cả hai điều kiện đảo ngược 1 và 2 của ticket 013.
+  const direct = await rootCall((o) => RPC.listNotebooks(o));
+  if (direct.ok) {
+    return { ok: true, notebooks: direct.notebooks || [], needsTab: false, status: 'ok', account: direct.account };
+  }
+
   const tabId = await anyNotebookLmTab();
-  if (tabId == null) return { ok: false, notebooks: [], needsTab: true, status: 'no-tab' };
+  if (tabId == null) {
+    return { ok: false, notebooks: [], needsTab: true, status: direct.status || 'no-tab', account: direct.account };
+  }
   try {
     const r = await sendToTab(tabId, { type: MSG.NLM_LIST_NOTEBOOKS }, 20000);
     return {
@@ -238,14 +353,17 @@ async function createNotebook(title) {
   const name = String(title == null ? '' : title).trim();
   if (!name) return { ok: false, notebookId: null, status: 'no-title' };
 
-  const tabId = await anyNotebookLmTab();
-  if (tabId == null) return { ok: false, notebookId: null, needsTab: true, status: 'no-tab' };
-
-  let r;
-  try {
-    r = await sendToTab(tabId, { type: MSG.NLM_CREATE_NOTEBOOK, title: name }, 30000);
-  } catch (_) {
-    return { ok: false, notebookId: null, status: 'tab-error' };
+  let r = await rootCall((o) => RPC.createNotebook(name, o));
+  if (!r.ok) {
+    const tabId = await anyNotebookLmTab();
+    if (tabId == null) {
+      return { ok: false, notebookId: null, needsTab: true, status: r.status || 'no-tab' };
+    }
+    try {
+      r = await sendToTab(tabId, { type: MSG.NLM_CREATE_NOTEBOOK, title: name }, 30000);
+    } catch (_) {
+      return { ok: false, notebookId: null, status: 'tab-error' };
+    }
   }
   if (!r || !r.ok || typeof r.notebookId !== 'string' || !r.notebookId) {
     return { ok: false, notebookId: null, limit: !!(r && r.limit), status: (r && r.status) || 'no-reply' };
@@ -1840,6 +1958,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         case MSG.CREATE_NOTEBOOK:
           sendResponse(await createNotebook(message.title));
           return;
+
+        case MSG.LIST_ACCOUNTS:
+          sendResponse(await listAccounts());
+          return;
+
+        case MSG.SELECT_ACCOUNT: {
+          // Vứt ngữ cảnh cũ khi đổi tài khoản. KHÔNG phải vì tính đúng đắn phụ
+          // thuộc vào dòng này — `usable()` trong google-accounts.js đã chặn ca
+          // token-chéo-tài-khoản bằng cấu trúc — mà để không giữ trên đĩa một
+          // token không còn ai dùng.
+          const email = String(message.email || '').trim().toLowerCase() || null;
+          await setSettings({ nlmAccount: email });
+          await ACC.clearRpcContext();
+          sendResponse({ ok: true, selected: email });
+          return;
+        }
 
         default:
           sendResponse({ error: `lệnh lạ: ${message.type}` });

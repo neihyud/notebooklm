@@ -168,7 +168,7 @@ NotebookLM bản consumer **không có API công khai**. Giao diện của nó n
 
 **Đường RPC** (tắt sẵn, bật trong Cài đặt): gọi thẳng `batchexecute` từ chính tab đó. Nhanh hơn nhiều. Nó *sẽ* hỏng vào một ngày nào đó — nên nó được viết để hỏng an toàn, và "an toàn" ở đây có nghĩa hẹp hơn "luôn chạy tiếp".
 
-**Hai lượt đứng ngoài công tắc đó**: *liệt kê notebook* để đổ dropdown chọn notebook trong popup, và *tạo notebook mới* từ chính dropdown ấy. Cả hai chỉ chạy sau một cử chỉ của bạn (mở dropdown, bấm làm mới, bấm Tạo) — không chạy lúc mở popup, không chạy theo lịch — và cả hai đều cần sẵn một tab `notebooklm.google.com` đang mở; extension không tự mở tab nào cho việc này. Lượt liệt kê chỉ đọc. Lượt tạo thì **có ghi**, và đó là một đường ghi không nằm sau công tắc RPC: nó tạo một notebook rỗng mang tên bạn vừa gõ, không đụng tới notebook nào đang có.
+**Hai lượt đứng ngoài công tắc đó**: *liệt kê notebook* để đổ dropdown chọn notebook trong popup, và *tạo notebook mới* từ chính dropdown ấy. Cả hai chỉ chạy sau một cử chỉ của bạn (mở dropdown, bấm làm mới, bấm Tạo) — không chạy lúc mở popup, không chạy theo lịch — và cả hai chạy được **kể cả khi không có tab NotebookLM nào đang mở** — extension tự lấy token cho tài khoản bạn chọn, chứ không mở tab nào. Lượt liệt kê chỉ đọc. Lượt tạo thì **có ghi**, và đó là một đường ghi không nằm sau công tắc RPC: nó tạo một notebook rỗng mang tên bạn vừa gõ, không đụng tới notebook nào đang có.
 
 Extension chỉ coi là "đã thêm" khi server trả về một frame mang **đúng RPC id vừa gửi** — đó cũng là cách nó biết Google đã xoay id. Sau đó có ba kết cục, không phải hai:
 
@@ -176,9 +176,15 @@ Extension chỉ coi là "đã thêm" khi server trả về một frame mang **đ
 - **Đã ghi xong** → tiếp mục sau.
 - **Không biết** (mất mạng giữa chừng, server lỗi, phản hồi không đọc được) → **dừng mục đó và báo bạn tự mở notebook kiểm**. Đây là chủ ý: thêm Nguồn không idempotent, chạy lại đường giao diện cho một request có thể đã tới nơi là để lại một bản trùng phải xoá tay.
 
-> **Cam kết:** extension **không đọc, không lưu cookie nào**. Cả hai đường đều chạy trong tab `notebooklm.google.com` bạn đã đăng nhập, nên trình duyệt tự gắn cookie phiên — `manifest.json` không xin quyền `cookies`.
+> **Cam kết:** extension **không đọc, không lưu cookie nào**. Trình duyệt tự gắn cookie phiên vào request đi tới Google; extension không có cách nào đọc được giá trị cookie — `manifest.json` không xin quyền `cookies`. Cam kết này không đổi.
 >
-> Đường RPC có đọc token CSRF `at` mà trang tự nhúng sẵn, vì backend từ chối request thiếu nó. Token đó **chỉ đi vào thân request gửi tới chính `notebooklm.google.com`**: không vào bộ nhớ extension, không vào log, không vào bản chụp gỡ lỗi (bản chụp chỉ ghi *có tìm thấy hay không* và tên khoá chứa nó), và không ra khỏi origin đó.
+> Đường RPC có đọc token CSRF `at` mà trang tự nhúng sẵn, vì backend từ chối request thiếu nó. Token đó không vào log, và không vào bản chụp gỡ lỗi (bản chụp chỉ ghi *có tìm thấy hay không* và tên khoá chứa nó).
+>
+> **Chỗ này đã đổi, và nói thẳng ra vì bản trước của README hứa nhiều hơn thực tế.** Cho tới 2026-09-03 README viết token *"không vào bộ nhớ extension"*. Kể từ tính năng chọn tài khoản, câu đó **không còn đúng**: để hành động với tư cách một tài khoản Google cụ thể, extension phải có token của chính tài khoản đó, mà token ấy chỉ ra từ một lượt tải `notebooklm.google.com/?authuser=N`. Nên token **được lưu vào `chrome.storage.local`, kèm hạn 12 giờ**.
+>
+> Ba ràng buộc còn nguyên quanh nó: token không bao giờ rời hai origin `notebooklm.google.com` và `accounts.google.com`; mỗi bản ghi mang theo `authuser` của chính nó và bị từ chối nếu bạn đổi sang tài khoản khác (nên token của tài khoản này không thể gửi nhầm cho tài khoản kia); và bạn tắt hẳn việc lưu xuống đĩa được bằng cách đặt `{"ttlMs": 0}` trong *Ghi đè hình dạng ListAccounts* ở trang Cài đặt.
+>
+> Danh sách tài khoản Google lấy từ `accounts.google.com/ListAccounts` — chỉ email và tên hiển thị, chỉ khi bạn mở dropdown, và không lưu xuống đâu cả.
 
 Vài chi tiết đáng lưu ý trong `src/notebooklm/automation.js`:
 

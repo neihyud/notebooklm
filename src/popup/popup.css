@@ -995,3 +995,25 @@ kbd {
 .notebook__select { flex: 1 1 auto; min-width: 0; }
 .notebook__create { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
 .notebook__create input { flex: 1 1 auto; min-width: 0; }
+
+/* Hàng chọn tài khoản Google — ticket 013. Cùng nhịp với .notebook__pick. */
+.notebook__account {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.notebook__account .notebook__select {
+  flex: 1;
+  min-width: 0;
+}
+/*
+ * Câu "đang dùng tài khoản mặc định". Cố ý KHÔNG dùng màu lỗi: đây không phải
+ * lỗi, chỉ là chỗ ta không biết chắc — và ticket 013 buộc phải nói ra chứ
+ * không được im lặng.
+ */
+.notebook__note {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.75;
+}

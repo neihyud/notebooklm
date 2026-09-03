@@ -269,6 +269,51 @@ const decode = (call) => {
     ok(r.ok === false && r.notebookId === null, 'tạo: không có token thì không báo thành công');
   }
 
+  /* ---------------------------------------------------------------- */
+  /* `authuser` — ticket 013                                            */
+  /* ---------------------------------------------------------------- */
+
+  {
+    // Đường CŨ (content script, đọc token từ tab): KHÔNG được kèm authuser.
+    // Token là của tài khoản cái tab đang đứng; gắn thêm một authuser do người
+    // khác chọn là đúng ca ghi vào nhầm tài khoản mà ticket 013 tồn tại để chặn.
+    const f = scene({ plan: [] });
+    const E = f.win.NBLM_RPC.config.listNotebooks;
+    f.win.fetch = async (u, i) => (f.calls.push([u, i]), { status: 200, text: async () => envelope([wrb(E.rpcId, [[]])]) });
+    await f.win.NBLM_RPC.listNotebooks({ authuser: '7' });
+    const url = String(f.calls[0][0]);
+    ok(
+      !url.includes('authuser'),
+      'không truyền `at` thì authuser bị BỎ QUA — token của tab không đi kèm authuser của người khác'
+    );
+    ok((f.calls[0][1] || {}).credentials === 'same-origin', 'đường content script giữ credentials hẹp');
+  }
+
+  {
+    // Đường MỚI (service worker): `at` và `authuser` đi cùng nhau, hoặc không đi.
+    const f = scene({ plan: [] });
+    const E = f.win.NBLM_RPC.config.listNotebooks;
+    f.win.fetch = async (u, i) => (f.calls.push([u, i]), { status: 200, text: async () => envelope([wrb(E.rpcId, [[]])]) });
+    await f.win.NBLM_RPC.listNotebooks({
+      at: 'TOKEN-NGOAI', authuser: '2', origin: 'https://notebooklm.google.com', credentials: 'include',
+    });
+    const [url, init] = f.calls[0];
+    const q = new URL(String(url)).searchParams;
+    ok(q.get('authuser') === '2', 'truyền `at` kèm authuser thì authuser vào URL');
+    ok(String(init.body).includes(encodeURIComponent('TOKEN-NGOAI')), 'token truyền vào là token được gửi');
+    ok(init.credentials === 'include', 'service worker gọi cross-origin thì phải include');
+    ok(String(url).startsWith('https://notebooklm.google.com/'), 'origin tường minh cho URL tuyệt đối');
+  }
+
+  {
+    // authuser rỗng/null không được biến thành chuỗi "null" trong URL.
+    const f = scene({ plan: [] });
+    const E = f.win.NBLM_RPC.config.listNotebooks;
+    f.win.fetch = async (u, i) => (f.calls.push([u, i]), { status: 200, text: async () => envelope([wrb(E.rpcId, [[]])]) });
+    await f.win.NBLM_RPC.listNotebooks({ at: 'T', authuser: null });
+    ok(!String(f.calls[0][0]).includes('authuser'), 'authuser null → không có tham số, không phải "null"');
+  }
+
   console.log(`${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
 })();

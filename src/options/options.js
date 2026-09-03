@@ -82,10 +82,31 @@
       },
       write: (el, v) => (el.value = v ? JSON.stringify(v, null, 2) : ''),
     },
+
+    /* Chuẩn hoá về chữ thường ở ĐÚNG MỘT chỗ — service worker so khớp email
+       bằng chữ thường, nên lưu hoa thường lẫn lộn là lỡ một cách im lặng. */
+    nlmAccount: {
+      el: () => $('nlmAccount'),
+      read: (el) => el.value.trim().toLowerCase() || null,
+      write: (el, v) => (el.value = v || ''),
+    },
+    accountOverrides: {
+      el: () => $('accountOverrides'),
+      read: (el) => {
+        const raw = el.value.trim();
+        if (!raw) return null;
+        return JSON.parse(raw); // như rpcOverrides: lỗi cú pháp bắt ở save()
+      },
+      write: (el, v) => (el.value = v ? JSON.stringify(v, null, 2) : ''),
+    },
   };
 
-  /* Mỗi ô JSON có dòng báo lỗi của riêng nó — hai ô, hai chỗ đọc kết quả. */
-  const JSON_STATUS = { selectorOverrides: 'jsonStatus', rpcOverrides: 'rpcJsonStatus' };
+  /* Mỗi ô JSON có dòng báo lỗi của riêng nó — ba ô, ba chỗ đọc kết quả. */
+  const JSON_STATUS = {
+    selectorOverrides: 'jsonStatus',
+    rpcOverrides: 'rpcJsonStatus',
+    accountOverrides: 'accountJsonStatus',
+  };
 
   /* ------------------------------------------------------------------ */
   /* theo dõi thay đổi chưa lưu                                          */

@@ -7,7 +7,14 @@
  *
  * Vì sao không cần quyền mới: content script này chạy trên chính
  * `notebooklm.google.com`, nên `fetch` ở đây là same-origin và Chrome tự gắn
- * cookie phiên. Không đọc cookie, không lưu token, không gửi gì ra ngoài origin.
+ * cookie phiên. Không đọc cookie, không gửi gì ra ngoài origin.
+ *
+ * ĐÃ ĐỔI 2026-09-03 (ticket 013): câu "không lưu token" không còn đúng cho cả
+ * extension. File NÀY vẫn không lưu gì — nó đọc token từ `WIZ_global_data` của
+ * tab và token không rời thân request. Nhưng `src/common/google-accounts.js`
+ * thì CÓ lưu, để phục vụ việc chọn tài khoản, và owner đã cho phép rõ ràng.
+ * Kể từ đó file này còn được `importScripts` vào service worker, nơi nó nhận
+ * token qua `opts.at` thay vì tự đọc — xem `rootAttempt`.
  *
  * ────────────────────────────────────────────────────────────────────────
  * CÁI GÌ Ở ĐÂY LÀ GIẢ THUYẾT, CÁI GÌ KHÔNG
@@ -523,7 +530,7 @@
     return 100000 + Math.floor(Math.random() * 899999);
   }
 
-  function buildUrl({ path, rpcId, notebookId, reqid, sourcePath }) {
+  function buildUrl({ path, rpcId, notebookId, reqid, sourcePath, authuser, origin }) {
     const q = new URLSearchParams();
     q.set('rpcids', rpcId);
     // `sourcePath` chỉ được truyền cho hai lượt đứng ở GỐC (liệt kê / tạo
@@ -531,7 +538,11 @@
     q.set('source-path', sourcePath || `/notebook/${notebookId}`);
     q.set('_reqid', String(reqid));
     q.set('rt', 'c');
-    return `${path}?${q.toString()}`;
+    // `authuser` chọn TÀI KHOẢN nào nhận request. Bỏ trống thì Google hiểu là
+    // `0`, tức tài khoản đăng nhập đầu tiên — im lặng và có thể sai. Xem
+    // ticket 013. `null`/`undefined` vẫn giữ đường cũ nguyên vẹn.
+    if (authuser != null && authuser !== '') q.set('authuser', String(authuser));
+    return `${origin || ''}${path}?${q.toString()}`;
   }
 
   function buildBody({ rpcId, params, at }) {
@@ -689,15 +700,20 @@
   /* một lần gọi                                                          */
   /* ------------------------------------------------------------------ */
 
-  async function attemptOnce({ path, rpcId, params, at, notebookId, fetchImpl, reqid, sourcePath }) {
-    const url = buildUrl({ path, rpcId, notebookId, reqid, sourcePath });
+  async function attemptOnce({
+    path, rpcId, params, at, notebookId, fetchImpl, reqid, sourcePath, authuser, origin, credentials,
+  }) {
+    const url = buildUrl({ path, rpcId, notebookId, reqid, sourcePath, authuser, origin });
     let res;
     try {
       res = await fetchImpl(url, {
         method: 'POST',
-        // 'same-origin' chứ không phải 'include': ta chỉ gọi chính origin này,
-        // và cờ hẹp hơn thì không có cách nào lỡ gửi cookie đi nơi khác.
-        credentials: 'same-origin',
+        // Mặc định 'same-origin' chứ không phải 'include': lối gọi từ content
+        // script chỉ đụng chính origin này, và cờ hẹp hơn thì không có cách nào
+        // lỡ gửi cookie đi nơi khác. Service worker gọi thì BUỘC phải là
+        // 'include' (cross-origin), nên nó truyền vào tường minh — không có
+        // đường nào nới cờ này một cách tình cờ.
+        credentials: credentials || 'same-origin',
         headers: { 'content-type': 'application/x-www-form-urlencoded;charset=UTF-8' },
         body: buildBody({ rpcId, params, at }),
       });
@@ -838,20 +854,44 @@
     const doc = o.document || root.document;
 
     if (!fetchImpl) return { status: 'no-fetch' };
-    const found = readAtToken(doc, cfg);
-    if (!found) return { status: 'no-at-token' };
 
-    const r = await attemptOnce({
-      path: cfg.paths[0],
-      rpcId: entry.rpcId,
-      sourcePath: entry.sourcePath,
-      params,
-      at: found.token,
-      fetchImpl,
-      reqid: o.reqid == null ? newReqId() : o.reqid,
-    });
-    if (r.detail) r.detail = redact(r.detail, found.token);
-    return r;
+    // Hai nguồn token, và chúng KHÔNG trộn lẫn:
+    //   - `o.at` — service worker đã lấy sẵn qua `NBLM_ACCOUNTS.getRpcContext()`
+    //     cho ĐÚNG `o.authuser` nó đang gửi. Ràng buộc khớp nằm ở đó, không ở
+    //     đây, và cố ý chỉ nằm ở một chỗ.
+    //   - không có `o.at` — đường cũ: đọc từ `WIZ_global_data` của chính tab.
+    //     Tab nào thì tài khoản nấy, nên KHÔNG được kèm `authuser` do người
+    //     khác chọn; gửi token của tab kèm authuser của tài khoản khác đúng là
+    //     ca hỏng mà ticket 013 tồn tại để chặn.
+    const at = typeof o.at === 'string' && o.at ? o.at : null;
+    if (!at) {
+      const found = readAtToken(doc, cfg);
+      if (!found) return { status: 'no-at-token' };
+      // `null` VIẾT THẲNG ở đây, không phải một biến tính ra từ `o.authuser`.
+      // Đó là chỗ giữ luật: không có đường nào để `o.authuser` chảy vào nhánh
+      // này, kể cả khi ai đó sửa nhầm dòng trên. Đo 2026-09-03: một đột biến
+      // gỡ phép canh bằng biến vẫn XANH — vì biến đó là code chết. Ràng buộc
+      // thật nằm ở hằng `null` này.
+      return await finish(found.token, null);
+    }
+    return await finish(at, o.authuser);
+
+    async function finish(token, au) {
+      const r = await attemptOnce({
+        path: cfg.paths[0],
+        rpcId: entry.rpcId,
+        sourcePath: entry.sourcePath,
+        params,
+        at: token,
+        fetchImpl,
+        reqid: o.reqid == null ? newReqId() : o.reqid,
+        authuser: au,
+        origin: o.origin,
+        credentials: o.credentials,
+      });
+      if (r.detail) r.detail = redact(r.detail, token);
+      return r;
+    }
   }
 
   /**
@@ -1091,13 +1131,20 @@
    * tồn tại để một tin đến sớm hơn lần đọc storage đầu tiên không lặng lẽ chạy
    * bằng cấu hình mặc định.
    */
+  // Hai điều kiện tách riêng, không gộp: kể từ ticket 013 file này còn nạp
+  // trong service worker qua `importScripts`, nên nó phải chịu được một
+  // `chrome.storage` không có `onChanged`. Đọc cấu hình lần đầu vẫn chạy; chỉ
+  // phần theo dõi thay đổi là bỏ qua.
   if (typeof root.chrome !== 'undefined' && root.chrome && root.chrome.storage) {
     ready = root.NBLM.getSettings().then(configure, () => {});
-    root.chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes[root.NBLM.KEYS.SETTINGS]) {
-        configure(changes[root.NBLM.KEYS.SETTINGS].newValue || {});
-      }
-    });
+    const onChanged = root.chrome.storage.onChanged;
+    if (onChanged && typeof onChanged.addListener === 'function') {
+      onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes[root.NBLM.KEYS.SETTINGS]) {
+          configure(changes[root.NBLM.KEYS.SETTINGS].newValue || {});
+        }
+      });
+    }
   }
 
   root.NBLM_RPC = {

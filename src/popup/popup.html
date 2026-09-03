@@ -19,6 +19,10 @@
       <label for="notebook-url" class="notebook__label">Notebook đích</label>
       <button type="button" id="use-current" class="btn-text">Dùng tab hiện tại</button>
     </div>
+    <div class="notebook__account" id="notebook-account-row" hidden>
+      <select id="account-select" class="notebook__select" aria-label="Tài khoản NotebookLM"></select>
+    </div>
+    <p class="notebook__note" id="account-note" hidden></p>
     <div class="notebook__pick">
       <select id="notebook-select" class="notebook__select" aria-label="Chọn notebook từ danh sách" disabled>
         <option value="">Bấm ↻ để nạp danh sách</option>

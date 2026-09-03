@@ -10,6 +10,9 @@
     notebookUrl: $('notebook-url'),
     notebookHint: $('notebook-hint'),
     useCurrent: $('use-current'),
+    accountRow: $('notebook-account-row'),
+    accountSelect: $('account-select'),
+    accountNote: $('account-note'),
     notebookSelect: $('notebook-select'),
     notebookRefresh: $('notebook-refresh'),
     notebookCreate: $('notebook-create'),
@@ -142,18 +145,85 @@
   }
 
   /**
+   * Hàng chọn tài khoản (ticket 013).
+   *
+   * ẨN HẲN khi không đọc được `ListAccounts`, hoặc khi chỉ có đúng một tài
+   * khoản: một dropdown một dòng không cho owner quyết định gì, chỉ chiếm chỗ.
+   * Đó cũng chính là đường lùi cho điều kiện đảo ngược số 1 của ticket.
+   */
+  function renderAccounts(r) {
+    const row = els.accountRow;
+    const sel = els.accountSelect;
+    const list = (r && r.accounts) || [];
+    if (!r || !r.ok || list.length < 2) {
+      row.hidden = true;
+      sel.textContent = '';
+      return;
+    }
+    sel.textContent = '';
+    for (const a of list) {
+      const o = document.createElement('option');
+      o.value = a.email;
+      o.textContent = a.isDefault ? `${a.email} (mặc định)` : a.email;
+      sel.append(o);
+    }
+    sel.value = r.selected || (list.find((a) => a.isDefault) || list[0]).email;
+    row.hidden = false;
+  }
+
+  /**
+   * Câu "đang dùng tài khoản nào". Hiện CHỈ khi ta không chắc.
+   *
+   * Ticket 013, Kết quả 3: không có tài khoản nào được chọn thì phải NÓI RA là
+   * đang dùng mặc định. Im lặng ở đây đúng là chế độ hỏng mà ticket tồn tại để
+   * chặn — ghi vào nhầm tài khoản mà không báo gì.
+   */
+  function renderAccountNote(account) {
+    const el = els.accountNote;
+    if (!account || account.source === 'chosen') {
+      el.hidden = true;
+      el.textContent = '';
+      return;
+    }
+    const text = {
+      tab: 'Đang dùng tài khoản của tab NotebookLM đang mở.',
+      default: 'Chưa chọn tài khoản — đang dùng tài khoản Google mặc định (authuser=0).',
+      'chosen-missing':
+        'Tài khoản đã chọn không còn đăng nhập. Chưa gửi request nào — chọn lại tài khoản ở trên.',
+    }[account.source];
+    if (!text) {
+      el.hidden = true;
+      return;
+    }
+    el.textContent = text;
+    el.hidden = false;
+  }
+
+  async function napTaiKhoan() {
+    let r = null;
+    try {
+      r = await send(MSG.LIST_ACCOUNTS);
+    } catch (_) {
+      r = null;
+    }
+    renderAccounts(r);
+  }
+
+  /**
    * Lượt liệt kê. CHỈ gọi từ hai chỗ: nút ↻, và ngay sau khi tạo notebook xong.
    * Không có lối gọi nào lúc popup mở — đó là ràng buộc thay cho việc gắn tính
    * năng này sau công tắc `rpcEnabled` (xem ticket 011, Chốt 3).
    */
   async function napDanhSach() {
     renderNotebookSelect('dang-nap');
+    await napTaiKhoan();
     let r = null;
     try {
       r = await send(MSG.LIST_NOTEBOOKS);
     } catch (_) {
       r = null;
     }
+    renderAccountNote(r && r.account);
     if (!r || (!r.ok && r.needsTab)) {
       renderNotebookSelect('khong-co-tab');
       els.notebookHint.textContent =
@@ -707,6 +777,28 @@
   });
 
   els.notebookRefresh.addEventListener('click', () => withActionLock(napDanhSach));
+
+  /*
+   * Đổi tài khoản thì nạp lại danh sách notebook NGAY, không đợi owner bấm ↻:
+   * để nguyên danh sách cũ bên dưới một tài khoản mới là nói dối bằng giao
+   * diện — owner sẽ chọn một notebook không thuộc tài khoản đang hiện.
+   */
+  els.accountSelect.addEventListener('change', () =>
+    withActionLock(async () => {
+      const email = els.accountSelect.value;
+      try {
+        await send(MSG.SELECT_ACCOUNT, { email });
+      } catch (_) {
+        return;
+      }
+      // Xoá cả Ô LẪN CÀI ĐẶT. Xoá mỗi ô là để lại một `notebookUrl` trỏ vào
+      // notebook của tài khoản cũ — lượt import kế tiếp sẽ ghi vào đó mà giao
+      // diện không hiện gì. Đúng kiểu hỏng im lặng ticket 013 phải chặn.
+      els.notebookUrl.value = '';
+      await globalThis.NBLM.setSettings({ notebookUrl: '' });
+      await napDanhSach();
+    })
+  );
 
   els.notebookSelect.addEventListener('change', async () => {
     const v = els.notebookSelect.value;

@@ -34,6 +34,24 @@ const referenced = new Set([
   manifest.background.service_worker,
   ...manifest.content_scripts.flatMap((cs) => cs.js || []),
 ]);
+/*
+ * Service worker nạp thêm file bằng `importScripts()`, và những file đó KHÔNG
+ * xuất hiện ở đâu trong manifest. Không quét chỗ này thì phép kiểm "code chết"
+ * bên dưới sai theo cả hai chiều: một file chỉ được importScripts sẽ bị báo là
+ * chết, còn một `importScripts` trỏ vào file không tồn tại thì không ai bắt.
+ */
+const swPath = manifest.background.service_worker;
+const swSrc = fs.readFileSync(path.join(ROOT, swPath), 'utf8');
+// `[\s\S]*?\);` chứ không phải `[^)]*`: lời gọi trải nhiều dòng và có chú thích
+// chứa dấu `)`, nên dừng ở dấu đóng ngoặc đầu tiên là cắt mất nửa danh sách —
+// đúng kiểu hỏng im lặng mà chính phép kiểm này tồn tại để bắt.
+for (const call of swSrc.matchAll(/importScripts\(([\s\S]*?)\);/g)) {
+  for (const hit of call[1].matchAll(/['"]([^'"]+\.js)['"]/g)) {
+    const file = path.normalize(hit[1].replace(/^\//, ''));
+    exists(file, `importScripts trong ${swPath}`);
+    referenced.add(file);
+  }
+}
 const inHtml = new Set();
 // Quét mọi trang HTML trong src/, không chỉ popup+options: offscreen document
 // được tạo lúc chạy bằng chrome.offscreen nên không xuất hiện trong manifest.
