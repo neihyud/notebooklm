@@ -29,6 +29,11 @@
     NLM_PING: 'nlm-ping',
     NLM_ADD_URL: 'nlm-add-url',
     NLM_ADD_TEXT: 'nlm-add-text',
+    // Hai lượt đứng ở GỐC notebooklm.google.com, không cần đứng trong notebook.
+    // Chỉ chạy sau một cử chỉ của owner trong popup — không có lối gọi tự động
+    // nào, và đó là ràng buộc thay cho việc gắn chúng sau `rpcEnabled`.
+    NLM_LIST_NOTEBOOKS: 'nlm-list-notebooks',
+    NLM_CREATE_NOTEBOOK: 'nlm-create-notebook',
     // background/popup -> tab tài liệu
     DOCS_PING: 'docs-ping',
     DOCS_PANEL: 'docs-panel',     // mở bảng chọn link
@@ -50,6 +55,8 @@
     COLLECT_TABS: 'collect-tabs',             // gom mọi tab YouTube đang mở
     COLLECT_PAGE_LINKS: 'collect-page-links', // quét link YouTube trên tab hiện tại
     IMPORT_PLAYLIST: 'import-playlist',       // import toàn bộ playlist/kênh của tab hiện tại
+    LIST_NOTEBOOKS: 'list-notebooks',         // popup xin danh sách notebook cho dropdown
+    CREATE_NOTEBOOK: 'create-notebook',       // popup xin tạo notebook mới (lượt GHI duy nhất)
   };
 
   /** Loại nguồn trong hàng đợi. */

@@ -121,6 +121,18 @@ nào để canh. Gắn nó sau `rpcEnabled` là giấu tính năng khỏi đúng
 dropdown, hoặc bấm làm mới). Không chạy lúc popup mở, không chạy theo `alarms`. Owner lật quyết
 định này được — nhưng lật thì phải lật cả ràng buộc cử chỉ, không lật riêng một nửa.
 
+**Chỗ lập luận trên KHÔNG phủ, ghi lúc làm 2026-09-03.** Đoạn trên viết trước Chốt 3, nên nó chỉ
+nói về `wXbhsf` và dựa hẳn vào chữ *"chỉ đọc"*. Chốt 3 thêm `CCqFvf`, và `CCqFvf` **có ghi**. Tôi
+đã cho nó đi chung `rootAttempt`, tức cũng không sau `rpcEnabled` — quyết định của lead, không
+phải của owner, nên nó nằm đây để owner nhìn thấy mà lật:
+
+- Nhận, vì kiểu hỏng khác hẳn. `rpcEnabled` sinh ra để canh ca *Nguồn rơi vào sai ô của một
+  notebook thật*. `CCqFvf` hỏng thì để lại một notebook rỗng thừa hoặc sai tên — xoá tay được,
+  và không notebook đang có nào bị đụng.
+- Và nó không tự chạy: owner phải chọn `+ Tạo notebook mới`, gõ tên, rồi bấm Tạo.
+- Nếu owner thấy "đường ghi thì phải sau công tắc" là luật không có ngoại lệ, chỗ sửa là một
+  dòng trong `createNotebook`, không phải sửa kiến trúc.
+
 ### Chốt 3 — có `+ Tạo notebook mới` ngay trong dropdown không? Đề xuất: **CÓ.** → owner chốt: **CÓ**
 
 Mở 2026-09-03, sau khi owner gửi ảnh chụp popup Sourclip. Ticket này ban đầu coi dropdown là
@@ -261,12 +273,20 @@ phải một cuộc di trú** — và đó là khác biệt lớn nhất giữa 
 
 Mỗi câu nói rõ **chiều nào phải đỏ**.
 
-1. **Đảo `slots.id` và `slots.title`** (2 ↔ 0). Chiều phải đỏ: **bản hoán vị**. Đúng hình dạng
-   *đường dữ liệu song song*: hai chuỗi cùng kiểu đi ra từ một phần tử mảng. Đảo chúng thì
-   dropdown vẫn đúng số dòng, vẫn "chạy" — chỉ có `value` của `<option>` thành tiêu đề và nhãn
-   thành id, tức thứ ghi vào `notebookUrl` là rác. Assert phải dùng fixture mà **id và title khác
-   nhau rõ rệt** và ghim **trường nào mang giá trị nào**; một phần tử có id trùng title thì xanh
-   cả hai chiều.
+1. **Đảo `slots.id` và `slots.title`** (2 ↔ 0). Chiều phải đỏ: ticket viết là **bản hoán vị** —
+   **và đó là một dự đoán SAI, đã đo và bác bỏ lúc làm** (2026-09-03).
+
+   Hoán vị đó **không đỏ được**, vì lý do cấu trúc chứ không phải sơ suất: `slots` chính là thứ
+   **định nghĩa** nghĩa của hai ô, nên mọi fixture đều phải dựng theo nó và hai vế đảo cùng nhau.
+   Đo thật: đảo slots → **45 pass / 0 fail**. Muốn nó đỏ thì phải gõ tay một con số ô, tức chứng
+   nhận một hằng số ngoại sinh mà chỉ `tools/probe-notebooklm.mjs` mới đo được — đúng bẫy *test
+   ghim hằng số chép tay*. Đây là ca *"hai vế đều là giả thuyết của ta"*.
+
+   **Thứ đứng thay** là một cơ chế phát hiện lúc chạy, thêm vào chính vì phép đo này:
+   `listNotebooks.idPattern` (`^[A-Za-z0-9_-]{8,}$`) từ chối dòng mà ô "id" mang chuỗi có khoảng
+   trắng — tức một tiêu đề. Đọc nhầm ô thì dropdown rỗng và `notebookUrl` **không đổi**, thay vì
+   nhận một cái tên làm id. Cơ chế đó thì test được, và nó cắn: `idPattern` nhận tất → **4 đỏ**;
+   mẫu hỏng nghĩa là "nhận" thay vì "từ chối" → **1 đỏ**.
 2. **Đổi `sourcePath` từ `/` sang một đường notebook.** Chiều phải đỏ: **bản hoán vị** — nhưng
    chỉ khi có test ghim `source-path` **trong query string thật sự gửi đi**. Nếu câu trả lời là
    "không test nào" thì nói ra: nghĩa là chỗ này chỉ có oracle đỡ, không có lưới.

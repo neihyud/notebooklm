@@ -61,7 +61,14 @@
    * `src/docs/content.js`. Trả lời tin của script khác là cướp mất phản hồi của
    * nó (Chrome lấy câu trả lời đến trước), và lỗi hiện ra sẽ trỏ sai chỗ hoàn toàn.
    */
-  const HANDLED = new Set([MSG.NLM_PING, MSG.NLM_ADD_URL, MSG.NLM_ADD_TEXT, 'nblm-hud']);
+  const HANDLED = new Set([
+    MSG.NLM_PING,
+    MSG.NLM_ADD_URL,
+    MSG.NLM_ADD_TEXT,
+    MSG.NLM_LIST_NOTEBOOKS,
+    MSG.NLM_CREATE_NOTEBOOK,
+    'nblm-hud',
+  ]);
 
   /**
    * Trả nguyên vẹn cả `verified` lẫn `unverified` về background.
@@ -111,6 +118,29 @@
             if (result.ok) hideHud(hudDone(message.title, result));
             else showHud(`Lỗi: ${result.error}`, { spinning: false });
             sendResponse(reply(result));
+            return;
+          }
+
+          /*
+           * Hai lượt gốc. KHÔNG hiện HUD: chúng chạy do owner đang nhìn vào
+           * popup, nên chỗ báo trạng thái là popup. Một HUD nhấp nháy trên tab
+           * NotebookLM lúc owner không nhìn tab đó chỉ là nhiễu.
+           *
+           * `NBLM_RPC` không có thì trả `ok:false` chứ không ném: file rpc.js
+           * nạp trước content.js trong `manifest.json`, nhưng lối tiêm bằng
+           * `chrome.scripting` cũng chạy qua đây và ta không muốn một lỗi lạ.
+           */
+          case MSG.NLM_LIST_NOTEBOOKS: {
+            const R = globalThis.NBLM_RPC;
+            if (!R) { sendResponse({ ok: false, notebooks: [], status: 'no-rpc-module' }); return; }
+            sendResponse(await R.listNotebooks());
+            return;
+          }
+
+          case MSG.NLM_CREATE_NOTEBOOK: {
+            const R = globalThis.NBLM_RPC;
+            if (!R) { sendResponse({ ok: false, notebookId: null, status: 'no-rpc-module' }); return; }
+            sendResponse(await R.createNotebook(message.title));
             return;
           }
 

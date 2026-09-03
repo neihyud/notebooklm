@@ -10,6 +10,12 @@
     notebookUrl: $('notebook-url'),
     notebookHint: $('notebook-hint'),
     useCurrent: $('use-current'),
+    notebookSelect: $('notebook-select'),
+    notebookRefresh: $('notebook-refresh'),
+    notebookCreate: $('notebook-create'),
+    notebookName: $('notebook-name'),
+    notebookCreateGo: $('notebook-create-go'),
+    notebookCreateCancel: $('notebook-create-cancel'),
     bulk: $('bulk'),
     bulkHint: $('bulk-hint'),
     addBulk: $('add-bulk'),
@@ -72,6 +78,99 @@
     } finally {
       isActionPending = false;
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* chọn notebook bằng danh sách (ticket 011)                         */
+  /* ---------------------------------------------------------------- */
+
+  /** Giá trị đặc biệt của `<option>` đầu danh sách. */
+  const TAO_MOI = '__tao-moi__';
+
+  /**
+   * Năm trạng thái, và KHÔNG trạng thái nào là ngõ cụt. Đây là phần đáng đọc
+   * nhất của tính năng, nên nó nằm trong một hàm chứ không rải ra các handler.
+   *
+   * Chỗ dễ làm sai: gộp "chưa mở NotebookLM" với "đã mở nhưng chưa có notebook
+   * nào". Hai ca đó cần hai câu khác nhau, vì hành động tiếp theo của owner
+   * khác nhau — một bên đi mở tab, một bên bấm tạo. Backend phân biệt chúng
+   * bằng `needsTab`; nếu popup gộp lại thì phần phân biệt ấy vứt đi.
+   *
+   * Nhãn lúc hỏng nói VIỆC CẦN LÀM, không nói "Lỗi".
+   */
+  function renderNotebookSelect(state, data) {
+    const sel = els.notebookSelect;
+    const opt = (value, label) => {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = label;
+      return o;
+    };
+    sel.innerHTML = '';
+
+    if (state === 'chua-nap') {
+      sel.append(opt('', 'Bấm ↻ để nạp danh sách'));
+      sel.disabled = true;
+      return;
+    }
+    if (state === 'dang-nap') {
+      sel.append(opt('', 'Đang nạp danh sách…'));
+      sel.disabled = true;
+      return;
+    }
+    if (state === 'khong-co-tab') {
+      sel.append(opt('', 'Mở NotebookLM rồi bấm ↻'));
+      sel.disabled = true;
+      return;
+    }
+    // Từ đây trở xuống là hai ca "với tới được backend". Mục tạo mới đứng ĐẦU
+    // ở cả hai, và chính nó khiến ca "0 notebook" không còn là ngõ cụt.
+    sel.append(opt('', 'Chọn notebook…'));
+    sel.append(opt(TAO_MOI, '+ Tạo notebook mới'));
+    for (const nb of (data && data.notebooks) || []) {
+      sel.append(opt(nb.id, nb.title || `(không tên) ${nb.id.slice(0, 8)}`));
+    }
+    sel.disabled = false;
+  }
+
+  function moKhungTao(mo) {
+    els.notebookCreate.hidden = !mo;
+    if (mo) {
+      els.notebookName.value = '';
+      els.notebookName.focus();
+    }
+  }
+
+  /**
+   * Lượt liệt kê. CHỈ gọi từ hai chỗ: nút ↻, và ngay sau khi tạo notebook xong.
+   * Không có lối gọi nào lúc popup mở — đó là ràng buộc thay cho việc gắn tính
+   * năng này sau công tắc `rpcEnabled` (xem ticket 011, Chốt 3).
+   */
+  async function napDanhSach() {
+    renderNotebookSelect('dang-nap');
+    let r = null;
+    try {
+      r = await send(MSG.LIST_NOTEBOOKS);
+    } catch (_) {
+      r = null;
+    }
+    if (!r || (!r.ok && r.needsTab)) {
+      renderNotebookSelect('khong-co-tab');
+      els.notebookHint.textContent =
+        'Chưa có tab NotebookLM nào đang mở. Mở notebooklm.google.com rồi bấm ↻.';
+      return;
+    }
+    if (!r.ok) {
+      // Với tới tab được nhưng backend không trả danh sách đọc được. KHÔNG phải
+      // ngõ cụt: mục "Tạo notebook mới" vẫn còn, và ô dán URL vẫn nguyên.
+      renderNotebookSelect('co-tab', { notebooks: [] });
+      els.notebookHint.textContent = 'Không đọc được danh sách notebook — vẫn dán URL vào ô dưới được.';
+      return;
+    }
+    renderNotebookSelect('co-tab', r);
+    els.notebookHint.textContent = r.notebooks.length
+      ? ''
+      : 'Tài khoản chưa có notebook nào. Chọn “+ Tạo notebook mới”.';
   }
 
   /* ---------------------------------------------------------------- */
@@ -605,6 +704,87 @@
       await globalThis.NBLM.setSettings({ notebookUrl: clean });
       refresh();
     });
+  });
+
+  els.notebookRefresh.addEventListener('click', () => withActionLock(napDanhSach));
+
+  els.notebookSelect.addEventListener('change', async () => {
+    const v = els.notebookSelect.value;
+    if (!v) return;
+    if (v === TAO_MOI) {
+      moKhungTao(true);
+      els.notebookSelect.value = '';
+      return;
+    }
+    moKhungTao(false);
+    await withActionLock(async () => {
+      const clean = `https://notebooklm.google.com/notebook/${v}`;
+      els.notebookUrl.value = clean;
+      await globalThis.NBLM.setSettings({ notebookUrl: clean });
+      refresh();
+    });
+  });
+
+  els.notebookCreateCancel.addEventListener('click', () => moKhungTao(false));
+
+  /*
+   * LƯỢT GHI DUY NHẤT của popup này. Bốn ràng buộc từ ticket 011, và cả bốn đều
+   * nhìn thấy được ngay ở đây:
+   *   - chỉ chạy khi owner bấm nút này (không có lối gọi nào khác);
+   *   - tên rỗng thì DỪNG, không tự đặt tên;
+   *   - `notebookUrl` do background ghi ngay khi có id thật;
+   *   - chạm trần quota có câu riêng, không lẫn vào "lỗi".
+   */
+  async function taoNotebook() {
+    const name = els.notebookName.value.trim();
+    if (!name) {
+      els.notebookHint.textContent = 'Đặt tên cho notebook mới trước đã.';
+      els.notebookName.focus();
+      return;
+    }
+    els.notebookCreateGo.disabled = true;
+    els.notebookHint.textContent = 'Đang tạo notebook…';
+    let r = null;
+    try {
+      r = await send(MSG.CREATE_NOTEBOOK, { title: name });
+    } catch (_) {
+      r = null;
+    }
+    els.notebookCreateGo.disabled = false;
+
+    if (r && r.ok && r.url) {
+      moKhungTao(false);
+      els.notebookUrl.value = r.url;
+      els.notebookHint.textContent = `Đã tạo “${name}” và đặt làm notebook đích.`;
+      await napDanhSach();
+      refresh();
+      return;
+    }
+    if (r && r.limit) {
+      els.notebookHint.textContent =
+        'Tài khoản đã chạm trần số notebook của NotebookLM. Xoá bớt notebook rồi thử lại.';
+      return;
+    }
+    if (r && r.status === 'created-but-no-id') {
+      // Notebook ĐÃ tồn tại trên tài khoản. Nói ra, vì "thử lại" ở đây sẽ tạo
+      // cái thứ hai — đúng chế độ hỏng tích luỹ mà ticket 011 cảnh báo.
+      els.notebookHint.textContent =
+        'Notebook có thể đã được tạo nhưng không đọc được id. Bấm ↻ để kiểm trước khi tạo lại.';
+      return;
+    }
+    if (r && r.needsTab) {
+      els.notebookHint.textContent = 'Chưa có tab NotebookLM nào đang mở. Mở nó rồi thử lại.';
+      return;
+    }
+    els.notebookHint.textContent = 'Không tạo được notebook. Bấm ↻ để kiểm trước khi thử lại.';
+  }
+
+  els.notebookCreateGo.addEventListener('click', () => withActionLock(taoNotebook));
+  els.notebookName.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      withActionLock(taoNotebook);
+    }
   });
 
   els.bulk.addEventListener('keydown', (e) => {

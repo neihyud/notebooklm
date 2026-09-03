@@ -19,6 +19,18 @@
       <label for="notebook-url" class="notebook__label">Notebook đích</label>
       <button type="button" id="use-current" class="btn-text">Dùng tab hiện tại</button>
     </div>
+    <div class="notebook__pick">
+      <select id="notebook-select" class="notebook__select" aria-label="Chọn notebook từ danh sách" disabled>
+        <option value="">Bấm ↻ để nạp danh sách</option>
+      </select>
+      <button type="button" id="notebook-refresh" class="btn btn--sm btn--icon"
+              title="Nạp danh sách notebook" aria-label="Nạp danh sách notebook">↻</button>
+    </div>
+    <div class="notebook__create" id="notebook-create" hidden>
+      <input type="text" id="notebook-name" placeholder="Tên notebook mới" spellcheck="false" maxlength="120">
+      <button type="button" id="notebook-create-go" class="btn btn--primary btn--sm">Tạo</button>
+      <button type="button" id="notebook-create-cancel" class="btn btn--sm">Huỷ</button>
+    </div>
     <input type="url" id="notebook-url" placeholder="https://notebooklm.google.com/notebook/…" spellcheck="false">
     <p class="hint" id="notebook-hint"></p>
   </section>

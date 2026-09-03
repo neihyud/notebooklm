@@ -168,6 +168,8 @@ NotebookLM bản consumer **không có API công khai**. Giao diện của nó n
 
 **Đường RPC** (tắt sẵn, bật trong Cài đặt): gọi thẳng `batchexecute` từ chính tab đó. Nhanh hơn nhiều. Nó *sẽ* hỏng vào một ngày nào đó — nên nó được viết để hỏng an toàn, và "an toàn" ở đây có nghĩa hẹp hơn "luôn chạy tiếp".
 
+**Hai lượt đứng ngoài công tắc đó**: *liệt kê notebook* để đổ dropdown chọn notebook trong popup, và *tạo notebook mới* từ chính dropdown ấy. Cả hai chỉ chạy sau một cử chỉ của bạn (mở dropdown, bấm làm mới, bấm Tạo) — không chạy lúc mở popup, không chạy theo lịch — và cả hai đều cần sẵn một tab `notebooklm.google.com` đang mở; extension không tự mở tab nào cho việc này. Lượt liệt kê chỉ đọc. Lượt tạo thì **có ghi**, và đó là một đường ghi không nằm sau công tắc RPC: nó tạo một notebook rỗng mang tên bạn vừa gõ, không đụng tới notebook nào đang có.
+
 Extension chỉ coi là "đã thêm" khi server trả về một frame mang **đúng RPC id vừa gửi** — đó cũng là cách nó biết Google đã xoay id. Sau đó có ba kết cục, không phải hai:
 
 - **Chắc chắn chưa ghi gì** (id đã lỗi thời, thiếu token, server từ chối trước khi làm) → lượt đó tự rơi xuống đường giao diện, bạn chỉ thấy chậm hơn.

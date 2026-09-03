@@ -158,6 +158,61 @@
      */
     kindCodes: { text: 2, url: null, youtube: null },
     /**
+     * Liệt kê notebook. CHỈ ĐỌC — hình dạng sai thì cùng lắm là danh sách rỗng.
+     *
+     * `sourcePath: '/'` chứ không phải `/notebook/<id>`: lượt này không đứng
+     * trong một notebook nào, nên bất kỳ tab `notebooklm.google.com` nào cũng
+     * chạy được. Đó là thứ khiến dropdown khả thi mà không cần quyền mới.
+     *
+     * `args` là hằng số ngoại sinh CHƯA HIỂU — không ai biết `1` và `[2]` nghĩa
+     * gì. Một oracle gọi thật (`docs/notebooklm-rpc-do-duoc-2.md`), oracle kia
+     * chỉ xác nhận cái TÊN `LIST_RECENTLY_VIEWED_PROJECTS`. Và chính cái tên đó
+     * là lý do dropdown không bao giờ được thay ô dán URL: "recently viewed"
+     * không hứa là đủ.
+     */
+    listNotebooks: {
+      rpcId: 'wXbhsf',
+      sourcePath: '/',
+      args: [null, 1, null, [2]],
+      /** Trong mỗi phần tử của `payload[0]`. */
+      slots: { id: 2, title: 0 },
+      /**
+       * Hình dạng một notebook id, dùng để TỪ CHỐI dòng đọc sai ô.
+       *
+       * Vì sao cần: `slots.id` và `slots.title` là hai số cùng kiểu, lấy từ
+       * cùng một mảng — đảo chúng thì dropdown vẫn đủ số dòng, vẫn "chạy", chỉ
+       * có thứ ghi vào `notebookUrl` là một cái tên. Và một test không bắt được
+       * chuyện đó: fixture nào cũng phải dựng theo `slots`, nên hai vế đảo cùng
+       * nhau và assertion xanh cả hai chiều.
+       *
+       * Đây là lối ra: một CƠ CHẾ PHÁT HIỆN LÚC CHẠY thay cho một assertion
+       * không tồn tại được. Id là chuỗi đi vào URL — không khoảng trắng, không
+       * dấu `/`. Tiêu đề do người đặt thì gần như luôn có khoảng trắng. Đọc
+       * nhầm ô là dòng đó bị bỏ, không phải là một notebookUrl rác.
+       */
+      idPattern: '^[A-Za-z0-9_-]{8,}$',
+    },
+    /**
+     * Tạo notebook. Đây là lượt GHI duy nhất của đường này — mọi thứ còn lại
+     * chỉ đọc. Notebook rỗng thì xoá được và không có nội dung nào để mất, nên
+     * nó nhẹ hơn hẳn thêm Nguồn; nhưng nó vẫn là ghi, và owner đã chốt riêng
+     * cho nó (`docs/tickets/011-*.md` → Chốt 3).
+     *
+     * `payload` rỗng ở đây KHÔNG phải lỗi parse: oracle B đọc frame `CCqFvf`
+     * không mang dữ liệu thành "tài khoản đã chạm trần số notebook". Xem
+     * `createNotebook` — nó phân biệt hai ca đó, và đó là lý do nó không dùng
+     * chung lối ra với `listNotebooks`.
+     */
+    createNotebook: {
+      rpcId: 'CCqFvf',
+      sourcePath: '/',
+      /** Ô 0 nhận tiêu đề; phần còn lại là hằng số quan sát được. */
+      args: [null, null, null, [2], [1, null, null, null, null, null, null, null, null, null, [1]]],
+      titleSlot: 0,
+      /** Trong `payload`: thử `[0][2]` trước, rồi `[2]`. */
+      idPaths: [[0, 2], [2]],
+    },
+    /**
      * Hình dạng của token `at`: chuỗi base64url, dấu hai chấm, mốc thời gian ms.
      *
      * Neo theo HÌNH DẠNG chứ không theo tên khoá là chủ ý. Mọi tài liệu bên
@@ -468,10 +523,12 @@
     return 100000 + Math.floor(Math.random() * 899999);
   }
 
-  function buildUrl({ path, rpcId, notebookId, reqid }) {
+  function buildUrl({ path, rpcId, notebookId, reqid, sourcePath }) {
     const q = new URLSearchParams();
     q.set('rpcids', rpcId);
-    q.set('source-path', `/notebook/${notebookId}`);
+    // `sourcePath` chỉ được truyền cho hai lượt đứng ở GỐC (liệt kê / tạo
+    // notebook). Mặc định vẫn là đường notebook, nên mọi lối gọi cũ không đổi.
+    q.set('source-path', sourcePath || `/notebook/${notebookId}`);
     q.set('_reqid', String(reqid));
     q.set('rt', 'c');
     return `${path}?${q.toString()}`;
@@ -632,8 +689,8 @@
   /* một lần gọi                                                          */
   /* ------------------------------------------------------------------ */
 
-  async function attemptOnce({ path, rpcId, params, at, notebookId, fetchImpl, reqid }) {
-    const url = buildUrl({ path, rpcId, notebookId, reqid });
+  async function attemptOnce({ path, rpcId, params, at, notebookId, fetchImpl, reqid, sourcePath }) {
+    const url = buildUrl({ path, rpcId, notebookId, reqid, sourcePath });
     let res;
     try {
       res = await fetchImpl(url, {
@@ -741,6 +798,156 @@
       }),
       describeAt(found)
     );
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* hai lượt đứng ở GỐC: liệt kê notebook, và tạo notebook                */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Phần chung của hai lượt gốc.
+   *
+   * KHÁC `tryRpc` ở ba chỗ, và cả ba đều có lý do:
+   *
+   *   1. **Không kiểm `enabled`.** `rpcEnabled` canh đường GHI Nguồn, nơi hình
+   *      dạng sai cho `unknown` rồi dừng cả hàng đợi. Liệt kê thì hình dạng sai
+   *      chỉ cho danh sách rỗng. Ràng buộc thay thế nằm ở tầng gọi và nó cứng
+   *      hơn một ô tick: **chỉ chạy sau một cử chỉ của owner**, không chạy lúc
+   *      mở popup, không chạy theo `alarms`.
+   *
+   *      Nói thẳng chỗ lập luận này KHÔNG phủ hết: `createNotebook` là một
+   *      đường **ghi**, và nó cũng đi qua đây, tức cũng không sau `rpcEnabled`.
+   *      Lý do nhận: hỏng thì nó tạo một notebook rỗng thừa (hoặc sai tên) —
+   *      xoá được, và không đụng tới notebook nào đang có, khác hẳn kiểu hỏng
+   *      mà `rpcEnabled` sinh ra để canh (Nguồn rơi vào sai ô của notebook
+   *      thật). Owner lật quyết định này được; lật thì lật cả cặp với ràng
+   *      buộc cử chỉ ở trên, đừng lật một nửa.
+   *   2. **Không cần `notebookId`.** `source-path` là `/`, nên bất kỳ tab
+   *      `notebooklm.google.com` nào cũng đủ — kể cả trang chủ.
+   *   3. **Không thử nhiều rpc id.** `addSourceIds` là mảng vì Google xoay id
+   *      của lượt ghi và ta cần đường lùi. Ở đây một id sai chỉ làm dropdown
+   *      rỗng, nên vòng thử không mua được gì.
+   *
+   * Token `at` KHÔNG rời khỏi hàm này: `detail` được `redact` trước khi trả về.
+   */
+  async function rootAttempt(entry, params, opts) {
+    await ready;
+    const o = opts || {};
+    const cfg = config;
+    const fetchImpl = o.fetch || (typeof root.fetch === 'function' ? root.fetch.bind(root) : null);
+    const doc = o.document || root.document;
+
+    if (!fetchImpl) return { status: 'no-fetch' };
+    const found = readAtToken(doc, cfg);
+    if (!found) return { status: 'no-at-token' };
+
+    const r = await attemptOnce({
+      path: cfg.paths[0],
+      rpcId: entry.rpcId,
+      sourcePath: entry.sourcePath,
+      params,
+      at: found.token,
+      fetchImpl,
+      reqid: o.reqid == null ? newReqId() : o.reqid,
+    });
+    if (r.detail) r.detail = redact(r.detail, found.token);
+    return r;
+  }
+
+  /**
+   * Giá trị này có thể là một notebook id không? Xem `idPattern` trong `BASE`.
+   *
+   * Mẫu hỏng thì mặc định là TỪ CHỐI TẤT: dropdown rỗng, ô dán URL vẫn nguyên.
+   * Chiều ngược lại — mẫu hỏng thì nhận tất — sẽ ghi một cái tên vào
+   * `settings.notebookUrl` và mọi lượt import sau đó nhắm vào hư không.
+   */
+  function looksLikeNotebookId(value, entry) {
+    const src = entry && entry.idPattern;
+    if (!src) return false;
+    try {
+      return new RegExp(src).test(value);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
+   * Danh sách notebook cho dropdown.
+   *
+   * `ok` phân biệt hai ca mà giao diện PHẢI hiện khác nhau:
+   *   - `ok:true` + mảng rỗng  → với tới được backend, tài khoản chưa có notebook
+   *     nào. Owner đi tiếp được bằng "Tạo notebook mới".
+   *   - `ok:false`             → không với tới được (không tab, không token,
+   *     rpc id lỗi thời…). Owner phải mở NotebookLM trước.
+   * Gộp hai ca này làm một là biến trạng thái thứ nhất thành ngõ cụt.
+   *
+   * KHÔNG bao giờ ném, và không bao giờ đụng `settings.notebookUrl`.
+   */
+  async function listNotebooks(opts) {
+    await ready;
+    const entry = config.listNotebooks;
+    const r = await rootAttempt(entry, entry.args, opts);
+    if (r.status !== 'ok') {
+      return { ok: false, notebooks: [], status: r.status, reason: r.detail || null };
+    }
+    const rows = Array.isArray(r.payload) && Array.isArray(r.payload[0]) ? r.payload[0] : [];
+    const notebooks = [];
+    for (const row of rows) {
+      if (!Array.isArray(row)) continue;
+      const id = row[entry.slots.id];
+      const title = row[entry.slots.title];
+      if (typeof id === 'string' && id && looksLikeNotebookId(id, entry)) {
+        notebooks.push({ id, title: typeof title === 'string' && title ? title : null });
+      }
+    }
+    return { ok: true, notebooks, status: r.status, reason: null };
+  }
+
+  /**
+   * Tạo notebook. LƯỢT GHI DUY NHẤT của đường này.
+   *
+   * `empty-payload` ở đây có nghĩa riêng và không được gộp vào lỗi chung: oracle
+   * B đọc frame `CCqFvf` không mang dữ liệu thành **tài khoản đã chạm trần số
+   * notebook**. Trả nó về thành một lỗi parse rồi vẫn cố moi id sẽ cho ra
+   * `undefined` — và bên gọi có nhiệm vụ ghi id vào `settings.notebookUrl`.
+   *
+   * Không tự đặt tên: tên rỗng là `no-title` chứ không phải một cái tên mặc
+   * định. Một notebook tên tự sinh là một notebook owner không nhận ra là của
+   * mình trong danh sách tháng sau.
+   */
+  async function createNotebook(title, opts) {
+    await ready;
+    const entry = config.createNotebook;
+    const name = String(title == null ? '' : title).trim();
+    if (!name) return { ok: false, notebookId: null, limit: false, status: 'no-title', reason: null };
+
+    const args = entry.args.slice();
+    args[entry.titleSlot] = name;
+
+    const r = await rootAttempt(entry, args, opts);
+    if (r.status === 'empty-payload') {
+      return { ok: false, notebookId: null, limit: true, status: 'notebook-limit', reason: null };
+    }
+    if (r.status !== 'ok') {
+      return { ok: false, notebookId: null, limit: false, status: r.status, reason: r.detail || null };
+    }
+
+    let id = null;
+    for (const path of entry.idPaths) {
+      let v = r.payload;
+      for (const k of path) v = Array.isArray(v) ? v[k] : undefined;
+      if (typeof v === 'string' && v) {
+        id = v;
+        break;
+      }
+    }
+    // Tạo XONG rồi nhưng không đọc được id: notebook ĐÃ tồn tại trên tài khoản.
+    // Nói ra thay vì trả một lỗi trông như "chưa tạo gì" — hai câu đó dẫn tới
+    // hai hành động khác nhau của owner.
+    if (!id) {
+      return { ok: false, notebookId: null, limit: false, status: 'created-but-no-id', reason: null };
+    }
+    return { ok: true, notebookId: id, limit: false, status: 'ok', reason: null };
   }
 
   /* ------------------------------------------------------------------ */
@@ -899,6 +1106,8 @@
     OUTCOME,
     configure,
     tryRpc,
+    listNotebooks,
+    createNotebook,
     get config() {
       return config;
     },
@@ -920,8 +1129,10 @@
       buildUrl,
       buildBody,
       newReqId,
+      looksLikeNotebookId,
       readEnvelope,
       outcomeFor,
+      rootAttempt,
       collectStrings,
       isLimitText,
       route,

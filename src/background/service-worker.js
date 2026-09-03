@@ -21,7 +21,7 @@ importScripts('/src/common/shared.js', '/src/youtube/srt.js');
 
 const {
   MSG, STATUS, PRIVACY, KIND, KEYS, DEFAULTS,
-  getSettings, getQueue, setQueue, getCopiedLog,
+  getSettings, setSettings, getQueue, setQueue, getCopiedLog,
   uid, sleep, videoIdFrom, canonicalUrl, parseUrlList,
   docKey, urlLabel,
   buildSourceText, sourceTitle,
@@ -175,6 +175,86 @@ async function ensureScripts(tabId, kind) {
 /* -------------------------------------------------------------------- */
 /* tab NotebookLM                                                        */
 /* -------------------------------------------------------------------- */
+
+/**
+ * Một tab NotebookLM BẤT KỲ — không cần đang ở trong một notebook.
+ *
+ * Khác `resolveNotebookTab()` ở hai điểm, và cả hai là quyết định đã chốt trong
+ * `docs/tickets/011-*.md`:
+ *
+ *   - **Không mở tab mới.** Đường (a): không có tab sẵn thì trả `null`, giao
+ *     diện tự biết phải hiện "Mở NotebookLM…". Mở hộ một tab nền rồi đóng đi là
+ *     đường (b), owner chưa chốt.
+ *   - **Không cần `/notebook/<id>`.** Hai lượt gốc gửi `source-path=/`, nên
+ *     trang chủ NotebookLM cũng đủ.
+ */
+async function anyNotebookLmTab() {
+  const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+  if (!tabs.length) return null;
+  // Ưu tiên tab đang ở trong một notebook: nó chắc chắn đã nạp xong phiên và có
+  // `WIZ_global_data`. Trang chủ vẫn dùng được, chỉ là lựa chọn thứ hai.
+  const tab = tabs.find((t) => /\/notebook\/[^/]+/.test(t.url || '')) || tabs[0];
+  try {
+    await ensureScripts(tab.id, 'notebooklm');
+  } catch (_) {
+    return null;
+  }
+  return tab.id;
+}
+
+/**
+ * Danh sách notebook cho dropdown trong popup.
+ *
+ * KHÔNG ném, và không đụng `settings.notebookUrl`. `ok:false` + `needsTab` là
+ * cách giao diện phân biệt "chưa mở NotebookLM" với "đã mở nhưng chưa có
+ * notebook nào" — hai câu dẫn tới hai hành động khác nhau của owner.
+ */
+async function listNotebooks() {
+  const tabId = await anyNotebookLmTab();
+  if (tabId == null) return { ok: false, notebooks: [], needsTab: true, status: 'no-tab' };
+  try {
+    const r = await sendToTab(tabId, { type: MSG.NLM_LIST_NOTEBOOKS }, 20000);
+    return {
+      ok: !!(r && r.ok),
+      notebooks: (r && r.notebooks) || [],
+      needsTab: false,
+      status: (r && r.status) || 'no-reply',
+    };
+  } catch (e) {
+    return { ok: false, notebooks: [], needsTab: false, status: 'tab-error' };
+  }
+}
+
+/**
+ * Tạo notebook. LƯỢT GHI DUY NHẤT của đường này.
+ *
+ * Ghi thẳng `settings.notebookUrl` khi thành công. Bỏ bước đó thì owner bấm
+ * tạo lần nữa và tài khoản có hai notebook rỗng — chế độ hỏng dễ xảy ra nhất
+ * của tính năng này, và nó im lặng.
+ *
+ * Ghi CHỈ khi có id thật. `notebook-limit` và `created-but-no-id` đều không ghi.
+ */
+async function createNotebook(title) {
+  const name = String(title == null ? '' : title).trim();
+  if (!name) return { ok: false, notebookId: null, status: 'no-title' };
+
+  const tabId = await anyNotebookLmTab();
+  if (tabId == null) return { ok: false, notebookId: null, needsTab: true, status: 'no-tab' };
+
+  let r;
+  try {
+    r = await sendToTab(tabId, { type: MSG.NLM_CREATE_NOTEBOOK, title: name }, 30000);
+  } catch (_) {
+    return { ok: false, notebookId: null, status: 'tab-error' };
+  }
+  if (!r || !r.ok || typeof r.notebookId !== 'string' || !r.notebookId) {
+    return { ok: false, notebookId: null, limit: !!(r && r.limit), status: (r && r.status) || 'no-reply' };
+  }
+
+  const url = `https://notebooklm.google.com/notebook/${r.notebookId}`;
+  await setSettings({ notebookUrl: url });
+  return { ok: true, notebookId: r.notebookId, url, status: 'ok' };
+}
 
 async function resolveNotebookTab() {
   const settings = await getSettings();
@@ -1748,6 +1828,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
         case MSG.IMPORT_PLAYLIST:
           sendResponse(await importPlaylistOfTab(message.tabId));
+          return;
+
+        // Hai lối vào duy nhất của đường notebook gốc. Không có lối gọi nào
+        // khác trong file này — không `alarms`, không gọi lúc khởi động. Ràng
+        // buộc "chỉ chạy sau cử chỉ của owner" được giữ bằng đúng chuyện đó.
+        case MSG.LIST_NOTEBOOKS:
+          sendResponse(await listNotebooks());
+          return;
+
+        case MSG.CREATE_NOTEBOOK:
+          sendResponse(await createNotebook(message.title));
           return;
 
         default:

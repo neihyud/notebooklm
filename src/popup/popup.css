@@ -989,3 +989,9 @@ kbd {
   flex: 0 0 auto;
   font-size: 12px;
 }
+
+/* ---- chọn notebook bằng danh sách (ticket 011) ---- */
+.notebook__pick { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.notebook__select { flex: 1 1 auto; min-width: 0; }
+.notebook__create { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.notebook__create input { flex: 1 1 auto; min-width: 0; }
