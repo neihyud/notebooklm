@@ -279,6 +279,126 @@
   }
 
   /* -------------------------------------------------------------------- */
+  /* mở các section đang đóng                                              */
+  /* -------------------------------------------------------------------- */
+
+  /*
+   * Vì sao phải bấm chứ không đọc thẳng DOM.
+   *
+   * Hai kiểu "đóng" trông giống nhau trên màn hình nhưng khác hẳn trong DOM:
+   *
+   *   - Đóng bằng CSS (MkDocs Material: checkbox + `~ nav`; `<details>` không
+   *     `open`). Link con VẪN nằm trong DOM. Đo 2026-09-04 trên
+   *     squidfunk.github.io/mkdocs-material/setup/: 73/95 thẻ `a` có rect 0×0
+   *     mà `build()` vẫn dựng đủ 94 link. Ca này chưa bao giờ hỏng.
+   *
+   *   - Đóng bằng cách unmount (Docusaurus: React bỏ hẳn `<ul>` con khi
+   *     collapsed). Link con KHÔNG tồn tại. Cùng ngày trên docusaurus.io/docs:
+   *     `<li>` của category "Guides" có đúng 1 thẻ `a` và 0 thẻ `<ul>`. `detect()`
+   *     trả về 9 link; mở hết ra thì thành 55 — sót 46 link, tức 5/6 sidebar.
+   *
+   * Không có cách nào đọc được ca thứ hai từ DOM tĩnh, nên ta bấm.
+   *
+   * Điều kiện dừng là SỐ LINK KHÔNG CÒN TĂNG, cố tình không phải "hết
+   * `aria-expanded=false`". Cũng phép đo trên: sau khi mở hết, 5 nút vẫn khai
+   * báo `aria-expanded="false"` trong khi `<li>` của chúng đã chứa 5, 36, 8, 12
+   * và 8 thẻ `a` — React không đồng bộ lại thuộc tính. Lấy nó làm điều kiện dừng
+   * là lặp vô hạn và bấm đóng lại những gì vừa mở.
+   */
+
+  const EXPANDER = [
+    '[aria-expanded="false"]',
+    'details:not([open]) > summary',
+    '.menu__list-item--collapsed > .menu__list-item-collapsible > button',
+  ].join(',');
+
+  /** Trần vòng lặp: sidebar lồng sâu nhất đo được cần 3 vòng; 8 là dư dả mà vẫn hữu hạn. */
+  const EXPAND_ROUNDS = 8;
+
+  /*
+   * Phải nhường lại luồng sau mỗi lượt bấm, nếu không hàm này không làm gì cả.
+   *
+   * React commit DOM ở macrotask KẾ TIẾP, không phải trong handler. Đo 2026-09-04
+   * trên docusaurus.io/docs, bấm xong đếm link ngay: 10 (y nguyên); nhường một
+   * `setTimeout(0)` rồi đếm: 30. Bản đồng bộ đầu tiên của hàm này vì thế luôn
+   * thấy "không mọc thêm link" và thoát ngay vòng đầu — 9 link, đúng bằng lúc
+   * chưa mở gì.
+   *
+   * 50ms chứ không phải 0: cùng phép đo cho thấy 0/16/50/200/600ms đều ra 30, nên
+   * một macrotask là đủ về mặt cơ chế. Lấy 50 để còn chỗ cho máy chậm và cho
+   * theme nào chờ transition rồi mới gắn DOM, mà tổng vẫn chỉ 8×50 = 400ms.
+   */
+  const EXPAND_SETTLE_MS = 50;
+
+  const nextTick = () => new Promise((resolve) => setTimeout(resolve, EXPAND_SETTLE_MS));
+
+  /**
+   * Mở mọi section đóng trong `container`, tại chỗ.
+   *
+   * Bấm bằng chuỗi sự kiện chuột đầy đủ chứ không `el.click()`: React gắn
+   * handler qua pointer event, và `.click()` một mình không mở được section nào
+   * trên docusaurus.io (đo 2026-09-04: 6 vòng `.click()`, số link đứng nguyên 9).
+   *
+   * @returns {Promise<number>} số link dùng được sau khi mở.
+   */
+  async function expandAll(container, pageUrl) {
+    let count = usableCount(container, pageUrl);
+
+    /*
+     * Mỗi phần tử chỉ được bấm MỘT lần trong cả lượt dựng.
+     *
+     * Không có sổ này thì lượt sau bấm lại chính nút vừa mở, và với nút toggle
+     * (đa số) lần bấm thứ hai là ĐÓNG. Bản đầu tiên của hàm này dừng đúng lúc
+     * "số link không tăng" — nhưng đó là *sau* khi cú bấm thừa đã đóng mất
+     * section, nên nó trả về con số cũ đúng trong khi DOM thì đã hỏng. Ca 5 của
+     * `test/sidebar-expand.test.js` ghim đúng chỗ này.
+     */
+    const pressed = new Set();
+
+    for (let round = 0; round < EXPAND_ROUNDS; round++) {
+      let targets;
+      try {
+        targets = container.querySelectorAll(EXPANDER);
+      } catch (_) {
+        break;
+      }
+
+      let hit = 0;
+      for (const el of targets) {
+        if (pressed.has(el)) continue;
+        // Đừng bấm vào chính thẻ <a>: bấm là điều hướng, mất luôn trang đang mở.
+        if ((el.tagName || '').toLowerCase() === 'a' && el.getAttribute('href')) continue;
+        pressed.add(el);
+        press(el);
+        hit++;
+      }
+      if (!hit) break;   // không còn gì chưa bấm -> xong
+
+      await nextTick();
+      count = usableCount(container, pageUrl);
+    }
+    return count;
+  }
+
+  /*
+   * `<details>` không cần đặt tay `open = true`: cả trình duyệt thật lẫn jsdom
+   * đều tự mở khi `<summary>` nhận click, đúng như spec. Đo 2026-09-04 trên
+   * Brave headless và jsdom 30 — cùng cho `open === true` chỉ nhờ chuỗi sự kiện.
+   * Một dòng gán thêm ở đây là lớp phòng thủ không bao giờ chạy, và không test
+   * nào phân biệt nổi có nó hay không.
+   */
+  function press(el) {
+    try {
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+        el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      }
+    } catch (_) {
+      // Trang chặn constructor sự kiện — thử đường thô rồi thôi.
+      try { if (typeof el.click === 'function') el.click(); } catch (_) { /* bỏ qua mục này */ }
+    }
+  }
+
+  /* -------------------------------------------------------------------- */
   /* api                                                                   */
   /* -------------------------------------------------------------------- */
 
@@ -318,6 +438,10 @@
       container = inner.sort((a, b) => b.points - a.points)[0].el;
     }
 
+    return pack(container, pageUrl);
+  }
+
+  function pack(container, pageUrl) {
     const tree = build(container, pageUrl);
     const count = countLinks(tree);
     if (count < 3) return null;
@@ -330,5 +454,23 @@
     };
   }
 
-  root.NBLM_DOCS_SIDEBAR = { detect, usableUrl, countLinks };
+  /**
+   * Dò sidebar, có mở các section đang đóng trước khi dựng cây.
+   *
+   * Tách hẳn khỏi `detect()` chứ không làm một cờ tuỳ chọn, vì hai hàm khác nhau
+   * ở chỗ quan trọng hơn nhiều so với một tham số: hàm này **đụng vào trang của
+   * người dùng** (bấm mở section, và không đóng lại). Chỉ gọi sau khi người dùng
+   * đã tỏ ý muốn import — xem lời gọi trong `src/docs/content.js`.
+   *
+   * Bất đồng bộ là do React: xem `EXPAND_SETTLE_MS`.
+   */
+  async function detectExpanded() {
+    const found = detect();
+    if (!found) return null;
+    await expandAll(found.container, location.href);
+    // Dựng lại từ đầu trên DOM đã mở; `found.tree` dựng trước lúc bấm nên đã cũ.
+    return pack(found.container, location.href) || found;
+  }
+
+  root.NBLM_DOCS_SIDEBAR = { detect, detectExpanded, usableUrl, countLinks, expandAll };
 })(globalThis);

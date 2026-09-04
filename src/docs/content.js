@@ -30,11 +30,32 @@
   /* dò sidebar + nút mở bảng                                              */
   /* -------------------------------------------------------------------- */
 
+  /*
+   * Dò sidebar mà KHÔNG đụng vào trang.
+   *
+   * `expand: false` là bắt buộc ở đây, không phải tuỳ chọn cho gọn. Hàm này chạy
+   * lúc trang vừa tải và lặp mỗi 1500ms khi SPA đổi URL, chỉ để biết có nên hiện
+   * nút launcher và ghi số lên nó. Cho nó mở section là extension tự bung toàn bộ
+   * sidebar của người dùng khi họ chưa bấm gì — một tác động thấy được lên trang
+   * của người khác, đổi lấy một con số trang trí trên nút.
+   *
+   * Chỗ mở đúng chỗ là `open()`: người dùng đã bấm, và con số lúc đó mới có hệ quả.
+   */
   function detect() {
     try {
       detection = SB.detect();
     } catch (_) {
       detection = null;
+    }
+    return detection;
+  }
+
+  /** Dò lại có mở section — chỉ dùng khi người dùng đã bấm mở bảng chọn. */
+  async function detectExpanded() {
+    try {
+      detection = (await SB.detectExpanded()) || detection;
+    } catch (_) {
+      /* giữ nguyên `detection` cũ: thà thiếu link còn hơn mất cả bảng */
     }
     return detection;
   }
@@ -220,8 +241,8 @@
     return rows;
   }
 
-  function open() {
-    if (!detection) detect();
+  async function open() {
+    await detectExpanded();
     if (!detection) {
       flash('Không dò thấy sidebar tài liệu trên trang này.');
       return;
@@ -889,7 +910,8 @@
             return;
 
           case MSG.DOCS_PANEL:
-            open();
+            // Phải await: `open()` mở các section đóng và số link chỉ đúng sau đó.
+            await open();
             sendResponse({ ok: true, hasSidebar: !!detection, count: detection ? detection.count : 0 });
             return;
 
