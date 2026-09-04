@@ -216,10 +216,39 @@ So sánh alternatives + ghi rõ điều kiện đảo ngược trước khi vi�
   14. **Trọng tâm thật của ticket 013**: token `at` ↔ `authuser` trong `google-accounts.js`.
      KHÁC hai cặp trên — đây **ĐÃ CÓ LƯỚI**, vì hai giá trị này không ra từ cùng một bản đồ ngoại
      sinh; chúng là hai kết quả của hai lượt mạng khác nhau mà không có gì trong kiểu dữ liệu
-     buộc chúng khớp. Gỡ phép khớp `authuser` trong `usable()` → **5 đỏ** trên
-     `google-accounts.test.js` + `notebooklm-notebooks.test.js` (gốc 94/0). Đây cũng là cặp mà
-     `anyNotebookLmTab()` phía service worker suýt lặp lại hở — tự soát sau khi giao bắt được nó
-     (xem cuối ticket 013), lưới riêng ở `service-worker-accounts.test.js` (gốc 22/0, đỏ 3–4).
+     buộc chúng khớp. Gỡ phép khớp `authuser` trong `usable()` → **5 đỏ**, và review seat độc lập
+     (2026-09-04) đo lại thấy **cả 5 nằm trong `google-accounts.test.js`**;
+     `notebooklm-notebooks.test.js` cho 0 đỏ. Câu cũ ở đây ghi hai file — sai, đã sửa.
+
+     **Và lưới đó chỉ có ở tầng module.** Cùng lượt review đo ra: hoán vị `authuser: ctx.authuser`
+     → `'0'` trong `service-worker.js` (gửi token của tài khoản N kèm `authuser=0`) cho **0 đỏ
+     trên toàn bộ 1561 assertion**. Lý do: cả `service-worker-accounts.test.js` chỉ phát ra đúng
+     MỘT request `batchexecute` và nó mang `authuser=0`; ba ca dựng tài khoản index 1 đều chết ở
+     `no-at-token` trước khi có byte nào rời máy. Bịt bằng ca K — hai token khác nhau cho hai
+     `authuser` khác nhau, đối chiếu cả hai vế trên đúng một request đi ra. Đo lại: vế `authuser`
+     → 1 đỏ; vế token (lấy token từ trang `authuser=0` rồi dùng cho tài khoản 1) → 3 đỏ, 2 file.
+
+     Bài học chung với cặp #15 bên dưới: **một cặp có lưới ở tầng module KHÔNG có nghĩa là tầng
+     trên đã được canh.** Chỗ ghép hai vế lại mới là chỗ chúng lệch được.
+
+  15. `resolveNotebookTab()` ↔ tài khoản đã chọn — ticket 013, review seat 2026-09-04.
+     `anyNotebookLmTab()` (đường liệt kê) lọc tab theo `authuser`; `resolveNotebookTab()` (đường
+     IMPORT — đường thật sự ghi Nguồn) thì không, nên owner chọn `b@` mà đang mở tab `a@` thì
+     Nguồn vào `a@` trong im lặng. Đúng hình dạng *Đường dữ liệu song song*: cùng một thông tin,
+     xử lý đúng một đường và sai đường kia; lượt tự soát bỏ sót vì nó chỉ soi đường liệt kê.
+     Lưới: ca F–J trong `service-worker-accounts.test.js`. Bốn hoán vị, exit=1 cả bốn, mỗi cái 1
+     đỏ. Ghi chú phép đo: hoán vị *"ghim cả khi chỉ suy ra tài khoản"* thoạt đầu cho 0 đỏ vì tab
+     trần và nguồn `default` cùng quy về `'0'`; phải có ca J (hai tài khoản cùng mở) mới cắn.
+
+  16. `accountSlots.index` ↔ vị trí hàng trong mảng — ticket 013, review seat 2026-09-04.
+     Ô `index` một mình quyết định `authuser`. Bản đầu thiếu số thì **lùi về vị trí trong mảng**,
+     tức bịa ra ánh xạ email→tài khoản (`ListAccounts` không sắp theo `authuser`), và `usable()`
+     không bắt được vì nó chỉ so con số với con số. Cùng lớp hằng số ngoại sinh với #12/#13 —
+     **lần thứ ba** — nhưng ô này lại là ô duy nhất KHÔNG có phép dò, trong khi ô `email` bên
+     cạnh thì có. Đơn thuốc là **gỡ** đường lùi, không thêm lớp: `Number.isInteger(index) &&
+     index >= 0`, sai thì bỏ hàng. Bỏ hết mọi hàng là kết quả hợp lệ — danh sách rỗng → dropdown
+     ẩn → lùi về đường tab như trước 013, đúng điều kiện đảo ngược số 1. Ba hoán vị (gỡ phép dò,
+     ép kiểu thay vì từ chối, quay lại lùi theo vị trí) → **5 đỏ mỗi cái**, exit=1.
 
 ### Hình dạng lỗi mà nghi thức hoán vị của peer bỏ sót
 

@@ -37,6 +37,8 @@ const S = {
   notes: [],
   /** Trả lời cho `NLM_PING`. `inNotebook` thiếu → 4 nhịp ngủ 1s trong SW. */
   pingReply: { ok: true, inNotebook: true },
+  /** Mọi lượt `batchexecute` đi ra: `{url, body}`. */
+  posts: [],
 };
 
 const AT_HTML = '<script>window.WIZ={"SNlM0e":"TOKEN","cfb2h":"boq"};</script>';
@@ -68,7 +70,10 @@ const store = new Map();
 let onMessage = null;
 
 global.self = global;
-global.fetch = (u, i) => S.fetch(String(u), i);
+global.fetch = (u, i) => {
+  if (String(u).includes('batchexecute')) S.posts.push({ url: String(u), body: String((i && i.body) || '') });
+  return S.fetch(String(u), i);
+};
 global.chrome = {
   runtime: {
     getURL: (p) => `chrome-extension://test/${p}`,
@@ -143,6 +148,7 @@ async function reset() {
   S.nav = [];
   S.notes = [];
   S.pingReply = { ok: true, inNotebook: true };
+  S.posts = [];
   ACC._internals.resetMemo();
   await self.NBLM.setSettings({ nlmAccount: null });
 }
@@ -364,6 +370,39 @@ async function reset() {
     await chayRong();
     ok(S.nav.length === 0,
       `J: dùng đúng tab đang mở notebook đích, không kéo tab tài khoản khác, nhận: ${JSON.stringify(S.nav)}`);
+  }
+
+  {
+    /*
+     * K. CẶP #14 — token `at` và `authuser` phải luôn thuộc CÙNG một tài khoản.
+     *
+     * Trước ca này, cả file chỉ phát ra đúng MỘT request batchexecute và nó
+     * mang `authuser=0`; ba ca C/D/E dựng tài khoản index 1 nhưng đều chết ở
+     * `no-at-token` TRƯỚC khi có byte nào rời máy. Nên hoán vị
+     * `authuser: ctx.authuser` → `'0'` đo ra 0 đỏ trên cả 1561 assertion: gửi
+     * token của tài khoản 1 kèm authuser=0 mà không phép đo nào thấy.
+     *
+     * Ghim bằng HAI token khác nhau cho hai `authuser` khác nhau, rồi đối chiếu
+     * hai vế trên đúng một request đi ra. Một vế thôi thì hoán vị vế kia vẫn
+     * xanh — đó là hình dạng của mọi cặp correspondence-critical.
+     */
+    await reset();
+    await self.NBLM.setSettings({ nlmAccount: 'chu@gmail.com' });
+    S.tabs = [];
+    S.fetch = async (u) => {
+      if (u.includes('ListAccounts')) return res(accountsBody(ACC, 'chu@gmail.com', 1));
+      if (u.includes('batchexecute')) return res(envelope([wrb('wXbhsf', [[[['nb-1', ['Sổ của tôi']]]]])]));
+      // Trang gốc: mỗi authuser một token RIÊNG. Lấy nhầm trang là lộ ra ngay.
+      const au = (/[?&]authuser=([^&]*)/.exec(u) || [])[1] || '0';
+      return res(`<script>window.WIZ={"SNlM0e":"TOKEN-CUA-${au}","cfb2h":"boq"};</script>`);
+    };
+
+    await send({ type: MSG.LIST_NOTEBOOKS });
+    ok(S.posts.length === 1, `K: đúng một lượt batchexecute đi ra, nhận ${S.posts.length}`);
+    const post = S.posts[0] || { url: '', body: '' };
+    ok(/[?&]authuser=1(&|$)/.test(post.url), `K: request mang authuser=1, nhận: ${post.url}`);
+    ok(post.body.includes('TOKEN-CUA-1'), 'K: và mang token lấy từ trang của CHÍNH tài khoản 1');
+    ok(!post.body.includes('TOKEN-CUA-0'), 'K: không mang token của tài khoản khác');
   }
 
   console.log(`${pass} pass, ${fail} fail`);

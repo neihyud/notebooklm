@@ -150,14 +150,30 @@
   function rowsToAccounts(rows, cfg) {
     const s = cfg.accountSlots;
     const out = [];
-    rows.forEach((row, i) => {
+    rows.forEach((row) => {
       const email = String(row[s.email] || '').toLowerCase();
-      // Hai bộ lọc, hai lý do khác nhau: `dropEmailContaining` là rác của chính
-      // endpoint; `looksLikeEmail` là phép dò ô đọc nhầm.
+      // Ba bộ lọc, ba lý do khác nhau: `dropEmailContaining` là rác của chính
+      // endpoint; `looksLikeEmail` và phép kiểm `index` là hai phép dò ô đọc
+      // nhầm — hai ô, hai phép dò riêng.
       if (!email || email.includes(cfg.dropEmailContaining)) return;
       if (!looksLikeEmail(email, cfg)) return;
+      /*
+       * Ô `index` TRỰC TIẾP trở thành `authuser`, tức nó một mình quyết định
+       * request đi vào tài khoản nào.
+       *
+       * Bản trước thiếu số thì lùi về VỊ TRÍ trong mảng. Cú lùi đó bịa ra một
+       * ánh xạ email→tài khoản, vì `ListAccounts` không sắp theo `authuser`; và
+       * `usable()` không bắt được, vì nó chỉ so con số với con số. Kết quả là
+       * ghi vào nhầm tài khoản, hoàn toàn im lặng — đúng thứ ticket 013 tồn tại
+       * để chặn. Bỏ hàng đi thay vì đoán.
+       *
+       * Bỏ hết mọi hàng là một kết quả HỢP LỆ: danh sách rỗng → dropdown ẩn →
+       * lùi về đường `authuser` của tab như trước ticket 013. Đó đúng là điều
+       * kiện đảo ngược số 1, chứ không phải một ngõ cụt mới.
+       */
+      const index = row[s.index];
+      if (!Number.isInteger(index) || index < 0) return;
       const name = String(row[s.name] || '').trim() || email.split('@')[0];
-      const index = typeof row[s.index] === 'number' ? row[s.index] : i;
       out.push({ email, name, index, isDefault: row[s.isDefault] === 1 });
     });
     return out;

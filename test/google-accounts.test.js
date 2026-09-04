@@ -105,6 +105,33 @@ const res = (body, okFlag) => ({ ok: okFlag !== false, status: okFlag === false 
     ok(r.accounts.length === 0, 'ô email mang chuỗi không phải email thì LOẠI (đảo ô bị bắt ở đây)');
   });
 
+  /* Ô `index` — phép dò THỨ HAI, cho ô thứ hai. Nó một mình quyết định
+     `authuser`, nên đọc nhầm ô này là ghi vào nhầm tài khoản. Bản trước lùi về
+     vị trí trong mảng, tức bịa ra một ánh xạ email→tài khoản mà `usable()`
+     không thể bắt (nó chỉ so con số với con số). */
+  const mkIdx = (email, idx) => {
+    const r = mk('Chu So Huu', email);
+    if (idx === undefined) delete r[s.index];
+    else r[s.index] = idx;
+    return r;
+  };
+  const chayIdx = (rows, msg, muon) =>
+    A.detectAccounts({ fetch: async () => res(JSON.stringify([rows])) }).then((r) => {
+      ok(r.accounts.length === muon, `${msg} — mong ${muon}, nhận ${r.accounts.length}`);
+    });
+
+  chayIdx([mkIdx('a@gmail.com', 1)], 'ô index là số nguyên thì nhận', 1);
+  chayIdx([mkIdx('a@gmail.com', 0)], 'index 0 hợp lệ (tài khoản mặc định)', 1);
+  /* Ba hình dạng "ô đã dịch chỗ". KHÔNG hàng nào được lùi về vị trí mảng —
+     hai hàng dưới đây nằm ở vị trí 0 và 1, đúng thứ cú lùi cũ sẽ trả về. */
+  chayIdx([mkIdx('a@gmail.com', '1')], 'index là chuỗi số thì LOẠI, không ép kiểu', 0);
+  chayIdx([mkIdx('a@gmail.com', undefined)], 'thiếu ô index thì LOẠI, không lùi về vị trí mảng', 0);
+  chayIdx([mkIdx('a@gmail.com', 1.5)], 'index không nguyên thì LOẠI', 0);
+  chayIdx([mkIdx('a@gmail.com', -1)], 'index âm thì LOẠI', 0);
+  /* Và loại từng hàng một, chứ không phải cả mảng: hàng lành vẫn phải sống. */
+  chayIdx([mkIdx('hong@gmail.com', undefined), mkIdx('lanh@gmail.com', 2)],
+    'hàng hỏng bị bỏ, hàng lành vẫn nhận', 1);
+
   ok(A._internals.looksLikeEmail('a@b.co', A.config) === true, 'looksLikeEmail: nhận email');
   ok(A._internals.looksLikeEmail('Nguyen Van A', A.config) === false, 'looksLikeEmail: loại tên người');
   ok(
@@ -233,7 +260,7 @@ const res = (body, okFlag) => ({ ok: okFlag !== false, status: okFlag === false 
  * sửa con số này; nó là một phép đếm của CHÍNH file này, không phải một hằng số
  * ngoại sinh chép tay.
  */
-const CAN_CO = 42;
+const CAN_CO = 49;
 
 setTimeout(() => {
   const daChay = pass + fail;
