@@ -79,6 +79,25 @@ const uncheck = (h, i) => {
 /** Trạng thái tick của TỪNG dòng, theo thứ tự — ghim slot chứ không ghim tổng số. */
 const states = (h) => h.panelAll('.row input').map((b) => b.checked);
 
+/*
+ * Bấm vào cả DÒNG, đúng như người dùng bấm — dòng là một `<label>` bọc ô tick.
+ * `check()`/`uncheck()` ở trên lái thẳng ô tick nên bỏ qua đúng lớp này.
+ */
+const clickRow = (h, i) => h.panelAll('.row')[i].dispatchEvent(
+  new h.win.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+/** Cây 3 cấp: cha CÓ url > nhóm không url > hai cháu, cộng một trang em và một trang lẻ. */
+const deep = () => [
+  docNode('Guide', 'https://docs.example.dev/guide', [
+    docNode('Cơ bản', null, [
+      docNode('Cài đặt', 'https://docs.example.dev/guide/install', [], 2),
+      docNode('Chạy thử', 'https://docs.example.dev/guide/run', [], 2),
+    ], 1),
+    docNode('Nâng cao', 'https://docs.example.dev/guide/adv', [], 1),
+  ]),
+  docNode('API', 'https://docs.example.dev/api'),
+];
+
 async function run() {
   /* ---------------------------------------------------------------- */
   /* nút mở bảng                                                       */
@@ -158,6 +177,106 @@ async function run() {
       '(d) tick nhóm phải tick luôn cả hai trang con');
     eq(h.panel('[data-act="import"]').textContent, 'Thêm 2 trang',
       '(d) nút Thêm chỉ đếm dòng CÓ URL, nhóm không được tính là một trang');
+    h.close();
+  }
+
+  /*
+   * Cú bấm THẬT lên dòng cha, không phải `box.checked = true` rồi bắn `change`.
+   *
+   * Luật "tick cha thì tick cả con" đã có phép đo giữ: hoán vị
+   * `for (const kid of value ? [] : descendants(row))` cho 106 pass / 4 fail /
+   * exit 1. Nhưng mọi ca đang có đều lái checkbox bằng tay, nên KHÔNG ca nào
+   * hỏi xem người dùng có bấm tới được cái luật ấy không. Dòng là một `<label>`
+   * bọc quanh ô tick — đó là thứ duy nhất khiến bấm vào CHỮ cũng tick. Hoán vị
+   * `createElement('label')` -> `createElement('div')` giết hẳn đường bấm ấy mà
+   * vẫn 110 pass / 0 fail / exit 0 (đo 2026-09-04). Ba khối dưới đây đi bằng
+   * `clickRow()` chính vì thế.
+   */
+  {
+    const h = loadDocsPage({ tree: deep() });
+    await h.tick(80);
+    h.click(h.launcher());
+    await h.tick(60);
+    eq(h.panelAll('.row__title').map((s) => s.textContent),
+      ['Guide', 'Cơ bản', 'Cài đặt', 'Chạy thử', 'Nâng cao', 'API'],
+      '(d) tiền đề: cây 3 cấp phải phẳng hoá đúng thứ tự thì chỉ số dòng dưới mới có nghĩa');
+
+    clickRow(h, 0);
+    eq(states(h), [true, true, true, true, true, false],
+      '(d) bấm vào DÒNG cha có URL phải tick nhóm con, hai cháu và trang em — không chỉ mình nó');
+    eq(h.panel('[data-act="import"]').textContent, 'Thêm 4 trang',
+      '(d) tick cả nhánh thì nút Thêm đếm 4 trang có URL, nhóm giữa không được tính');
+
+    clickRow(h, 0);
+    eq(states(h), [false, false, false, false, false, false],
+      '(d) bấm lần hai lên chính dòng cha phải bỏ tick toàn bộ nhánh');
+    h.close();
+  }
+
+  /*
+   * Bấm một nhóm đang LỬNG phải tick nốt phần còn thiếu, không phải quét sạch.
+   *
+   * Đây là chỗ `checked` và `indeterminate` nói hai chuyện khác nhau: ô lửng có
+   * `checked === false`, nên nếu handler đọc nhầm nó thành "đang tắt" thì cú bấm
+   * ra kết quả ngược. Không ca nào đang ghim nhánh này.
+   */
+  {
+    const h = loadDocsPage({ tree: deep() });
+    await h.tick(80);
+    h.click(h.launcher());
+    await h.tick(60);
+
+    clickRow(h, 2);
+    const group = h.panelAll('.row input')[1];
+    ok(group.indeterminate && !group.checked,
+      '(d) tiền đề: mới tick một trong hai cháu thì nhóm giữa phải lửng, chưa phải đã tick');
+
+    clickRow(h, 1);
+    eq(states(h), [false, true, true, true, false, false],
+      '(d) bấm nhóm đang LỬNG phải tick nốt cháu còn lại, không phải bỏ tick cả nhóm');
+    ok(!h.panelAll('.row input')[1].indeterminate,
+      '(d) nhóm đã đủ con thì phải thôi lửng');
+    eq(h.panel('[data-act="import"]').textContent, 'Thêm 2 trang',
+      '(d) nhóm giữa không có URL nên chỉ hai cháu được đếm');
+    h.close();
+  }
+
+  /*
+   * Tick cha khi BỘ LỌC đang bật: con bị giấu cũng phải theo.
+   *
+   * Ô lọc `.panel__search` tới giờ chưa có một ca nào — `grep -n panel__search
+   * test/` chỉ ra 0 hit (đo 2026-09-04). Nó không phải chi tiết phụ ở đây: mỗi
+   * lượt `render()` dựng lại ô tick MỚI cho riêng dòng đang hiện, và trạng thái
+   * của dòng bị giấu sống nhờ ô cũ vẫn nằm trong sổ `boxes`. Hoán vị thêm
+   * `boxes.clear()` vào đầu `render()` — tức dòng bị lọc mất sạch trạng thái —
+   * vẫn 110 pass / 0 fail / exit 0.
+   *
+   * Quyết định được ghim ở đây: "cha" nghĩa là CẢ NHÁNH, kể cả phần bộ lọc đang
+   * giấu. Nút Thêm nói ra con số thật (4 trang) trong khi chỉ 3 dòng đang hiện —
+   * cố ý, để cú bấm không lặng lẽ bỏ sót trang.
+   */
+  {
+    const h = loadDocsPage({ tree: deep() });
+    await h.tick(80);
+    h.click(h.launcher());
+    await h.tick(60);
+
+    const box = h.panel('.panel__search');
+    box.value = 'install';
+    box.dispatchEvent(new h.win.Event('input'));
+    await h.tick(20);
+    eq(h.panelAll('.row__title').map((s) => s.textContent), ['Guide', 'Cơ bản', 'Cài đặt'],
+      '(d) lọc phải giữ lại cả dòng cha của dòng khớp, nếu không dòng con mất chỗ đứng trong cây');
+
+    clickRow(h, 0);
+    eq(h.panel('[data-act="import"]').textContent, 'Thêm 4 trang',
+      '(d) tick cha khi đang lọc phải tick cả những trang bộ lọc đang giấu');
+
+    box.value = '';
+    box.dispatchEvent(new h.win.Event('input'));
+    await h.tick(20);
+    eq(states(h), [true, true, true, true, true, false],
+      '(d) gỡ lọc thì trạng thái tick của dòng từng bị giấu phải còn nguyên');
     h.close();
   }
 
