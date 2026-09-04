@@ -531,6 +531,92 @@ const V = (id, over) => Object.assign({ id, videoId: id.padEnd(11, 'x'), title: 
     eq(win.document.getElementById('notebook-create').hidden, true, 'list hỏng: KHÔNG tự mở khung tạo');
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Ngõ cụt của ca "tài khoản đã chọn không dùng được"                 */
+  /* ---------------------------------------------------------------- */
+  /*
+   * Câu note bảo "chọn lại tài khoản ở trên". Hàng chọn lại bị ẩn khi danh
+   * sách có dưới hai mục — nên chính câu hướng dẫn trỏ vào một điều khiển
+   * không tồn tại. Hai hình dạng, hai lối ra khác nhau.
+   */
+  async function nap(opts) {
+    const win = renderPopup([], opts);
+    await settle();
+    click(win, win.document.getElementById('notebook-refresh'));
+    await settle();
+    const d = win.document;
+    return {
+      win,
+      hangChon: d.getElementById('notebook-account-row'),
+      sel: d.getElementById('account-select'),
+      note: d.getElementById('account-note'),
+      thoat: d.getElementById('account-clear'),
+    };
+  }
+  const MAT = { ok: true, needsTab: false, notebooks: [], account: { source: 'chosen-missing', authuser: null } };
+
+  {
+    // CA1. Chỉ còn MỘT tài khoản đăng nhập, và cái đã chọn không phải nó.
+    // Một mục thật + mục "không còn đăng nhập" là đủ để chọn lại → phải HIỆN.
+    const { hangChon, sel } = await nap({
+      accounts: { ok: true, selected: 'da-dang-xuat@gmail.com', accounts: [{ email: 'con@gmail.com', name: 'Con', index: 0, isDefault: true }] },
+      notebooks: MAT,
+    });
+    eq(hangChon.hidden, false, 'CA1: còn một tài khoản thì vẫn phải hiện hàng chọn để chọn lại');
+    eq(sel.options.length, 2, 'CA1: mục "không còn đăng nhập" + mục thật');
+    ok([...sel.options].some((o) => o.value === 'con@gmail.com' && !o.disabled),
+      'CA1: và mục thật chọn được');
+  }
+
+  {
+    // CA2. `ListAccounts` hỏng hẳn: không có mục nào để chọn. Lối ra duy nhất
+    // là bỏ chọn tài khoản — tức lùi về hành vi trước ticket 013.
+    const { hangChon, thoat } = await nap({
+      accounts: { ok: false, selected: 'da-dang-xuat@gmail.com', accounts: [], status: 'network' },
+      notebooks: MAT,
+    });
+    eq(hangChon.hidden, true, 'CA2: không đọc được danh sách thì không dựng dropdown rỗng');
+    eq(thoat.hidden, false, 'CA2: nhưng PHẢI có lối ra, không để owner kẹt');
+    const { note } = await nap({
+      accounts: { ok: false, selected: 'da-dang-xuat@gmail.com', accounts: [], status: 'network' },
+      notebooks: MAT,
+    });
+    ok(!/ở trên/.test(note.textContent),
+      `CA2: và câu note KHÔNG trỏ vào hàng chọn đang bị ẩn — nhận: ${JSON.stringify(note.textContent)}`);
+  }
+
+  {
+    // CA3. `status` từng được tính, truyền hết đường rồi bị bỏ: "chỉ có một
+    // tài khoản" và "phép dò hỏng nên không nhận ra tài khoản nào" hiện ra y
+    // hệt nhau. Ca sau là điều kiện đảo ngược số 1 đang xảy ra.
+    const { note, thoat } = await nap({
+      accounts: { ok: true, selected: null, accounts: [], status: 'empty' },
+      notebooks: { ok: true, needsTab: false, notebooks: [], account: { source: 'default', authuser: '0' } },
+    });
+    eq(note.hidden, false, 'CA3: có nói ra điều gì đó');
+    ok(/không đọc được danh sách tài khoản/i.test(note.textContent),
+      `CA3: nói rõ là phép dò hỏng, không chỉ nói "đang dùng mặc định" — nhận: ${JSON.stringify(note.textContent)}`);
+    ok(/mặc định/.test(note.textContent), 'CA3: và vẫn nói tài khoản nào đang nhận request');
+    eq(thoat.hidden, true, 'CA3: chưa chọn gì thì không có gì để bỏ chọn');
+  }
+
+  {
+    // CA4. Bình thường: không note, không nút thoát. Không có ca này thì hoán
+    // vị "luôn hiện nút thoát" vẫn xanh.
+    const { note, thoat } = await nap({
+      accounts: {
+        ok: true, selected: 'con@gmail.com', status: 'ok',
+        accounts: [
+          { email: 'con@gmail.com', name: 'Con', index: 0, isDefault: true },
+          { email: 'khac@gmail.com', name: 'Khac', index: 1, isDefault: false },
+        ],
+      },
+      notebooks: { ok: true, needsTab: false, notebooks: [], account: { source: 'chosen', authuser: '0' } },
+    });
+    eq(note.hidden, true, 'CA4: đã chọn được tài khoản thì im lặng');
+    eq(thoat.hidden, true, 'CA4: và không có nút thoát thừa');
+  }
+
   console.log(`${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
 })();

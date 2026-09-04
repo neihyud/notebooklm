@@ -1023,3 +1023,11 @@ kbd {
   line-height: 1.4;
   opacity: 0.75;
 }
+
+/* Lối thoát khỏi ca "tài khoản đã chọn không dùng được". Nằm ngay dưới câu
+   note giải thích, vì nó là hành động DUY NHẤT đi tiếp được ở trạng thái đó. */
+.notebook__escape {
+  display: block;
+  margin: 2px 0 6px;
+  padding: 0;
+}

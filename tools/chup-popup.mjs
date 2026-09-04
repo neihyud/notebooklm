@@ -67,6 +67,21 @@ const CANH = {
     },
     notebooks: { ok: false, needsTab: false, notebooks: [], account: { source: 'chosen-missing', authuser: null } },
   },
+  'khong-doc-duoc-tai-khoan': {
+    vi: 'ListAccounts hỏng + đã chọn tài khoản — ngõ cụt cũ, giờ có nút Bỏ chọn.',
+    accounts: { ok: false, selected: 'da-dang-xuat@gmail.com', accounts: [], status: 'network' },
+    notebooks: { ok: false, needsTab: false, notebooks: [], account: { source: 'chosen-missing', authuser: null } },
+  },
+  'con-mot-tai-khoan': {
+    vi: 'Chỉ còn một tài khoản, cái đã chọn đã đăng xuất — hàng chọn phải HIỆN.',
+    accounts: { ok: true, selected: 'da-dang-xuat@gmail.com', accounts: [{ email: 'chu@gmail.com', name: 'Chu', index: 0, isDefault: true }] },
+    notebooks: { ok: true, needsTab: false, notebooks: [], account: { source: 'chosen-missing', authuser: null } },
+  },
+  'do-hong-lang-le': {
+    vi: 'ListAccounts đọc ra 0 tài khoản (status empty) — điều kiện đảo ngược 1 đang xảy ra.',
+    accounts: { ok: true, selected: null, accounts: [], status: 'empty' },
+    notebooks: { ok: true, needsTab: false, notebooks: [{ id: 'a1', title: 'Sổ nào đó' }], account: { source: 'default', authuser: '0' } },
+  },
   'khong-co-notebook': {
     vi: 'Tài khoản mới, chưa có notebook nào → chỉ còn mục Tạo mới.',
     accounts: { ok: true, selected: null, accounts: [] },

@@ -8,6 +8,7 @@
   const $ = (id) => document.getElementById(id);
   const els = {
     notebookUrl: $('notebook-url'),
+    accountClear: $('account-clear'),
     notebookHint: $('notebook-hint'),
     useCurrent: $('use-current'),
     accountRow: $('notebook-account-row'),
@@ -198,7 +199,14 @@
     const row = els.accountRow;
     const sel = els.accountSelect;
     const list = (r && r.accounts) || [];
-    if (!r || !r.ok || list.length < 2) {
+    /*
+     * Ẩn khi một dropdown một dòng không cho quyết định gì — TRỪ khi tài khoản
+     * đã chọn không còn trong danh sách. Lúc đó ẩn đi là bỏ owner lại trong ngõ
+     * cụt: câu note bảo "chọn lại tài khoản ở trên" mà "ở trên" không có gì.
+     * Còn một mục thật cộng mục "không còn đăng nhập" là đủ để chọn lại.
+     */
+    const thieu = r && r.selected && !list.some((a) => a.email === r.selected);
+    if (!r || !r.ok || (list.length < 2 && !thieu) || !list.length) {
       row.hidden = true;
       sel.textContent = '';
       return;
@@ -240,25 +248,49 @@
    * đang dùng mặc định. Im lặng ở đây đúng là chế độ hỏng mà ticket tồn tại để
    * chặn — ghi vào nhầm tài khoản mà không báo gì.
    */
-  function renderAccountNote(account) {
+  function renderAccountNote(account, acc) {
     const el = els.accountNote;
+    const thoat = els.accountClear;
+    thoat.hidden = true;
     if (!account || account.source === 'chosen') {
       el.hidden = true;
       el.textContent = '';
       return;
     }
+    /*
+     * `acc.status` từng được tính, truyền hết đường lên đây rồi BỊ BỎ. Nên hai
+     * ca rất khác nhau hiện ra y hệt nhau: "bạn thật sự chỉ có một tài khoản",
+     * và "`ListAccounts` đổi hình dạng nên ta không nhận ra tài khoản nào".
+     * Ca thứ hai là điều kiện đảo ngược số 1 đang xảy ra — im lặng ở đó thì
+     * owner không bao giờ biết phép dò đã hỏng.
+     */
+    const dochong = acc && (!acc.ok || (acc.status === 'empty' && !acc.accounts.length));
+    /*
+     * Câu cho `chosen-missing` phải trỏ vào điều khiển CÓ THẬT. Hàng chọn ẩn
+     * mà vẫn viết "chọn lại tài khoản ở trên" thì chính câu hướng dẫn là ngõ
+     * cụt — nó bảo owner làm một việc không làm được.
+     */
+    const ket = els.accountRow.hidden;
     const text = {
       tab: 'Đang dùng tài khoản của tab NotebookLM đang mở.',
       default: 'Chưa chọn tài khoản — đang dùng tài khoản Google mặc định (authuser=0).',
-      'chosen-missing':
-        'Tài khoản đã chọn không còn đăng nhập. Chưa gửi request nào — chọn lại tài khoản ở trên.',
+      'chosen-missing': ket
+        ? 'Tài khoản đã chọn không còn đăng nhập, và không đọc được danh sách để chọn lại. Chưa gửi request nào.'
+        : 'Tài khoản đã chọn không còn đăng nhập. Chưa gửi request nào — chọn lại tài khoản ở trên.',
     }[account.source];
     if (!text) {
       el.hidden = true;
       return;
     }
-    el.textContent = text;
+    // Chỉ ghép cho `tab`/`default`: câu `chosen-missing` lúc kẹt đã tự nói ra
+    // chuyện không đọc được danh sách, ghép nữa là lặp ý.
+    el.textContent = dochong && account.source !== 'chosen-missing'
+      ? `Không đọc được danh sách tài khoản Google. ${text}`
+      : text;
     el.hidden = false;
+    // Ngõ cụt duy nhất còn lại: đã chọn một tài khoản không dùng được, mà danh
+    // sách không đủ để chọn lại. Bỏ chọn là đường lùi về hành vi trước 013.
+    if (account.source === 'chosen-missing' && ket) thoat.hidden = false;
   }
 
   async function napTaiKhoan() {
@@ -269,6 +301,7 @@
       r = null;
     }
     renderAccounts(r);
+    return r;
   }
 
   /**
@@ -278,14 +311,14 @@
    */
   async function napDanhSach() {
     renderNotebookSelect('dang-nap');
-    await napTaiKhoan();
+    const acc = await napTaiKhoan();
     let r = null;
     try {
       r = await send(MSG.LIST_NOTEBOOKS);
     } catch (_) {
       r = null;
     }
-    renderAccountNote(r && r.account);
+    renderAccountNote(r && r.account, acc);
     if (!r || (!r.ok && r.needsTab)) {
       renderNotebookSelect('khong-co-tab');
       els.notebookHint.textContent =
@@ -874,6 +907,20 @@
       // worker lo — nó là chỗ duy nhất biết đổi tài khoản kéo theo những gì,
       // nên trang Cài đặt đổi tài khoản cũng được dọn y hệt. Ghi lại ở đây nữa
       // thì hai cơ chế cùng giữ một luật, và hoán vị chỗ nào cũng xanh.
+      els.notebookUrl.value = '';
+      await napDanhSach();
+    })
+  );
+
+  /* Bỏ chọn tài khoản: gửi email rỗng, service worker quy về `null`. Đó là
+     cùng một đường với đổi tài khoản, nên `doiTaiKhoan()` dọn y hệt. */
+  els.accountClear.addEventListener('click', () =>
+    withActionLock(async () => {
+      try {
+        await send(MSG.SELECT_ACCOUNT, { email: '' });
+      } catch (_) {
+        return;
+      }
       els.notebookUrl.value = '';
       await napDanhSach();
     })
