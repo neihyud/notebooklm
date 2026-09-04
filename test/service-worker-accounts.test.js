@@ -1,8 +1,11 @@
 /*
  * Đường lùi của hai lượt gốc, phía service worker. Ticket `docs/tickets/013-*.md`.
  *
- * Đây là phần TỰ SOÁT của ticket 013 — không có review seat độc lập, nên hai
- * khuyết tật dưới đây là do đọc lại chính code vừa viết mà ra:
+ * Ca A–E là phần TỰ SOÁT của ticket 013 — hai khuyết tật dưới đây do đọc lại
+ * chính code vừa viết mà ra. Ca F–J đến từ review seat ĐỘC LẬP chạy sau đó
+ * (2026-09-04), và nó tìm ra chỗ mà lượt tự soát bỏ sót hoàn toàn: cả A–E chỉ
+ * canh đường LIỆT KÊ, còn đường IMPORT — đường thật sự ghi Nguồn — không bị
+ * ghim tài khoản chút nào. Đúng hình dạng "đường dữ liệu song song":
  *
  *   1. `createNotebook` lùi sang đường tab MÙ QUÁNG. `created-but-no-id` nghĩa
  *      là notebook có thể đã tạo xong rồi; lùi lúc đó là tạo cái THỨ HAI, và
@@ -28,6 +31,12 @@ const S = {
   /** Trả lời cho `sendMessage` tới tab; null = chưa ai gọi. */
   tabReply: null,
   tabCalls: [],
+  /** Mọi lượt điều hướng tab: `{how:'create'|'update', url}`. */
+  nav: [],
+  /** Tiêu đề mọi thông báo hệ thống. */
+  notes: [],
+  /** Trả lời cho `NLM_PING`. `inNotebook` thiếu → 4 nhịp ngủ 1s trong SW. */
+  pingReply: { ok: true, inNotebook: true },
 };
 
 const AT_HTML = '<script>window.WIZ={"SNlM0e":"TOKEN","cfb2h":"boq"};</script>';
@@ -85,14 +94,14 @@ global.chrome = {
   alarms: { create: async () => {}, clear: async () => {}, onAlarm: noopEvent() },
   commands: { onCommand: noopEvent() },
   contextMenus: { create() {}, removeAll: (cb) => cb && cb(), onClicked: noopEvent() },
-  notifications: { create: async () => {} },
+  notifications: { create: async (o) => { S.notes.push((o && o.title) || ''); } },
   scripting: { executeScript: async () => [{ result: true }] },
   downloads: { download: async () => 1, search: async () => [], onChanged: noopEvent() },
   tabs: {
     query: async (q) =>
       String((q && q.url) || '').includes('notebooklm') ? S.tabs.slice() : [],
-    create: async ({ url }) => ({ id: 9, url, status: 'complete' }),
-    update: async (id, { url }) => ({ id, url }),
+    create: async ({ url }) => { S.nav.push({ how: 'create', url }); return { id: 9, url, status: 'complete' }; },
+    update: async (id, { url }) => { S.nav.push({ how: 'update', id, url }); return { id, url }; },
     get: async (id) => ({ id, status: 'complete', url: (S.tabs.find((t) => t.id === id) || {}).url }),
     remove: async () => {},
     /* Chữ ký CALLBACK, không phải promise: `sendToTab` dùng callback và đọc
@@ -101,7 +110,7 @@ global.chrome = {
     sendMessage: (id, msg, cb) => {
       // Ping của `ensureScripts` trả lời riêng: gộp nó vào S.tabCalls thì phép
       // đếm "có lùi sang đường tab không" đếm nhầm cả bước dò script.
-      if (msg && msg.type === MSG_PING) { setTimeout(() => cb && cb({ ok: true }), 0); return; }
+      if (msg && msg.type === MSG_PING) { setTimeout(() => cb && cb(S.pingReply), 0); return; }
       S.tabCalls.push({ id, msg });
       setTimeout(() => cb && cb(S.tabReply), 0);
     },
@@ -131,6 +140,9 @@ async function reset() {
   S.tabs = [];
   S.tabReply = null;
   S.tabCalls = [];
+  S.nav = [];
+  S.notes = [];
+  S.pingReply = { ok: true, inNotebook: true };
   ACC._internals.resetMemo();
   await self.NBLM.setSettings({ nlmAccount: null });
 }
@@ -254,6 +266,104 @@ async function reset() {
     ok(r.selected === 'ai.do@gmail.com', 'F: email hạ về chữ thường ở đúng một chỗ');
     ok((store.get('settings') || {}).nlmAccount === 'ai.do@gmail.com', 'F: lựa chọn được lưu');
     ok(store.get(ACC.CTX_KEY) === undefined, 'F: đổi tài khoản thì ngữ cảnh cũ bị vứt');
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* F–I. ĐƯỜNG IMPORT — đường thật sự GHI, seat review tìm ra là hở    */
+  /* ---------------------------------------------------------------- */
+  /*
+   * Ca A–E ở trên chỉ canh đường liệt kê/tạo. `resolveNotebookTab` — hàm mà
+   * mỗi lượt Chạy dùng để chọn tab nhận Nguồn — nhận BẤT KỲ tab notebooklm nào,
+   * nên owner chọn `b@` mà đang mở tab `a@` thì Nguồn vào thẳng `a@`, im lặng.
+   *
+   * Lái bằng hàng đợi RỖNG: `resolveNotebookTab()` chạy đủ (nó nằm TRƯỚC vòng
+   * lặp), rồi vòng lặp thoát ngay vì không có Mục nào. Quan sát bằng lượt điều
+   * hướng tab, chứ không bằng giá trị trả về — tác động mới là thứ cần ghim.
+   */
+
+  /** Một lượt Chạy trên hàng đợi rỗng; trả về khi runner đã xong. */
+  async function chayRong() {
+    await self.NBLM.setQueue([]);
+    S.notes = [];
+    await send({ type: MSG.RUN });
+    for (let i = 0; i < 400; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      if (store.get('running') === false) return;
+    }
+    throw new Error('lượt chạy không kết thúc trong 4s — phép đo không dùng được');
+  }
+
+  const CHON_1 = async (email) => {
+    await self.NBLM.setSettings({ nlmAccount: email, notebookUrl: 'https://notebooklm.google.com/notebook/abc' });
+    S.fetch = async (u) => (u.includes('ListAccounts') ? res(accountsBody(ACC, email, 1)) : res('<html></html>'));
+  };
+
+  {
+    // F. Tab đang mở là của tài khoản 0; owner nhắm tài khoản 1. KHÔNG được
+    // giao Nguồn cho tab đó — đây đúng là ca ghi vào nhầm tài khoản.
+    await reset();
+    await CHON_1('chu@gmail.com');
+    S.tabs = [{ id: 7, url: 'https://notebooklm.google.com/notebook/abc' }];
+    await chayRong();
+    ok(!S.nav.some((n) => n.how === 'update' && n.id === 7),
+      'F: KHÔNG điều hướng tab của tài khoản khác đi làm việc hộ');
+    ok(S.nav.some((n) => /[?&]authuser=1(&|$)/.test(n.url || '')),
+      `F: mở notebook đích kèm authuser=1, nhận: ${JSON.stringify(S.nav)}`);
+  }
+
+  {
+    // G. Đúng tài khoản và đúng notebook thì dùng lại tab, không điều hướng gì.
+    await reset();
+    await CHON_1('chu@gmail.com');
+    S.tabs = [{ id: 8, url: 'https://notebooklm.google.com/notebook/abc?authuser=1' }];
+    await chayRong();
+    ok(S.nav.length === 0, `G: tab đúng tài khoản + đúng notebook thì dùng lại, nhận: ${JSON.stringify(S.nav)}`);
+  }
+
+  {
+    // H. Tài khoản đã chọn không còn đăng nhập: dừng TRƯỚC khi chạm tab nào.
+    // Lùi về `0` ở đây là ghi Nguồn vào tài khoản mặc định trong im lặng.
+    await reset();
+    await self.NBLM.setSettings({ nlmAccount: 'da-dang-xuat@gmail.com', notebookUrl: 'https://notebooklm.google.com/notebook/abc' });
+    S.fetch = async (u) => (u.includes('ListAccounts') ? res(accountsBody(ACC, 'chu@gmail.com', 1)) : res('<html></html>'));
+    S.tabs = [{ id: 7, url: 'https://notebooklm.google.com/notebook/abc' }];
+    await chayRong();
+    ok(S.nav.length === 0, 'H: tài khoản đã đăng xuất thì không điều hướng tab nào');
+    ok(S.tabCalls.length === 0, 'H: và không hỏi tab nào');
+    ok(S.notes.some((t) => t.includes('Không chạy được hàng đợi')),
+      `H: nói ra là không chạy được, nhận: ${JSON.stringify(S.notes)}`);
+  }
+
+  {
+    // I. CHƯA chọn tài khoản — hành vi phải y như trước ticket 013. Đây là
+    // điều kiện đảo ngược số 1: ListAccounts hỏng thì ta lùi chứ không hỏng.
+    await reset();
+    await self.NBLM.setSettings({ nlmAccount: null, notebookUrl: 'https://notebooklm.google.com/notebook/abc' });
+    S.fetch = async () => res('', false);
+    S.tabs = [{ id: 7, url: 'https://notebooklm.google.com/notebook/abc' }];
+    await chayRong();
+    ok(S.nav.length === 0, `I: chưa chọn tài khoản thì dùng tab đang mở như cũ, nhận: ${JSON.stringify(S.nav)}`);
+    ok(!S.notes.some((t) => t.includes('Không chạy được hàng đợi')), 'I: và KHÔNG chặn lượt chạy');
+  }
+
+  {
+    // J. Chưa chọn tài khoản, nhưng HAI tài khoản cùng mở. `resolveAuthuser`
+    // chỉ SUY RA `authuser` từ tab đầu tiên nói ra nó — đó là quan sát, không
+    // phải ý định của owner. Ghim theo suy đoán đó sẽ loại đúng cái tab đang
+    // mở notebook đích, rồi kéo tab của tài khoản KHÁC đi làm việc hộ.
+    //
+    // Ca I không phân biệt được chuyện này: ở đó tab trần và `default` cùng
+    // quy về '0' nên lọc giữ nguyên. Đo ra là 0 đỏ, nên mới có ca J.
+    await reset();
+    await self.NBLM.setSettings({ nlmAccount: null, notebookUrl: 'https://notebooklm.google.com/notebook/xyz' });
+    S.fetch = async () => res('', false);
+    S.tabs = [
+      { id: 5, url: 'https://notebooklm.google.com/notebook/abc?authuser=1' },
+      { id: 6, url: 'https://notebooklm.google.com/notebook/xyz' },
+    ];
+    await chayRong();
+    ok(S.nav.length === 0,
+      `J: dùng đúng tab đang mở notebook đích, không kéo tab tài khoản khác, nhận: ${JSON.stringify(S.nav)}`);
   }
 
   console.log(`${pass} pass, ${fail} fail`);

@@ -211,7 +211,7 @@ async function anyNotebookLmTab(wantAuthuser) {
    */
   if (wantAuthuser != null) {
     const want = String(wantAuthuser);
-    tabs = tabs.filter((t) => (authuserFromUrl(t.url || '') || '0') === want);
+    tabs = tabs.filter((t) => tabAuthuser(t) === want);
   }
   if (!tabs.length) return null;
   // Ưu tiên tab đang ở trong một notebook: nó chắc chắn đã nạp xong phiên và có
@@ -255,6 +255,29 @@ async function listAccounts() {
     selected: s.nlmAccount || null,
     status: r.status,
   };
+}
+
+/**
+ * `authuser` của một tab, theo MỘT luật duy nhất cho cả đường liệt kê lẫn
+ * đường import: URL không nói gì thì coi là `'0'`.
+ *
+ * Suy đoán đó có thể sai (tab của tài khoản 1 vẫn hay hiện URL trần), và cái
+ * giá khi sai là một lượt điều hướng thừa — đổi lại, một tab NÓI RÕ tài khoản
+ * khác thì không bao giờ bị nhận nhầm. Đó là chiều hỏng đắt hơn hẳn.
+ */
+function tabAuthuser(tab) {
+  return authuserFromUrl((tab && tab.url) || '') || '0';
+}
+
+/** Gắn `authuser` vào một URL notebooklm; URL hỏng thì trả nguyên. */
+function withAuthuser(url, authuser) {
+  try {
+    const u = new URL(url);
+    u.searchParams.set('authuser', String(authuser));
+    return u.toString();
+  } catch (_) {
+    return url;
+  }
 }
 
 /** `authuser` đọc ra từ URL của một tab, hoặc `null`. */
@@ -418,7 +441,30 @@ async function resolveNotebookTab() {
   const settings = await getSettings();
   const target = (settings.notebookUrl || '').trim();
 
-  const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+  /*
+   * ĐƯỜNG GHI cũng phải ghim tài khoản — không chỉ đường liệt kê.
+   *
+   * Trước bản này, chỗ đây nhận BẤT KỲ tab notebooklm nào. Nên owner chọn `b@`,
+   * dropdown hiện `b@`, mà nếu đang mở một tab của `a@` thì Nguồn đi thẳng vào
+   * `a@` — im lặng, vì content script dùng token của chính tab nó đang ở, và
+   * không có cách nào bảo nó nhắm tài khoản khác. `anyNotebookLmTab` đã lọc từ
+   * đầu; đường này thì không, và đây mới là đường thật sự GHI.
+   *
+   * Chỉ ghim khi owner ĐÃ CHỌN. `tab`/`default` là ta suy ra, không phải ý định
+   * của owner — ghim theo suy đoán sẽ loại đúng những tab vẫn chạy tốt trước
+   * ticket 013, tức tự phá điều kiện đảo ngược số 1 của chính ticket đó.
+   */
+  const who = await resolveAuthuser();
+  if (who.authuser == null) {
+    throw new Error(
+      `Tài khoản đã chọn (${who.email || '?'}) không còn đăng nhập. Chưa gửi Nguồn nào cả — ` +
+        'chọn lại tài khoản trong popup rồi chạy lại.'
+    );
+  }
+  const want = who.source === 'chosen' ? who.authuser : null;
+
+  let tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+  if (want != null) tabs = tabs.filter((t) => tabAuthuser(t) === want);
   const inNotebook = tabs.filter((t) => /\/notebook\/[^/]+/.test(t.url || ''));
 
   let tab = null;
@@ -426,18 +472,28 @@ async function resolveNotebookTab() {
     const wantedId = (/\/notebook\/([^/?#]+)/.exec(target) || [])[1];
     tab = inNotebook.find((t) => wantedId && (t.url || '').includes(wantedId)) || null;
     if (!tab) {
+      // `settings.notebookUrl` không mang `authuser` (nó là URL owner dán, hoặc
+      // do dropdown ghi). Gắn vào lúc điều hướng, chứ không lưu xuống đĩa: id
+      // notebook thuộc về một tài khoản, `authuser` thì đổi theo lựa chọn.
+      const dest = want == null ? target : withAuthuser(target, want);
       tab = tabs[0]
-        ? await chrome.tabs.update(tabs[0].id, { url: target })
-        : await chrome.tabs.create({ url: target, active: false });
+        ? await chrome.tabs.update(tabs[0].id, { url: dest })
+        : await chrome.tabs.create({ url: dest, active: false });
       await waitTabComplete(tab.id);
       await sleep(2500); // Angular cần thời gian dựng UI
     }
   } else {
     tab = inNotebook[0] || null;
     if (!tab) {
+      // Hai ca khác nhau, hai việc phải làm khác nhau: không có tab nào, so với
+      // CÓ tab nhưng của tài khoản khác. Gộp lại thì owner đọc "chưa có notebook
+      // nào đang mở" trong khi đang nhìn thẳng vào một notebook đang mở.
       throw new Error(
-        'Chưa có notebook nào đang mở. Hãy mở notebook đích rồi bấm "Dùng notebook ở tab hiện tại" ' +
-          'trong popup, hoặc dán URL notebook vào Options.'
+        want != null && (await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' })).length
+          ? `Có tab NotebookLM đang mở, nhưng không phải của tài khoản đã chọn (${who.email || `authuser=${want}`}). ` +
+            'Mở notebook đích bằng đúng tài khoản đó, hoặc đổi tài khoản trong popup.'
+          : 'Chưa có notebook nào đang mở. Hãy mở notebook đích rồi bấm "Dùng notebook ở tab hiện tại" ' +
+            'trong popup, hoặc dán URL notebook vào Options.'
       );
     }
   }
