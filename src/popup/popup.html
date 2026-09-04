@@ -15,10 +15,6 @@
   </header>
 
   <section class="notebook">
-    <div class="notebook__header">
-      <label for="notebook-url" class="notebook__label">Notebook đích</label>
-      <button type="button" id="use-current" class="btn-text">Dùng tab hiện tại</button>
-    </div>
     <!--
       Mỗi dropdown một NHÃN RIÊNG. Bản đầu để cả hai nằm chung dưới mỗi chữ
       "Notebook đích", và chụp bằng Brave thật (tools/chup-popup.mjs) cho thấy
@@ -26,7 +22,7 @@
       ("NotebookLM account" / "Send to") vì đúng lý do này.
     -->
     <div class="notebook__row" id="notebook-account-row" hidden>
-      <label for="account-select" class="notebook__sublabel">Tài khoản</label>
+      <label for="account-select" class="notebook__sublabel">Tài khoản NotebookLM</label>
       <div class="notebook__pick">
         <select id="account-select" class="notebook__select"></select>
       </div>
@@ -54,7 +50,17 @@
       <button type="button" id="notebook-create-go" class="btn btn--primary btn--sm">Tạo</button>
       <button type="button" id="notebook-create-cancel" class="btn btn--sm">Huỷ</button>
     </div>
-    <input type="url" id="notebook-url" placeholder="https://notebooklm.google.com/notebook/…" spellcheck="false">
+    <!--
+      Không có ô dán URL notebook trong popup — chủ ý, không phải quên.
+
+      `settings.notebookUrl` VẪN là nguồn chân lý mà background đọc; lối đặt nó
+      bằng tay chỉ RỜI CHỖ chứ không mất — ô "URL notebook" nằm ở trang Cài đặt.
+      Trong popup còn hai đường: chọn trong dropdown, hoặc tạo notebook mới.
+
+      Đánh đổi đã biết và đã chấp nhận: khi `ListNotebooks` hỏng thì chỉ đích
+      danh một notebook có sẵn phải đi vòng qua trang Cài đặt, thêm vài cú bấm.
+      Câu hint ở nhánh đó có nhiệm vụ chỉ sang đấy — `popup.js` `napDanhSach()`.
+    -->
     <p class="hint" id="notebook-hint"></p>
   </section>
 
@@ -77,7 +83,7 @@
         -->
         <div class="chips" id="counts" role="group" aria-label="Lọc hàng đợi theo trạng thái"></div>
         <div class="queue__actions">
-          <button type="button" id="run" class="btn btn--primary btn--sm">Chạy</button>
+          <button type="button" id="run" class="btn btn--primary btn--cta">Chạy</button>
           <button type="button" id="stop" class="btn btn--sm" hidden>Dừng</button>
           <!--
             Thao tác không hoàn tác được KHÔNG đứng cạnh thao tác dùng nhiều nhất.

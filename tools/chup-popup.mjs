@@ -36,7 +36,7 @@ const CANH = {
     notebooks: null,
   },
   '1-tai-khoan': {
-    vi: 'Một tài khoản → hàng chọn tài khoản PHẢI ẩn (không cho quyết định gì).',
+    vi: 'Một tài khoản → hàng chọn VẪN hiện (owner đảo 2026-09-04: nó nói rõ đi vào tài khoản nào).',
     accounts: { ok: true, selected: null, accounts: [{ email: 'chu@gmail.com', name: 'Chu', index: 0, isDefault: true }] },
     notebooks: { ok: true, needsTab: false, notebooks: [nb('a1', 'Ghi chép luận văn'), nb('b2', 'Đọc tuần này')], account: { source: 'tab', authuser: '0' } },
   },
@@ -86,6 +86,16 @@ const CANH = {
     vi: 'Tài khoản mới, chưa có notebook nào → chỉ còn mục Tạo mới.',
     accounts: { ok: true, selected: null, accounts: [] },
     notebooks: { ok: true, needsTab: false, notebooks: [], account: { source: 'tab', authuser: '0' } },
+  },
+  'hang-doi-co-viec': {
+    vi: 'Hàng đợi có việc → thanh công cụ và nút CTA Chạy mới hiện (popup.js:738).',
+    accounts: { ok: true, selected: null, accounts: [{ email: 'chu@gmail.com', name: 'Chu', index: 0, isDefault: true }] },
+    notebooks: { ok: true, needsTab: false, notebooks: [nb('a1', 'Ghi chép luận văn')], account: { source: 'tab', authuser: '0' } },
+    queue: [
+      { id: 'q1', url: 'https://www.youtube.com/watch?v=aaaaaaaaaaa', title: 'Bài giảng 1 — nhập môn', status: 'pending', kind: 'youtube' },
+      { id: 'q2', url: 'https://www.youtube.com/watch?v=bbbbbbbbbbb', title: 'Bài giảng 2 — thực hành', status: 'done', kind: 'youtube' },
+      { id: 'q3', url: 'https://example.com/tai-lieu', title: 'Tài liệu tham khảo', status: 'error', kind: 'doc', error: 'Không đọc được trang' },
+    ],
   },
   'ten-dai': {
     vi: 'Tên notebook dài + email dài — chỗ tràn chỉ nhìn thấy bằng CSS thật.',
@@ -160,7 +170,12 @@ function stub(canh) {
           let r = { ok: true };
           if (msg.type === 'list-accounts') r = CANH.accounts || { ok: false, accounts: [], selected: null };
           if (msg.type === 'list-notebooks') r = CANH.notebooks || { ok: false, needsTab: true, notebooks: [] };
-          if (msg.type === 'get-state') r = { ok: true, running: false, queue: [], counts: {} };
+          /* settings PHAI co: popup.js render() destructure roi doc ngay
+             settings.notebookUrl. Thieu no thi render() nem TypeError o dong
+             dau va chet cam -- moi anh chup ra deu la trang thai TRUOC render,
+             tuc cong cu "mat" nay mu dung phan no sinh ra de nhin.
+             (Khong backtick trong doan nay: no nam trong template literal.) */
+          if (msg.type === 'get-state') r = { ok: true, running: false, queue: CANH.queue || [], counts: {}, settings: SETTINGS };
           if (cb) { setTimeout(() => cb(r), 0); return; }
           return Promise.resolve(r);
         },
@@ -179,12 +194,29 @@ function stub(canh) {
   })();`;
 }
 
+const THEME = process.env.THEME || '';
+if (THEME && THEME !== 'light' && THEME !== 'dark') {
+  console.error(`THEME phải là light hoặc dark, nhận "${THEME}"`); process.exit(2);
+}
 const chon = process.argv[2];
 const danhSach = Object.entries(CANH).filter(([k]) => !chon || k === chon);
 if (!danhSach.length) { console.error(`Không có cảnh "${chon}". Có: ${Object.keys(CANH).join(', ')}`); process.exit(2); }
 
-fs.rmSync(OUT, { recursive: true, force: true });
+/*
+ * Chỉ xoá ảnh của CHÍNH lượt này.
+ *
+ * Bản đầu xoá sạch thư mục mỗi lượt, nên chạy `node ...` sau `THEME=light ...`
+ * là bộ ảnh sáng bay hết mà không báo gì — đã dính đúng một lần. Hậu tố quyết
+ * định lượt nào sở hữu file nào.
+ */
 fs.mkdirSync(OUT, { recursive: true });
+const HAU_TO = THEME ? `-${THEME}.png` : '.png';
+for (const f of fs.readdirSync(OUT)) {
+  const cuaLuotNay = THEME
+    ? f.endsWith(HAU_TO)
+    : f.endsWith('.png') && !/-(light|dark)\.png$/.test(f);
+  if (cuaLuotNay) fs.rmSync(path.join(OUT, f));
+}
 
 const URL_POPUP = 'file://' + path.join(ROOT, 'src/popup/popup.html');
 
@@ -197,6 +229,15 @@ for (const [ten, canh] of danhSach) {
   await send('Runtime.enable', {}, S);
   await send('Emulation.setDeviceMetricsOverride',
     { width: 400, height: 640, deviceScaleFactor: 2, mobile: false }, S);
+  /*
+   * Ép theme. Headless mặc định một theme duy nhất, nên nhánh `prefers-color-scheme`
+   * còn lại chưa từng lọt vào ảnh nào — và đó đúng là nơi CSS dễ sai nhất
+   * (màu chevron của select, viền trên nền trắng). `THEME=light` để nhìn nhánh kia.
+   */
+  if (THEME) {
+    await send('Emulation.setEmulatedMedia',
+      { features: [{ name: 'prefers-color-scheme', value: THEME }] }, S);
+  }
   await send('Page.addScriptToEvaluateOnNewDocument', { source: stub(canh) }, S);
   console.log(`  ${ten.padEnd(22)} ${canh.vi}`);
   await send('Page.navigate', { url: URL_POPUP }, S);
@@ -218,11 +259,14 @@ for (const [ten, canh] of danhSach) {
       acctOpts: [...document.getElementById('account-select').options].map(o => o.textContent),
       nbOpts: [...document.getElementById('notebook-select').options].map(o => o.textContent),
       note: document.getElementById('account-note').hidden ? null : document.getElementById('account-note').textContent,
+      nbChon: (document.getElementById('notebook-select').selectedOptions[0] || {}).textContent || null,
+      taoHien: !document.getElementById('notebook-create').hidden,
+      hint: document.getElementById('notebook-hint').textContent,
     })`, returnByValue: true }, S);
     console.log('    ' + d.result.value);
   }
   const { data } = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true }, S);
-  fs.writeFileSync(path.join(OUT, `${ten}.png`), Buffer.from(data, 'base64'));
+  fs.writeFileSync(path.join(OUT, `${ten}${THEME ? '-' + THEME : ''}.png`), Buffer.from(data, 'base64'));
   await send('Target.closeTarget', { targetId });
 }
 

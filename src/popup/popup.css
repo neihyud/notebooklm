@@ -1,4 +1,11 @@
 :root {
+  /*
+   * `color-scheme` là thứ DUY NHẤT điều khiển được danh sách xổ ra của
+   * `<select>`: nó do trình duyệt vẽ, không nhận CSS của trang. Thiếu dòng này
+   * thì dù control đóng có style đến mấy, cú bấm vào nó vẫn xổ ra một bảng
+   * trắng giữa popup tối.
+   */
+  color-scheme: light;
   --bg: #ffffff;
   --bg-subtle: #f8f9fa;
   --surface: #ffffff;
@@ -22,6 +29,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
     --bg: #1f1f1f;
     --bg-subtle: #292a2d;
     --surface: #242528;
@@ -145,22 +153,6 @@ body {
   padding: 10px 14px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-subtle);
-}
-
-.notebook__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.notebook__label {
-  margin: 0;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
 }
 
 .btn-text {
@@ -468,6 +460,30 @@ textarea {
 .btn--primary:disabled {
   background: var(--line);
   color: var(--muted);
+}
+
+/*
+ * Nút Chạy là hành động chính của cả popup, nhưng nó từng dùng `btn--sm` —
+ * đúng cỡ với nút `⋯` bên cạnh, nên không có điểm neo nào cho việc quan
+ * trọng nhất. Oracle B dành hẳn một dải màu đặc chiếm hết chiều ngang cho
+ * CTA của họ; ta không chiếm hết chiều ngang (thanh này còn chứa chips lọc),
+ * nhưng phải nặng hơn hẳn hàng xóm.
+ */
+.btn--cta {
+  padding: 6px 18px;
+  min-height: 30px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+
+.btn--cta:hover:not(:disabled) {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.btn--cta:disabled {
+  box-shadow: none;
 }
 
 .btn--ghost {
@@ -992,13 +1008,93 @@ kbd {
 
 /* ---- chọn notebook bằng danh sách (ticket 011) ---- */
 .notebook__pick { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
-.notebook__select { flex: 1 1 auto; min-width: 0; }
+/*
+ * Hai hàng chọn (tài khoản / notebook đích) là thứ đập vào mắt đầu tiên khi
+ * popup mở, nên chúng phải là CONTROL CỦA TRANG chứ không phải control mặc
+ * định của hệ điều hành.
+ *
+ * Trước đây rule này chỉ có `flex` và `min-width`: không border, không nền,
+ * không chiều cao. Kết quả là `<select>` render hoàn toàn native — chụp bằng
+ * Brave thật cho thấy hai ô TRẮNG BỐP nằm giữa nền tối, trong khi mọi control
+ * khác của popup đều theo theme. Oracle B style cả hai ô cùng một hình dạng
+ * với nút bấm của họ, và đó là lý do hai dòng đầu của họ đọc như một khối.
+ */
+.notebook__select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  /* Mũi chevron tự vẽ: `appearance: none` gỡ mũi native đi cùng với cả phần
+     nền, nên phải trả lại một cái — nếu không ô trông như một `<input>`. */
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 13px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .notebook__select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%239aa0a6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  }
+}
+
+.notebook__select:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+.notebook__select:focus-visible {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-surface);
+}
+
+/*
+ * Ô đang chờ nạp danh sách. `opacity` trên cả control làm mũi chevron mờ theo
+ * và ô đọc như đang hỏng; đổi nền + chữ thay vì làm mờ.
+ */
+.notebook__select:disabled {
+  background-color: var(--bg-subtle);
+  color: var(--muted);
+  cursor: default;
+}
 .notebook__create { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
 .notebook__create input { flex: 1 1 auto; min-width: 0; }
 
 /* Hàng chọn tài khoản Google — ticket 013. Cùng nhịp với .notebook__pick. */
 .notebook__row {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+/*
+ * Đường chia giữa hai hàng — chỉ vẽ khi hàng tài khoản THẬT SỰ đang hiện.
+ *
+ * Hàng đó bị ẩn ở phần lớn trạng thái (một tài khoản, hoặc `ListAccounts`
+ * hỏng). Vẽ vô điều kiện thì ở những ca ấy đường kẻ rơi lên sát viền dưới của
+ * header thành một nét thừa. Selector này đọc đúng điều kiện đang hỏi.
+ */
+/*
+ * Nút ↻ phải cao BẰNG ô select cạnh nó. `.btn--icon` mặc định 26px, và
+ * `.notebook__pick` canh giữa theo trục dọc — nên nút lùn hơn ô 8px, đọc như
+ * một nút phụ trôi nổi. Oracle B để hai thứ này cùng chiều cao, thành một cặp.
+ */
+.notebook__pick .btn--icon {
+  width: 34px;
+  min-height: 34px;
+  border-radius: var(--radius);
+}
+
+#notebook-account-row:not([hidden]) ~ .notebook__row {
+  border-top: 1px solid var(--line-subtle);
+  padding-top: 9px;
 }
 /*
  * Nhãn con cho từng dropdown. Nhỏ và mờ hơn nhãn mục, vì nó phân biệt hai
@@ -1006,11 +1102,12 @@ kbd {
  */
 .notebook__sublabel {
   display: block;
-  margin-bottom: 3px;
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
   text-transform: uppercase;
-  opacity: 0.6;
 }
 /*
  * Câu "đang dùng tài khoản mặc định". Cố ý KHÔNG dùng màu lỗi: đây không phải

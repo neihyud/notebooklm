@@ -324,6 +324,55 @@ const res = (body, okFlag) => ({ ok: okFlag !== false, status: okFlag === false 
   A.detectAccounts({ fetch: async () => res('<html>not json</html>') }).then((r) => {
     ok(r.ok === false && r.status === 'unparsable', 'phản hồi không parse được → unparsable');
   });
+
+  /*
+   * VỎ postMessage — hình dạng THẬT của endpoint, đo thẳng bằng curl ngày
+   * 2026-09-04 (không phải chép của oracle):
+   *
+   *   $ curl -sS '<listUrl>'
+   *   HTTP 200, Content-Type: text/html
+   *   <!DOCTYPE html><html><body><script ...>window.parent.postMessage(
+   *     '\x5b\x22gaia.l.a.r\x22,\x5b\x5d\x5d', 'https:\/\/www.google.com');
+   *   </script></body></html>
+   *
+   * Chuỗi dưới đây là NGUYÊN VĂN bytes đo được, không gõ lại theo trí nhớ.
+   * Trước khi có đường vớt này, popup của owner hiện "Không đọc được danh sách
+   * tài khoản Google" ở MỌI lượt — hàng chọn tài khoản không bao giờ hiện.
+   */
+  const VO_DO_DUOC =
+    '<!DOCTYPE html><html><body><script type="text/javascript" nonce="ayVpyDwBOBSGjsri0wwaiQ">' +
+    "window.parent.postMessage('\\x5b\\x22gaia.l.a.r\\x22,\\x5b\\x5d\\x5d', 'https:\\/\\/www.google.com');" +
+    '</script></body></html>';
+
+  A.detectAccounts({ fetch: async () => res(VO_DO_DUOC) }).then((r) => {
+    ok(r.ok === true, `vỏ postMessage đo được PHẢI parse ra được, nhận ok=${r.ok} status=${r.status}`);
+    ok(r.status === 'empty' && r.accounts.length === 0,
+      `payload rỗng → empty chứ không phải unparsable, nhận: ${r.status}`);
+  });
+
+  /*
+   * Cùng vỏ đó nhưng có tài khoản thật bên trong. Payload dựng TỪ CẤU TRÚC rồi
+   * mới escape, chứ không gõ tay chuỗi hex: gõ tay thì test chứng nhận đúng cái
+   * chuỗi mình gõ, không chứng nhận được phép giải mã.
+   */
+  {
+    const hang = ['gaia.l.a', 1, 'Chu Nha', 'chu@gmail.com', null, null, 1, 0];
+    const tho = JSON.stringify(['gaia.l.a.r', [hang]]);
+    // Escape đúng ba ký tự Google escape trong mẫu đo được: [ " ]
+    const escaped = tho.replace(/[\[\]"]/g, (c) =>
+      '\\x' + c.charCodeAt(0).toString(16).padStart(2, '0'));
+    const voCoTaiKhoan =
+      `<html><body><script>window.parent.postMessage('${escaped}', 'https:\\/\\/www.google.com');</script></body></html>`;
+
+    A.detectAccounts({ fetch: async () => res(voCoTaiKhoan) }).then((r) => {
+      ok(r.ok === true && r.accounts.length === 1,
+        `vỏ postMessage có tài khoản → đọc ra 1, nhận: ${r.accounts.length} (${r.status})`);
+      const a = r.accounts[0];
+      ok(a && a.email === 'chu@gmail.com', `email đọc đúng ô, nhận: ${a && a.email}`);
+      ok(a && a.index === 0, `index đọc đúng ô, nhận: ${a && a.index}`);
+      ok(a && a.isDefault === true, `isDefault đọc đúng ô, nhận: ${a && a.isDefault}`);
+    });
+  }
   A.detectAccounts({
     fetch: async () => { throw new Error('mất mạng'); },
   }).then((r) => {
@@ -357,7 +406,7 @@ const res = (body, okFlag) => ({ ok: okFlag !== false, status: okFlag === false 
  * sửa con số này; nó là một phép đếm của CHÍNH file này, không phải một hằng số
  * ngoại sinh chép tay.
  */
-const CAN_CO = 62;
+const CAN_CO = 68;
 
 setTimeout(() => {
   const daChay = pass + fail;

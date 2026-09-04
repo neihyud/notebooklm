@@ -35,10 +35,16 @@
  * ────────────────────────────────────────────────────────────────────────
  * HẰNG SỐ NGOẠI SINH — MỘT PHIẾU, và phiếu đó sẽ hỏng
  *
- * Toàn bộ hình dạng `ListAccounts` dưới đây chỉ có MỘT oracle (Sourclip 1.8.0).
+ * Phần lớn hình dạng `ListAccounts` dưới đây chỉ có MỘT oracle (Sourclip 1.8.0).
  * Chính oracle đó mang bảy regex vớt cho cùng một phản hồi — dấu hiệu rõ ràng
  * rằng Google đổi hình dạng chỗ này. Ta KHÔNG chép bảy đường lùi; ta để hỏng
  * thành mảng rỗng và lùi về đường "dùng authuser của tab".
+ *
+ * NGOẠI LỆ DUY NHẤT, và nó có phiếu riêng: vỏ `postMessage`
+ * (`postMessagePattern`). Nó vào đây không phải vì oracle có, mà vì ngày
+ * 2026-09-04 ta ĐO THẲNG endpoint bằng curl và thấy nó trả `text/html` chứ
+ * không trả JSON — khiến `detectAccounts` hỏng ở mọi lượt. Một mẫu, một phép
+ * đo. Sáu mẫu còn lại của oracle vẫn nằm ngoài vì vẫn chưa có phiếu nào.
  */
 ;(function (root) {
   'use strict';
@@ -55,6 +61,30 @@
 
     /** Dấu nhận biết một phần tử tài khoản trong cây mảng trả về. */
     accountMarker: 'gaia.l.a',
+
+    /*
+     * Vỏ `postMessage`. ĐO THẲNG từ Google ngày 2026-09-04 bằng curl — đây
+     * KHÔNG phải một hằng số chép của oracle:
+     *
+     *   HTTP 200, Content-Type: text/html
+     *   <script>window.parent.postMessage(
+     *     '\x5b\x22gaia.l.a.r\x22,\x5b\x5d\x5d', 'https:\/\/www.google.com');
+     *   </script>
+     *
+     * Tức endpoint KHÔNG trả JSON nữa; nó trả một trang HTML mang JSON đã
+     * escape hex trong đối số đầu của `postMessage`. Trước khi có mẫu này,
+     * `detectAccounts` trả `unparsable` ở MỌI lượt và hàng chọn tài khoản không
+     * bao giờ hiện — đúng triệu chứng owner báo.
+     *
+     * Neo vào `, 'https:` chứ không dừng ở dấu nháy đầu tiên: payload có thể
+     * chứa nháy đã escape, và đích của `postMessage` là phần ổn định nhất của
+     * câu lệnh này.
+     *
+     * Oracle B mang BẢY mẫu vớt cho cùng chỗ này. Ta chép ĐÚNG MỘT — cái vừa
+     * đo. Sáu cái còn lại vẫn chưa có phiếu nào ngoài chính oracle, nên vẫn
+     * nằm ngoài; hỏng sang hình dạng khác thì vẫn lùi về mảng rỗng như cũ.
+     */
+    postMessagePattern: 'postMessage\\(\\s*([\'"])([\\s\\S]*)\\1\\s*,\\s*[\'"]https:',
 
     /**
      * Ô nào mang gì, TRONG một phần tử tài khoản.
@@ -183,14 +213,47 @@
     return acc;
   }
 
-  /** Bỏ tiền tố chống-XSSI rồi parse. Không có bảy đường lùi như oracle. */
-  function parseListPayload(text) {
+  /**
+   * Giải escape của một chuỗi JS literal về lại JSON thô.
+   *
+   * Chỉ ba phép, đúng những gì thấy trong mẫu đo được: `\xNN`, và hai dấu nháy
+   * đã escape. KHÔNG đụng `\/` — đó là escape HỢP LỆ của JSON, `JSON.parse`
+   * tự hiểu; thay nó ở đây là làm thừa một việc rồi có ngày làm sai.
+   */
+  function unescapeJsLiteral(text) {
+    return String(text)
+      .replace(/\\x([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/\\'/g, "'")
+      .replace(/\\"/g, '"');
+  }
+
+  /**
+   * Bỏ tiền tố chống-XSSI rồi parse; hỏng thì thử vỏ `postMessage`.
+   *
+   * Ba đường, xếp theo độ chắc chắn giảm dần. Đường thứ ba là hình dạng Google
+   * ĐANG trả về lúc này (xem `postMessagePattern`), hai đường đầu giữ lại vì
+   * chúng rẻ và vì hình dạng ngoại sinh thì đổi được theo cả hai chiều.
+   */
+  function parseListPayload(text, cfg) {
     if (typeof text !== 'string') return null;
     try {
       return JSON.parse(text);
     } catch (_) {}
     try {
       return JSON.parse(text.replace(/^\s*\)\]\}'\s*/, ''));
+    } catch (_) {}
+    const src = (cfg || config).postMessagePattern;
+    if (typeof src !== 'string' || !src) return null;
+    let re;
+    try {
+      re = new RegExp(src);
+    } catch (_) {
+      return null;
+    }
+    const m = re.exec(text);
+    if (!m || typeof m[2] !== 'string') return null;
+    try {
+      return JSON.parse(unescapeJsLiteral(m[2]));
     } catch (_) {}
     return null;
   }
@@ -252,7 +315,7 @@
     }
     if (!res || !res.ok) return { ok: false, accounts: [], status: 'http-' + ((res && res.status) || 0) };
 
-    const parsed = parseListPayload(await res.text());
+    const parsed = parseListPayload(await res.text(), cfg);
     if (!parsed) return { ok: false, accounts: [], status: 'unparsable' };
 
     const accounts = rowsToAccounts(collectAccountRows(parsed, cfg), cfg);
@@ -416,6 +479,7 @@
       looksLikeEmail,
       collectAccountRows,
       parseListPayload,
+      unescapeJsLiteral,
       rowsToAccounts,
       firstMatch,
       normAuthuser,

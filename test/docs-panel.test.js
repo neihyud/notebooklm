@@ -64,6 +64,21 @@ const check = (h, i) => {
   return box;
 };
 
+/*
+ * Bỏ tick đi đúng đường của người dùng: đổi `checked` rồi bắn `change`. Gọi
+ * thẳng vào `setRow()` là không được — nó nằm trong closure của bảng, và cái
+ * cần chứng nhận chính là handler `change` có gọi nó hay không.
+ */
+const uncheck = (h, i) => {
+  const box = h.panelAll('.row input')[i];
+  box.checked = false;
+  box.dispatchEvent(new h.win.Event('change'));
+  return box;
+};
+
+/** Trạng thái tick của TỪNG dòng, theo thứ tự — ghim slot chứ không ghim tổng số. */
+const states = (h) => h.panelAll('.row input').map((b) => b.checked);
+
 async function run() {
   /* ---------------------------------------------------------------- */
   /* nút mở bảng                                                       */
@@ -143,6 +158,75 @@ async function run() {
       '(d) tick nhóm phải tick luôn cả hai trang con');
     eq(h.panel('[data-act="import"]').textContent, 'Thêm 2 trang',
       '(d) nút Thêm chỉ đếm dòng CÓ URL, nhóm không được tính là một trang');
+    h.close();
+  }
+
+  /*
+   * Bỏ tick cha phải lan xuống mọi con — chiều ngược của khối trên, và nó KHÔNG
+   * được khối trên bao. Hoán vị `for (const kid of value ? descendants(row) : [])`
+   * trong `setRow()` giữ nguyên 102 pass / 0 fail của cả file, và cả
+   * `ui-isolation` (21) lẫn `manifest` (76) — đo 2026-09-04, đây là ba file duy
+   * nhất nạp `src/docs/content.js`.
+   *
+   * Vì sao mù: "Bỏ chọn" gọi `setRow(r, false)` cho MỌI dòng, nên con vẫn sạch
+   * kể cả khi cú bấm lên cha không lan xuống. Chỗ duy nhất phân biệt được là
+   * một cú bấm bỏ tick lên RIÊNG dòng cha.
+   */
+  {
+    const h = loadDocsPage({ tree: tree() });
+    await h.tick(80);
+    h.click(h.launcher());
+    await h.tick(60);
+
+    check(h, 0);
+    eq(states(h), [true, true, true, false],
+      '(d) tiền đề: tick nhóm phải tick cả hai con trước khi đo cú bỏ tick');
+
+    uncheck(h, 0);
+    eq(states(h), [false, false, false, false],
+      '(d) bỏ tick nhóm phải bỏ tick luôn cả hai trang con');
+    eq(h.panel('[data-act="import"]').textContent, 'Thêm 0 trang',
+      '(d) bỏ tick nhóm rồi thì nút Thêm phải về 0 trang');
+    ok(h.panel('[data-act="import"]').disabled, '(d) không còn dòng nào tick thì nút Thêm phải khoá');
+    h.close();
+  }
+
+  /*
+   * Cùng luật cho cha CÓ URL và cho cháu.
+   *
+   * Hai hình dạng khác hẳn nhóm ở khối trên: `syncCounts()` cố tình bỏ qua mọi
+   * dòng có URL (`if (row.url || !row.children.length) continue`), nên với cha
+   * có URL thì `setRow()` là đường DUY NHẤT hạ tick của con xuống — không có
+   * lớp nào đỡ hộ. Và cháu ở độ sâu 2 chỉ tới được qua nhánh đệ quy của
+   * `descendants()`, không qua `row.children`.
+   */
+  {
+    const deep = () => [
+      docNode('Guide', 'https://docs.example.dev/guide', [
+        docNode('Cơ bản', null, [
+          docNode('Cài đặt', 'https://docs.example.dev/guide/install', [], 2),
+        ], 1),
+        docNode('Nâng cao', 'https://docs.example.dev/guide/adv', [], 1),
+      ]),
+      docNode('API', 'https://docs.example.dev/api'),
+    ];
+    const h = loadDocsPage({ tree: deep() });
+    await h.tick(80);
+    h.click(h.launcher());
+    await h.tick(60);
+    eq(h.panelAll('.row__title').map((s) => s.textContent),
+      ['Guide', 'Cơ bản', 'Cài đặt', 'Nâng cao', 'API'],
+      '(d) tiền đề: cây phải phẳng hoá đúng thứ tự thì các chỉ số dòng dưới mới có nghĩa');
+
+    check(h, 0);
+    eq(states(h), [true, true, true, true, false],
+      '(d) tiền đề: tick cha có URL phải tick cả nhóm con, cháu và trang em');
+
+    uncheck(h, 0);
+    eq(states(h), [false, false, false, false, false],
+      '(d) bỏ tick cha có URL phải bỏ tick cả nhóm con lẫn CHÁU ở độ sâu 2');
+    eq(h.panel('[data-act="import"]').textContent, 'Thêm 0 trang',
+      '(d) bỏ tick cha có URL rồi thì không còn trang nào được đếm');
     h.close();
   }
 

@@ -7,10 +7,8 @@
 
   const $ = (id) => document.getElementById(id);
   const els = {
-    notebookUrl: $('notebook-url'),
     accountClear: $('account-clear'),
     notebookHint: $('notebook-hint'),
-    useCurrent: $('use-current'),
     accountRow: $('notebook-account-row'),
     accountSelect: $('account-select'),
     accountNote: $('account-note'),
@@ -102,8 +100,8 @@
    *
    * Nhãn lúc hỏng nói VIỆC CẦN LÀM, không nói "Lỗi".
    *
-   * @returns id notebook mà hàm này TỰ chọn thay owner và vì thế caller phải
-   *   ghi lại vào `notebookUrl`; `null` khi không có gì phải ghi.
+   * Không trả về gì: từ khi mục tạo mới luôn đứng hiện, hàm này không còn TỰ
+   * chọn notebook thay owner, nên cũng không còn gì để caller ghi lại.
    */
   function renderNotebookSelect(state, data) {
     const sel = els.notebookSelect;
@@ -147,37 +145,76 @@
     sel.disabled = false;
 
     /*
-     * Chọn sẵn cái nào.
+     * "+ Tạo notebook mới" LUÔN là mục đang hiện, kể cả khi owner đã có notebook
+     * đích — yêu cầu của owner, và nó đảo ngược Chốt 3 của ticket 011 một cách
+     * có ý thức. Chốt 3 sợ "mục tạo mới đứng hiện thì cú bấm kế tiếp đẻ ra một
+     * sổ rỗng thừa"; đổi lại, đây là extension một người dùng và owner muốn lối
+     * tạo nhanh nằm sẵn dưới tay.
      *
-     * Ưu tiên notebook đang lưu trong `notebookUrl`; nó không còn trong danh
-     * sách thì lùi về notebook THẬT đầu tiên chứ không để mục tạo mới đứng
-     * hiện — cùng cách oracle B làm, và vì cùng lý do: mục tạo mới đứng hiện
-     * mà owner đã có notebook thì cú bấm kế tiếp tạo ra một sổ rỗng thừa.
+     * Hệ quả phải bù: dropdown không còn TỰ chọn notebook đang lưu, nên nhìn nó
+     * không biết đang gửi đi đâu. Câu hint trong `render()` là chỗ duy nhất còn
+     * nói ra điều đó — đừng bỏ.
      *
-     * Chỉ khi KHÔNG có notebook nào thì mục tạo mới mới là cái đang hiện.
+     * Không bao giờ trả về id để caller ghi: lượt ghi `notebookUrl` giờ chỉ đến
+     * từ cú bấm thật của owner (chọn trong dropdown, hoặc tạo xong notebook mới).
+     *
+     * Thứ giữ luật này là THỨ TỰ APPEND ở trên — mục tạo mới được thêm trước
+     * mọi notebook, và một `<select>` không có option nào mang `selected` thì
+     * tự chọn option đầu. Từng có một dòng `sel.selectedIndex = 0` ở đây; đo
+     * 2026-09-04 thấy gỡ nó đi thì cả 196 assert vẫn xanh VÀ Brave thật vẫn báo
+     * `nbChon: "+ Tạo notebook mới"` — nó không làm gì cả, nên đã gỡ.
      */
-    const dangLuu = (/\/notebook\/([^/?#]+)/.exec(els.notebookUrl.value.trim()) || [])[1];
-    const khop = dangLuu && list.some((nb) => nb.id === dangLuu);
-    if (khop) {
-      sel.value = dangLuu;
-      return null;
-    }
-    if (list.length) {
-      sel.selectedIndex = 1; // mục ngay sau TAO_MOI
-      return sel.value;
-    }
-    sel.selectedIndex = 0;
     return null;
   }
 
   /**
-   * Ghi notebook đích. Một chỗ duy nhất biết hình dạng URL, vì giờ có HAI
-   * đường tới đây: owner tự chọn trong dropdown, và dropdown tự chọn hộ.
+   * Ghi notebook đích. Một chỗ duy nhất biết hình dạng URL. Trong popup giờ
+   * chỉ còn MỘT đường tới đây — owner tự chọn trong dropdown; dropdown không
+   * còn tự chọn hộ, và ô dán URL đã rời popup sang trang Cài đặt.
    */
-  async function datNotebook(id) {
+  async function datNotebook(id, title) {
     const clean = `https://notebooklm.google.com/notebook/${id}`;
-    els.notebookUrl.value = clean;
-    await globalThis.NBLM.setSettings({ notebookUrl: clean });
+    await globalThis.NBLM.setSettings({
+      notebookUrl: clean,
+      // Ghi cặp mỗi lượt, kể cả khi không biết tên: `null` xoá tên của notebook
+      // trước đó, thay vì để nó dính lại lên notebook mới.
+      notebookLabel: title ? { url: clean, title } : null,
+    });
+  }
+
+  /**
+   * Tên notebook đích, hoặc '' nếu chưa biết.
+   *
+   * Chỉ tin `notebookLabel` khi nó còn trỏ đúng `notebookUrl` hiện tại. Lệch
+   * nghĩa là URL đã bị một đường khác đổi (dán tay, "Dùng tab hiện tại", tạo
+   * notebook mới, đổi tài khoản) mà đường ấy không biết tên — im lặng lùi về
+   * id còn hơn nói tên của notebook khác.
+   */
+  /** id trong `…/notebook/<id>`, hoặc '' nếu URL không mang dạng đó. */
+  function idTuUrl(url) {
+    return (/\/notebook\/([^/?#]+)/.exec(String(url || '').trim()) || [])[1] || '';
+  }
+
+  function tenTrongDanhSach(list, id) {
+    const nb = (list || []).find((x) => x && x.id === id);
+    return (nb && nb.title) || '';
+  }
+
+  /*
+   * `notebookLabel` KHÔNG nằm trong `DEFAULTS`, và đó là chủ ý.
+   *
+   * Nó không phải setting owner chỉnh — nó là cache dẫn xuất từ `notebookUrl`,
+   * do popup tự ghi khi tình cờ cầm được tên. `test/options.test.js` bắt mọi key
+   * trong `DEFAULTS` phải có ô nhập ở trang Cài đặt, và luật đó đúng: thêm key
+   * mà quên nối UI thì owner chỉnh không ăn mà chẳng có gì báo. Cách xử lý sai
+   * là nới luật bằng một danh sách loại trừ; cách đúng là đừng gọi thứ này là
+   * setting. `getSettings()` merge bằng `Object.assign` nên key ngoài `DEFAULTS`
+   * vẫn đọc/ghi bình thường, và thiếu nó thì `undefined` — đã xử lý ngay dưới.
+   */
+  function tenNotebookDich(settings) {
+    const label = settings && settings.notebookLabel;
+    if (!label || !label.title || !settings.notebookUrl) return '';
+    return label.url === settings.notebookUrl ? label.title : '';
   }
 
   function moKhungTao(mo) {
@@ -200,13 +237,21 @@
     const sel = els.accountSelect;
     const list = (r && r.accounts) || [];
     /*
-     * Ẩn khi một dropdown một dòng không cho quyết định gì — TRỪ khi tài khoản
-     * đã chọn không còn trong danh sách. Lúc đó ẩn đi là bỏ owner lại trong ngõ
-     * cụt: câu note bảo "chọn lại tài khoản ở trên" mà "ở trên" không có gì.
-     * Còn một mục thật cộng mục "không còn đăng nhập" là đủ để chọn lại.
+     * Ẩn CHỈ khi không có gì để hiện.
+     *
+     * Bản trước còn ẩn khi danh sách có dưới hai mục, với lý do "một dropdown
+     * một dòng không cho quyết định gì". Owner đảo lại 2026-09-04: hàng này
+     * không thuần tuý là điều khiển — nó TRẢ LỜI câu "request sẽ đi vào tài
+     * khoản nào", và câu đó vẫn cần trả lời khi chỉ có một đáp án. Oracle B
+     * hiện nó với một tài khoản, vì cùng lý do.
+     *
+     * Danh sách RỖNG vẫn ẩn, kể cả khi tài khoản đã chọn không còn đăng nhập.
+     * Hiện một dropdown chỉ chứa đúng một mục ĐÃ KHOÁ là ngõ cụt: không chọn
+     * được gì, mà `renderAccountNote` lại đọc `accountRow.hidden` để quyết định
+     * bật nút "Bỏ chọn tài khoản" — nên hiện hàng lên là nuốt luôn đường thoát
+     * duy nhất. Đúng ngõ cụt commit 0af5e9e đã bịt.
      */
-    const thieu = r && r.selected && !list.some((a) => a.email === r.selected);
-    if (!r || !r.ok || (list.length < 2 && !thieu) || !list.length) {
+    if (!r || !r.ok || !list.length) {
       row.hidden = true;
       sel.textContent = '';
       return;
@@ -293,6 +338,20 @@
     if (account.source === 'chosen-missing' && ket) thoat.hidden = false;
   }
 
+  /**
+   * Nạp danh sách tài khoản Google.
+   *
+   * Gọi cả LÚC POPUP MỞ, khác `napDanhSach`. Ràng buộc cử chỉ của ticket 011
+   * ("không nạp gì khi popup mở") sinh ra cho lượt liệt kê notebook: nó đi qua
+   * RPC nội bộ của NotebookLM, cần token, và là thứ đáng lẽ nằm sau một công
+   * tắc. Lượt này không phải thứ đó — nó hỏi `accounts.google.com` một câu duy
+   * nhất, không token, không RPC.
+   *
+   * Và không nạp ở đây thì hàng tài khoản KHÔNG BAO GIỜ hiện lúc mở popup:
+   * `renderAccounts` chỉ chạy từ đây, còn đây thì chỉ chạy sau cú bấm ↻. Owner
+   * mở popup, thấy nhãn "Gửi tới" mà không đâu nói đang gửi bằng tài khoản nào
+   * — đúng thứ owner báo ngày 2026-09-04.
+   */
   async function napTaiKhoan() {
     let r = null;
     try {
@@ -301,6 +360,22 @@
       r = null;
     }
     renderAccounts(r);
+    /*
+     * Hỏng thì PHẢI nói ra ngay lúc mở popup.
+     *
+     * `renderAccounts` chỉ ẩn hàng đi khi không đọc được — và im lặng ở đây là
+     * thứ khiến owner mở popup, không thấy hàng tài khoản, và không có cách nào
+     * biết vì sao. `renderAccountNote` nói được câu này nhưng chỉ chạy sau ↻,
+     * tức sau đúng cái lúc câu hỏi được đặt ra.
+     *
+     * Ghi đè lành: `napDanhSach` gọi hàm này TRƯỚC `renderAccountNote`, nên sau
+     * cú ↻ câu đầy đủ hơn của `renderAccountNote` vẫn thắng.
+     */
+    if (!r || !r.ok || !(r.accounts && r.accounts.length)) {
+      els.accountNote.textContent =
+        'Không đọc được danh sách tài khoản Google — đang dùng tài khoản mặc định.';
+      els.accountNote.hidden = false;
+    }
     return r;
   }
 
@@ -326,33 +401,50 @@
       return;
     }
     if (!r.ok) {
-      // Với tới tab được nhưng backend không trả danh sách đọc được. KHÔNG phải
-      // ngõ cụt: mục "Tạo notebook mới" vẫn còn, và ô dán URL vẫn nguyên.
+      /*
+       * Với tới tab được nhưng backend không trả danh sách đọc được. KHÔNG phải
+       * ngõ cụt: mục "Tạo notebook mới" vẫn còn.
+       *
+       * Lối chỉ đích danh một notebook CÓ SẴN thì đã rời khỏi popup — nó nằm ở
+       * trang Cài đặt. Câu này phải chỉ sang đó; chỉ xuống "ô dưới" như trước là
+       * chỉ vào một ô không còn tồn tại, tức bỏ owner lại giữa ngõ cụt trong khi
+       * đường ra vẫn còn.
+       */
       renderNotebookSelect('co-tab', { notebooks: [] });
-      els.notebookHint.textContent = 'Không đọc được danh sách notebook — vẫn dán URL vào ô dưới được.';
+      els.notebookHint.textContent =
+        'Không đọc được danh sách notebook — tạo mới được, hoặc dán URL ở trang Cài đặt.';
       return;
     }
     /*
-     * Dropdown có thể TỰ chọn một notebook thay owner (khi cái đang lưu không
-     * còn trong danh sách). Không ghi lại thì nhãn “Gửi tới” nói một đằng,
-     * lượt import chạy một nẻo — backend đọc `notebookUrl`, không đọc dropdown.
-     * Oracle B ghi ngay tại đúng hai nhánh fallback này, vì cùng lý do.
+     * Dropdown KHÔNG còn tự chọn hộ owner nữa (nó luôn đứng ở "+ Tạo notebook
+     * mới"), nên nó cũng không còn ghi `notebookUrl` sau lưng ai. Điều đó dời
+     * gánh nặng sang câu hint: backend đọc `notebookUrl`, không đọc dropdown —
+     * và giờ hint là chỗ DUY NHẤT nói ra notebook đích là cái nào.
      */
-    const canGhi = renderNotebookSelect('co-tab', r);
-    if (canGhi) await datNotebook(canGhi);
+    renderNotebookSelect('co-tab', r);
 
-    if (r.notebooks.length) {
-      els.notebookHint.textContent = '';
-      return;
-    }
     /*
-     * 0 notebook: mục tạo mới là mục ĐANG HIỆN, nên bảo owner “chọn” nó là một
-     * ngõ cụt: chọn lại cái đang chọn không phát `change`. Mở thẳng khung tạo.
-     * Chỉ làm ở đây chứ không trong render: nhánh `!r.ok` bên trên cũng dựng
-     * danh sách rỗng, nhưng ở đó ta KHÔNG biết tài khoản có notebook hay không.
+     * Lượt DUY NHẤT popup cầm được tên của notebook đang lưu. Dropdown giờ luôn
+     * đứng ở mục tạo mới nên nó không còn nói hộ nữa; không ghi lại tên ở đây
+     * thì mọi lượt mở popup về sau owner chỉ thấy id, mãi mãi.
      */
-    els.notebookHint.textContent = 'Tài khoản chưa có notebook nào — đặt tên rồi bấm Tạo.';
+    const s = await globalThis.NBLM.getSettings();
+    const id = idTuUrl(s.notebookUrl);
+    const ten = id && tenTrongDanhSach(r.notebooks, id);
+    if (ten && tenNotebookDich(s) !== ten) {
+      await globalThis.NBLM.setSettings({ notebookLabel: { url: s.notebookUrl, title: ten } });
+    }
+
+    /*
+     * Khung đặt tên mở SẴN, và đây là hệ quả bắt buộc của việc mục tạo mới luôn
+     * đứng hiện: `change` không bắn khi owner chọn lại đúng mục đang chọn, nên
+     * không mở sẵn thì không còn cú bấm nào mở được nó — lối tạo mới thành ngõ
+     * cụt đúng lúc nó vừa được đưa lên làm mặc định.
+     */
     moKhungTao(true);
+    els.notebookHint.textContent = r.notebooks.length
+      ? ''
+      : 'Tài khoản chưa có notebook nào — đặt tên rồi bấm Tạo.';
   }
 
   /* ---------------------------------------------------------------- */
@@ -668,12 +760,26 @@
   function render(state) {
     const { queue, settings, running } = state;
 
-    if (document.activeElement !== els.notebookUrl) {
-      els.notebookUrl.value = settings.notebookUrl || '';
+    if (settings.notebookUrl) {
+      /*
+       * Hint nói notebook đích ở MỌI trạng thái, kể cả sau khi đã nạp danh sách.
+       *
+       * Bản trước im khi đã nạp, vì lúc đó dropdown tự chọn notebook đang lưu
+       * nên nhãn của nó đã là câu trả lời và hint chỉ lặp lại. Từ khi mục
+       * "+ Tạo notebook mới" luôn đứng hiện, dropdown KHÔNG bao giờ nói tên
+       * notebook đích nữa — giữ lại phép im ấy là bịt nốt chỗ cuối cùng còn
+       * nói ra, đúng khuyết tật vừa đi chữa.
+       */
+      const ten = tenNotebookDich(settings);
+      const id = idTuUrl(settings.notebookUrl);
+      els.notebookHint.textContent =
+        ten ? `Đang gửi tới: ${ten}`
+        : id ? `Đang gửi tới notebook ${id} — bấm ↻ để thấy tên.`
+        : '';
+    } else {
+      els.notebookHint.textContent =
+        'Chưa đặt notebook đích — extension sẽ dùng tab NotebookLM nào đang mở sẵn.';
     }
-    els.notebookHint.textContent = settings.notebookUrl
-      ? ''
-      : 'Chưa đặt notebook đích — extension sẽ dùng tab NotebookLM nào đang mở sẵn.';
 
     const raw = queue.reduce((acc, i) => {
       acc[i.status] = (acc[i.status] || 0) + 1;
@@ -868,26 +974,6 @@
   /* sự kiện                                                           */
   /* ---------------------------------------------------------------- */
 
-  els.notebookUrl.addEventListener('change', async () => {
-    await globalThis.NBLM.setSettings({ notebookUrl: els.notebookUrl.value.trim() });
-    refresh();
-  });
-
-  els.useCurrent.addEventListener('click', async () => {
-    await withActionLock(async () => {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const url = (tab && tab.url) || '';
-      if (!/^https:\/\/notebooklm\.google\.com\/notebook\//.test(url)) {
-        els.notebookHint.textContent = 'Tab hiện tại không phải một notebook. Hãy mở notebook đích rồi bấm lại.';
-        return;
-      }
-      const clean = url.split('?')[0].split('#')[0];
-      els.notebookUrl.value = clean;
-      await globalThis.NBLM.setSettings({ notebookUrl: clean });
-      refresh();
-    });
-  });
-
   els.notebookRefresh.addEventListener('click', () => withActionLock(napDanhSach));
 
   /*
@@ -903,11 +989,10 @@
       } catch (_) {
         return;
       }
-      // Chỉ xoá Ô hiển thị. Phần XUỐNG ĐĨA do `doiTaiKhoan()` bên service
-      // worker lo — nó là chỗ duy nhất biết đổi tài khoản kéo theo những gì,
-      // nên trang Cài đặt đổi tài khoản cũng được dọn y hệt. Ghi lại ở đây nữa
-      // thì hai cơ chế cùng giữ một luật, và hoán vị chỗ nào cũng xanh.
-      els.notebookUrl.value = '';
+      // Không dọn gì ở đây. Phần XUỐNG ĐĨA do `doiTaiKhoan()` bên service worker
+      // lo — nó là chỗ duy nhất biết đổi tài khoản kéo theo những gì, nên trang
+      // Cài đặt đổi tài khoản cũng được dọn y hệt. Ghi lại ở đây nữa thì hai cơ
+      // chế cùng giữ một luật, và hoán vị chỗ nào cũng xanh.
       await napDanhSach();
     })
   );
@@ -921,7 +1006,6 @@
       } catch (_) {
         return;
       }
-      els.notebookUrl.value = '';
       await napDanhSach();
     })
   );
@@ -935,8 +1019,11 @@
       return;
     }
     moKhungTao(false);
+    const ten = els.notebookSelect.selectedOptions[0]
+      ? els.notebookSelect.selectedOptions[0].textContent.trim()
+      : '';
     await withActionLock(async () => {
-      await datNotebook(v);
+      await datNotebook(v, ten);
       refresh();
     });
   });
@@ -970,7 +1057,12 @@
 
     if (r && r.ok && r.url) {
       moKhungTao(false);
-      els.notebookUrl.value = r.url;
+      /*
+       * `notebookUrl` do service worker ghi. Ở đây chỉ ghi thêm cái nó KHÔNG
+       * biết: tên owner vừa gõ. Đây là lượt duy nhất tên ấy đi qua popup, và
+       * không giữ lại thì tới lần mở sau owner chỉ còn thấy id.
+       */
+      await globalThis.NBLM.setSettings({ notebookLabel: { url: r.url, title: name } });
       els.notebookHint.textContent = `Đã tạo “${name}” và đặt làm notebook đích.`;
       await napDanhSach();
       refresh();
@@ -986,6 +1078,9 @@
       // cái thứ hai — đúng chế độ hỏng tích luỹ mà ticket 011 cảnh báo.
       els.notebookHint.textContent =
         'Notebook có thể đã được tạo nhưng không đọc được id. Bấm ↻ để kiểm trước khi tạo lại.';
+      // Nếu ↻ vẫn không thấy nó, mở notebook trong tab rồi dán URL của nó vào
+      // trang Cài đặt là đường còn lại duy nhất (khối dán tay không còn trong
+      // popup nữa).
       return;
     }
     if (r && r.needsTab) {
@@ -1194,6 +1289,11 @@
   // Trạng thái đổi trong lúc popup mở (ví dụ đang chạy hàng đợi).
   setInterval(refresh, 1500);
   refresh();
+  /*
+   * Tài khoản nạp NGAY khi popup mở — xem `napTaiKhoan`. Không `await`: nó là
+   * một lượt mạng, và mọi thứ còn lại của popup phải dùng được trong lúc chờ.
+   */
+  napTaiKhoan();
   updateTabContext();
   loadBulkCap();
 })();

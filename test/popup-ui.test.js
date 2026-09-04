@@ -404,8 +404,18 @@ const V = (id, over) => Object.assign({ id, videoId: id.padEnd(11, 'x'), title: 
   }
 
   {
-    // Một tài khoản thì hàng chọn PHẢI ẩn — dropdown một dòng không cho quyết
-    // định gì, chỉ chiếm chỗ trong popup 400px.
+    /*
+     * Một tài khoản thì hàng chọn vẫn PHẢI HIỆN — owner đảo lại 2026-09-04.
+     *
+     * Ticket 013 ẩn nó với lý do "một dropdown một dòng không cho quyết định
+     * gì". Lý do đó chỉ đúng nếu hàng này thuần tuý là điều khiển. Nó không:
+     * nó còn TRẢ LỜI câu "request sẽ đi vào tài khoản nào", và câu đó vẫn cần
+     * trả lời kể cả khi chỉ có một đáp án. Ẩn đi thì popup im lặng về đúng thứ
+     * dễ gây gửi nhầm chỗ nhất.
+     *
+     * Ẩn CHỈ còn ở một ca: không đọc được tài khoản nào (danh sách rỗng) —
+     * lúc đó không có gì để hiện, và đường lùi "authuser của tab" tiếp quản.
+     */
     const win = renderPopup([], {
       accounts: { ok: true, selected: null, accounts: [{ email: 'chu@gmail.com', name: 'C', index: 0, isDefault: true }] },
       notebooks: { ok: true, needsTab: false, notebooks: [], account: { source: 'tab', authuser: '0' } },
@@ -413,7 +423,45 @@ const V = (id, over) => Object.assign({ id, videoId: id.padEnd(11, 'x'), title: 
     await settle();
     click(win, win.document.getElementById('notebook-refresh'));
     await settle();
-    ok(win.document.getElementById('notebook-account-row').hidden === true, 'một tài khoản: hàng chọn ẩn');
+    const hang = win.document.getElementById('notebook-account-row');
+    ok(hang.hidden === false, 'một tài khoản: hàng chọn VẪN hiện (nói rõ đi vào tài khoản nào)');
+    const s1 = win.document.getElementById('account-select');
+    ok(s1.value === 'chu@gmail.com', `và hiện đúng email đó, nhận: ${s1.value}`);
+  }
+
+  {
+    // Danh sách RỖNG mới là ca ẩn: không có gì để hiện.
+    const win = renderPopup([], {
+      accounts: { ok: true, selected: null, accounts: [] },
+      notebooks: { ok: true, needsTab: false, notebooks: [], account: { source: 'tab', authuser: '0' } },
+    });
+    await settle();
+    click(win, win.document.getElementById('notebook-refresh'));
+    await settle();
+    ok(win.document.getElementById('notebook-account-row').hidden === true,
+      'không đọc được tài khoản nào: hàng chọn ẩn');
+  }
+
+  {
+    /*
+     * Danh sách RỖNG + đã chọn một tài khoản không còn đăng nhập.
+     *
+     * Nới luật ẩn suýt mở lại ngõ cụt của commit 0af5e9e: hàng hiện lên với
+     * đúng một mục ĐÃ KHOÁ, không chọn được gì, mà `renderAccountNote` đọc
+     * `accountRow.hidden` để bật nút "Bỏ chọn tài khoản" — hàng hiện thì nút
+     * thoát tắt. Ghim CẢ HAI vế, vì vế nút thoát mới là vế đau.
+     */
+    const win = renderPopup([], {
+      accounts: { ok: true, selected: 'cu@gmail.com', accounts: [] },
+      notebooks: { ok: true, needsTab: false, notebooks: [], account: { source: 'chosen-missing', authuser: null } },
+    });
+    await settle();
+    click(win, win.document.getElementById('notebook-refresh'));
+    await settle();
+    ok(win.document.getElementById('notebook-account-row').hidden === true,
+      'rỗng + chosen-missing: hàng chọn vẫn ẩn (dropdown một mục khoá là ngõ cụt)');
+    ok(win.document.getElementById('account-clear').hidden === false,
+      'và nút "Bỏ chọn tài khoản" PHẢI hiện — đường thoát duy nhất');
   }
 
   {
@@ -467,48 +515,51 @@ const V = (id, over) => Object.assign({ id, videoId: id.padEnd(11, 'x'), title: 
 
   const NB2 = { ok: true, needsTab: false, notebooks: [{ id: 'nb-mot', title: 'Ghi chép luận văn' }, { id: 'nb-hai', title: 'Đọc tuần này' }] };
 
+  /*
+   * Ba ca dưới đây từng ghim Chốt 3 của ticket 011 — "mục tạo mới KHÔNG được
+   * đứng hiện khi owner đã có notebook, vì cú bấm kế tiếp đẻ ra một sổ rỗng
+   * thừa". Owner đã chốt ngược lại ngày 2026-09-04: mục tạo mới luôn đứng hiện,
+   * đổi lấy lối tạo nhanh nằm sẵn dưới tay.
+   *
+   * Hệ quả đi kèm, và là thứ ba ca này chuyển sang canh: dropdown thôi TỰ chọn
+   * hộ, nên nó cũng thôi tự ghi `notebookUrl`. Mọi lượt ghi giờ đến từ một cú
+   * bấm thật của owner. Nhãn "Gửi tới" vì thế không còn nói notebook đích —
+   * `test/popup-notebook-dich.test.js` canh chỗ thay thế (câu hint).
+   */
   {
-    // Chưa lưu notebook nào. Mục tạo mới đứng ĐẦU (Chốt 3 của ticket 011),
-    // nhưng mục ĐANG HIỆN là notebook thật đầu tiên — để cú bấm kế tiếp không
-    // tạo ra một sổ rỗng thừa. Ghim theo SLOT, vì hai mục này hoán vị cho nhau
-    // vẫn ra một danh sách đọc hợp lý.
+    // Chưa lưu notebook nào.
     const { sel, urls, nhan } = await napXong({ notebooks: NB2 });
     eq(sel.options.length, 3, 'ba mục: tạo mới + hai notebook');
     eq(nhan[0], '+ Tạo notebook mới', 'slot 0 là mục tạo mới');
     eq(sel.options[1].value, 'nb-mot', 'slot 1 là notebook thật đầu tiên');
-    eq(sel.selectedIndex, 1, 'mục đang hiện là notebook thật, KHÔNG phải mục tạo mới');
+    eq(sel.selectedIndex, 0, 'mục đang hiện là mục TẠO MỚI');
 
-    // Placeholder chết đã gỡ: nó từng chiếm đúng slot 0 mà Chốt 3 dành cho mục
-    // tạo mới, và chọn nó không làm gì cả.
+    // Placeholder chết đã gỡ: chọn nó không làm gì cả.
     ok(![...sel.options].some((o) => o.value === ''), 'không còn mục rỗng nào trong danh sách');
 
-    // Dropdown tự chọn hộ thì PHẢI ghi xuống settings. Không ghi thì nhãn
-    // "Gửi tới" hiện một notebook mà lượt import không hề đi tới.
-    eq(urls.length, 1, 'lựa chọn tự động được ghi xuống settings đúng một lần');
-    eq(urls[0], 'https://notebooklm.google.com/notebook/nb-mot', 'ghi đúng id của mục đang hiện');
+    eq(urls.length, 0, 'không tự chọn hộ thì cũng KHÔNG tự ghi settings');
   }
 
   {
-    // Đã lưu một notebook CÒN trong danh sách: giữ nguyên nó, và không ghi lại
-    // gì cả. Cặp này tách "trả về id đang chọn" khỏi "trả về id cần ghi".
+    // Đã lưu một notebook CÒN trong danh sách: dropdown vẫn đứng ở mục tạo mới,
+    // và tuyệt đối không đụng tới `notebookUrl` đang lưu.
     const { sel, urls } = await napXong({
       notebooks: NB2,
       notebookUrl: 'https://notebooklm.google.com/notebook/nb-hai',
     });
-    eq(sel.value, 'nb-hai', 'notebook đang lưu thắng, không rơi về mục đầu danh sách');
-    eq(urls.length, 0, 'đang khớp sẵn thì KHÔNG ghi đè settings');
+    eq(sel.selectedIndex, 0, 'vẫn là mục tạo mới, không nhảy về notebook đang lưu');
+    eq(urls.length, 0, 'và KHÔNG ghi đè notebook đích owner đã chọn');
   }
 
   {
     // Đã lưu một notebook KHÔNG còn trong danh sách (đổi tài khoản, hoặc đã
-    // xoá). Rơi về notebook thật đầu tiên, và ghi lại — nếu chỉ rơi mà không
-    // ghi thì settings vẫn trỏ vào cái đã mất.
+    // xoá). Popup không tự chữa hộ nữa: nó để nguyên và chờ owner quyết.
     const { sel, urls } = await napXong({
       notebooks: NB2,
       notebookUrl: 'https://notebooklm.google.com/notebook/nb-da-mat',
     });
-    eq(sel.selectedIndex, 1, 'notebook đã mất: rơi về notebook thật đầu tiên');
-    eq(urls[0], 'https://notebooklm.google.com/notebook/nb-mot', 'và ghi đè cái đã mất trong settings');
+    eq(sel.selectedIndex, 0, 'notebook đã mất: vẫn đứng ở mục tạo mới');
+    eq(urls.length, 0, 'và không âm thầm trỏ owner sang một notebook khác');
   }
 
   {
