@@ -1,5 +1,5 @@
 /*
- * Bề mặt — `expandAll` / `detectExpanded` trong `src/docs/sidebar.js`.
+ * Bề mặt — `src/docs/sidebar.js`: mở section đóng, và khử trùng khi dựng cây.
  *
  * Vì sao tồn tại: tới trước thay đổi này, `detect()` đọc DOM tĩnh và chỉ thấy
  * những link mà theme tình cờ đang render. Đo 2026-09-04 bằng CDP trên
@@ -258,6 +258,117 @@ function wireReactish(document, log, window) {
     await new Promise((r) => window.setTimeout(r, 20));
     eq(log, [], 'detect() không bấm nút nào');
     eq(linkKeys(window, sb()), 6, 'DOM nguyên vẹn sau detect()');
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 9. Nhiều top-level list: URL nằm ở hai list chỉ được vào cây MỘT lần */
+  /* ------------------------------------------------------------------ */
+  /*
+   * Sidebar thật hay chia thành nhiều <ul> anh em thay vì một cây duy nhất. Đo
+   * 2026-09-04 trên tailwindcss.com/docs/installation/using-vite: container có
+   * 19 top-level list, và `/docs/installation` nằm ở cả list 0 ("Documentation")
+   * lẫn list 1 ("Installation") — cây ra 204 node cho 203 URL phân biệt.
+   *
+   * Ghim cả HAI vế, vì mỗi vế một mình đều chứng nhận được bản sai:
+   *   - chỉ đếm node  -> "gộp sạch mọi list làm một" cũng cho số đúng;
+   *   - chỉ đếm distinct -> bản làm mất luôn link cũng cho số đúng.
+   */
+  /*
+   * Số link ở đây phải đủ lớn để đường <ul> VƯỢT ngưỡng 80% của `build()`.
+   * Nếu không, bỏ hẳn list thứ hai vẫn cho cây tí hon rơi xuống `fromFlat`, và
+   * `fromFlat` gom lại đủ 4 link — ca test khi ấy xanh cả với bản đánh rơi cả
+   * một list. Đo bằng hoán vị: với 2+3 link, "chỉ dựng list đầu" KHÔNG đỏ.
+   */
+  const paths = (window, tree) => {
+    const out = [];
+    (function walk(ns) { for (const n of ns) { if (n.url) out.push(new window.URL(n.url).pathname); walk(n.children || []); } })(tree);
+    return out;
+  };
+
+  {
+    const HAI_LIST = `
+      <ul>
+        <li><a href="/docs/installation">Documentation</a></li>
+        ${['a', 'b', 'c', 'd', 'e', 'f'].map((k) => `<li><a href="/docs/${k}">${k}</a></li>`).join('')}
+      </ul>
+      <ul>
+        <li><a href="/docs/installation">Installation</a></li>
+        <li><a href="/docs/x">X</a></li>
+        <li><a href="/docs/y">Y</a></li>
+      </ul>`;
+    const { window, sb } = load(HAI_LIST, null);
+    const SB = window.NBLM_DOCS_SIDEBAR;
+
+    eq(linkKeys(window, sb()), 9, 'tiền đề: DOM có 10 thẻ <a> nhưng chỉ 9 URL phân biệt');
+
+    const got = paths(window, SB.detect().tree).sort();
+    eq(got.length, 9, 'cây có đúng 9 node mang URL — không nhân bản qua ranh giới list');
+    eq(
+      got,
+      ['/docs/a', '/docs/b', '/docs/c', '/docs/d', '/docs/e', '/docs/f',
+       '/docs/installation', '/docs/x', '/docs/y'],
+      'và là đúng 9 URL đó — không mất link nào của list thứ hai'
+    );
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 10. Đường fromFlat cũng phải khử trùng, và phải có sổ RIÊNG         */
+  /* ------------------------------------------------------------------ */
+  /*
+   * `build()` có hai lượt dựng, và ca 9 chỉ với tới lượt đầu. Không có ca này
+   * thì hai hoán vị đi qua lượt hai — "fromFlat dùng chung sổ với lượt <ul>" và
+   * "fromFlat thôi khử trùng" — đều xanh.
+   *
+   * Ép rơi xuống `fromFlat` bằng đúng hình dạng đã gặp ngoài đời (ghi trong
+   * `build()`): sidebar dựng bằng <div> lồng nhau, trong container lẫn một <ul>
+   * nhỏ. Lượt <ul> gom được quá ít so với tổng nên bị loại.
+   *
+   * Hai ràng buộc của fixture này, cả hai đều học được bằng hoán vị:
+   *
+   *   - `<ul>` phải có một link RIÊNG (`/docs/u1`) không nằm trong `<div>`.
+   *     Nếu không, `<div>` có đủ link bằng cả container và bước thu hẹp của
+   *     `detect()` sẽ chọn thẳng `<div>` — bỏ luôn `<ul>` ra ngoài, nên chẳng
+   *     còn lượt dựng nào để mà dùng chung sổ.
+   *   - Link trùng phải nằm VẮT QUA hai khối. Nếu nó gọn trong một khối thì
+   *     container sau khi thu hẹp không còn cặp trùng nào để khử.
+   *
+   * Đo bản đầu tiên thiếu cả hai: `detect()` trả container là `<div>` 7 link,
+   * không `<ul>`, và hai hoán vị "fromFlat dùng chung sổ" / "fromFlat thôi khử
+   * trùng" đều XANH.
+   *
+   * `<ul>` có ĐÚNG 3 link cũng là cố ý, và là chỗ duy nhất trong repo ghim
+   * ngưỡng 80% của `build()`. 3 link vượt sàn cứng `Math.max(3, …)` nhưng thua
+   * 80% của 8, nên fixture này phân biệt được hai luật: hoán vị ngưỡng về
+   * `>= 3` sẽ trả về cây tí hon 3 link thay vì gọi `fromFlat`. Với `<ul>` 2
+   * link, cả hai luật cùng loại nó và hoán vị ấy XANH.
+   */
+  {
+    const FLAT_SIDEBAR = `
+      <ul>
+        <li><a href="/docs/u1">Chỉ có ở list</a></li>
+        <li><a href="/docs/u2">Cũng chỉ có ở list</a></li>
+        <li><a href="/docs/installation">Documentation</a></li>
+      </ul>
+      <div>
+        <div><a href="/docs/installation">Installation</a></div>
+        ${['a', 'b', 'c', 'd', 'e'].map((k) => `<div><a href="/docs/${k}">${k}</a></div>`).join('')}
+      </div>`;
+    const { window, sb } = load(FLAT_SIDEBAR, null);
+    const SB = window.NBLM_DOCS_SIDEBAR;
+
+    eq(linkKeys(window, sb()), 8, 'tiền đề: 9 thẻ <a>, 8 URL phân biệt');
+
+    const picked = SB.detect();
+    ok(picked.container.querySelector('ul'), 'tiền đề: container giữ cả <ul> lẫn <div>');
+
+    const got = paths(window, picked.tree).sort();
+    eq(got.length, 8, 'fromFlat: 8 node mang URL, link trùng chỉ vào cây một lần');
+    eq(
+      got,
+      ['/docs/a', '/docs/b', '/docs/c', '/docs/d', '/docs/e', '/docs/installation',
+       '/docs/u1', '/docs/u2'],
+      'fromFlat lấy đủ cả hai khối, không bị sổ của lượt <ul> chặn mất'
+    );
   }
 
   for (const r of rejections) { fail++; console.log(`❌ promise rejection không ai bắt: ${r}`); }

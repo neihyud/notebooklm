@@ -232,9 +232,20 @@
   }
 
   function build(container, pageUrl) {
-    // Mỗi lần dựng phải có sổ "đã nhận" riêng: `claim()` chỉ cho mỗi URL xuất
-    // hiện một lần, nên tái dùng ctx cũ cho lượt dựng thứ hai là mất sạch những
-    // link lượt đầu đã nhận.
+    /*
+     * Một sổ "đã nhận" cho mỗi LƯỢT DỰNG — không phải cho mỗi danh sách.
+     *
+     * Hai lượt dựng (đường <ul> và `fromFlat`) phải có sổ riêng: `claim()` chỉ
+     * cho mỗi URL xuất hiện một lần, nên tái dùng sổ của lượt đầu cho lượt hai
+     * là mất sạch những link lượt đầu đã nhận.
+     *
+     * Nhưng trong CÙNG một lượt thì mọi danh sách phải chung một sổ. Bản trước
+     * gọi `newCtx()` bên trong `for (const list of lists)`, nên mỗi top-level
+     * list có sổ riêng và URL nằm ở hai list cùng lọt. Đo 2026-09-04 trên
+     * tailwindcss.com/docs/installation/using-vite: container có 19 top-level
+     * list, `/docs/installation` nằm ở cả list 0 ("Documentation") lẫn list 1
+     * ("Installation") — cây ra 204 node cho 203 URL phân biệt.
+     */
     const newCtx = () => {
       const claimed = new Set();
       return {
@@ -253,7 +264,8 @@
     );
 
     const tree = [];
-    for (const list of lists) tree.push(...fromList(list, newCtx(), 0));
+    const listCtx = newCtx();
+    for (const list of lists) tree.push(...fromList(list, listCtx, 0));
 
     /*
      * Chỉ tin đường <ul> khi nó gom được *gần hết* link trong container.
