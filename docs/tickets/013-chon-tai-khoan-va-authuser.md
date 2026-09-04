@@ -69,7 +69,7 @@ Lọc bỏ email chứa `@unknown`.
 
 ```
 authuser = Jc(Kc())                      # email đã chọn → chỉ số; không có thì `0`
-thử lần lượt: notebooklm.google.com, notebook.google.com
+thử lần lượt: notebooklm.google.com, notebook.google.com   # ta CHỈ giữ cái đầu — xem dưới
 GET  <origin>/?authuser=<N>&pageId=none  credentials: include, redirect: follow, 5000 ms
 /"SNlM0e":"([^"]+)"/   → at
 /"cfb2h":"([^"]+)"/    → bl
@@ -266,3 +266,45 @@ Một chỗ suýt xanh-giả trong chính test này, ghi lại vì nó là bài 
 phép đếm "có lùi sang đường tab không" đếm nhầm cả bước dò script. Ba ca C/D/E khi đó xanh vì lý
 do sai. Stub giờ tách ping riêng, và có một assertion neo `MSG_PING` vào hằng thật của repo để
 việc đổi tên không lặng lẽ mở lại lỗ đó.
+
+
+## Bổ sung 2026-09-04 — owner chốt hai chuyện về bề mặt mạng
+
+Review seat độc lập nêu: tính năng này thêm hai origin đi kèm `credentials:'include'` nằm ngoài
+phần owner đã duyệt hôm 2026-09-03 (owner duyệt **cache token**, không duyệt origin mới).
+
+1. **Gỡ `notebook.google.com`.** Hằng số ngoại sinh *một phiếu*: chỉ oracle B, không nguồn nào
+   khác xác nhận, `docs/notebooklm-rpc-do-duoc-2.md` chưa từng ghi, và ta chưa bao giờ đo thấy nó
+   cần. Giữ một origin chưa từng đo mà vẫn cho nhận cookie phiên là trả giá thật cho một lợi ích
+   giả định. `manifest.json` vốn đã có `https://*/*` nên đây không phải chuyện quyền — chỉ là luật
+   ta tự đặt.
+
+2. **`ListAccounts` được giữ, và `Authority` viết đích danh nó.** Nó là ruột của bộ chọn tài
+   khoản; bỏ nó là bỏ cả ticket 013. Nó gửi cookie Google sang Google bằng một lượt `GET`, không
+   mang token của ta, và trình duyệt vẫn đính cookie đó khi owner mở tab bình thường.
+
+3. **Allow-list `ORIGIN_CHO_PHEP` không ghi đè được.** `accountOverrides` vẫn đổi `origins` được
+   nhưng chỉ để thu hẹp hoặc đổi thứ tự. Một cơ chế, áp ở **hai** chỗ dùng (lượt lấy token trong
+   `getRpcContext`, và `origin` của lượt `batchexecute` trong `rootCall`) — hai chỗ gọi cùng một
+   hàm, không phải hai cơ chế.
+
+**Phép đo, và hai lần nó suýt xanh giả.** Hoán vị đổi origin của lượt gửi token đo ra **0 đỏ** ở
+lượt seat review. Sau khi thêm allow-list, đo lại **vẫn 0 đỏ** — vì allow-list chặn *cấu hình*,
+còn không có assertion nào ghim *đích đến*. Phải thêm một vế nữa vào ca K (URL của lượt
+`batchexecute` phải bắt đầu bằng `https://notebooklm.google.com/`) mới cắn.
+
+Tương tự, ca đầu chỉ ghim `BASE.origins`, nên hoán vị **nới allow-list** mà để `BASE` hẹp lọt qua
+với 0 đỏ. Ghim chính `ORIGIN_CHO_PHEP` mới bắt được. Bài học chung: ghim *nguồn* không thay được
+ghim *đích*, và ghim mặc định không thay được ghim ranh giới.
+
+| hoán vị | kết quả |
+|---|---|
+| gỡ allow-list | 3 đỏ, exit=1 |
+| nới allow-list thêm origin thứ hai | 2 đỏ, exit=1 |
+| thêm lại origin thứ hai vào `BASE` | 1 đỏ, exit=1 |
+| `originChoPhep()[0]` → `[1]` (undefined → URL tương đối) | 1 đỏ, exit=1 |
+| viết thẳng một origin lạ vào `rootCall` | 1 đỏ, exit=1 |
+
+Ghim hằng số ở đây **khác** ghim hình dạng `ListAccounts` (cặp #13/#16): đó là bản đồ ta suy ra về
+backend Google — hai vế đều là giả thuyết của ta, nên ghim là tự lừa. Còn đây là **ranh giới ta tự
+đặt**; ghim ranh giới của chính mình đúng là việc của test.

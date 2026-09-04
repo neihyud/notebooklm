@@ -267,6 +267,53 @@ const res = (body, okFlag) => ({ ok: okFlag !== false, status: okFlag === false 
 }
 
 /* ------------------------------------------------------------------ */
+/* 4c. Allow-list origin — owner chốt 2026-09-04                        */
+/* ------------------------------------------------------------------ */
+{
+  /*
+   * `accountOverrides` là một ô JSON trong Cài đặt. Không có chốt thì một chuỗi
+   * dán vào đó là đủ để chuyển hướng cookie phiên + token đi bất cứ đâu, và
+   * hoán vị đổi origin của lượt gửi token đo ra 0 đỏ trên toàn bộ suite.
+   *
+   * Ghim hằng số ở đây KHÁC ghim hình dạng `ListAccounts`: đó là bản đồ ta suy
+   * ra về backend Google (hai vế đều là giả thuyết của ta), còn đây là RANH
+   * GIỚI ta tự đặt. Ghim ranh giới của chính mình là đúng việc của test.
+   */
+  const F = load();
+  ok(F.BASE.origins.length === 1 && F.BASE.origins[0] === 'https://notebooklm.google.com',
+    `chỉ MỘT origin mặc định, và là notebooklm.google.com — nhận: ${JSON.stringify(F.BASE.origins)}`);
+
+  F.configure({ origins: ['https://ke-xau.example', 'https://notebooklm.google.com'] });
+  const loc = F.originChoPhep();
+  ok(loc.length === 1 && loc[0] === 'https://notebooklm.google.com',
+    `origin lạ bị lọc bỏ dù đã vào config, nhận: ${JSON.stringify(loc)}`);
+
+  /* Ghim chính ALLOW-LIST, không chỉ `BASE.origins`. Nới allow-list mà để BASE
+     hẹp là đúng cách hoán vị lọt qua: đo lần đầu ra 0 đỏ vì thiếu ca này.
+     `notebook.google.com` gọi đích danh — nó là thứ owner vừa chốt gỡ. */
+  F.configure({ origins: ['https://notebook.google.com', 'https://notebooklm.google.com'] });
+  const loc2 = F.originChoPhep();
+  ok(!loc2.includes('https://notebook.google.com'),
+    `notebook.google.com KHÔNG được nhận token dù có trong config, nhận: ${JSON.stringify(loc2)}`);
+  ok(loc2.length === 1, `và allow-list chỉ có đúng một origin, nhận: ${JSON.stringify(loc2)}`);
+
+  /* Không còn origin nào hợp lệ thì KHÔNG gửi đi đâu cả — chứ không lùi về
+     mặc định. Đo bằng chính việc `fetch` không được gọi lần nào. */
+  const G = load();
+  G.configure({ origins: ['https://ke-xau.example'] });
+  const daGoi = [];
+  (async () => {
+    const r = await G.getRpcContext('0', {
+      fetch: async (u) => (daGoi.push(String(u)), res('<script>window.WIZ={"SNlM0e":"T"};</script>')),
+      storage: fakeStore(),
+      now: 0,
+    });
+    ok(daGoi.length === 0, `không có origin hợp lệ thì KHÔNG fetch, nhận: ${JSON.stringify(daGoi)}`);
+    ok(r.ok === false && r.status === 'no-at-token', `và báo no-at-token, nhận: ${r.status}`);
+  })();
+}
+
+/* ------------------------------------------------------------------ */
 /* 5. Hỏng thì lùi, không hỏng thì ghi sai                              */
 /* ------------------------------------------------------------------ */
 {
@@ -310,7 +357,7 @@ const res = (body, okFlag) => ({ ok: okFlag !== false, status: okFlag === false 
  * sửa con số này; nó là một phép đếm của CHÍNH file này, không phải một hằng số
  * ngoại sinh chép tay.
  */
-const CAN_CO = 56;
+const CAN_CO = 62;
 
 setTimeout(() => {
   const daChay = pass + fail;

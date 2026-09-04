@@ -391,7 +391,9 @@ async function rootCall(run) {
   const r = await run({
     at: ctx.at,
     authuser: ctx.authuser,
-    origin: ACC.config.origins[0],
+    // Qua allow-list, không đọc thẳng `config.origins` — cùng MỘT cơ chế với
+    // lượt lấy token, áp ở hai chỗ, chứ không phải hai cơ chế.
+    origin: ACC.originChoPhep()[0],
     // Cross-origin từ service worker, nên BUỘC phải 'include'. Đường content
     // script vẫn giữ 'same-origin' — xem `attemptOnce`.
     credentials: 'include',

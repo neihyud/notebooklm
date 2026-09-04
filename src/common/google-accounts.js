@@ -72,8 +72,16 @@
      */
     emailPattern: '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$',
 
-    /** Nơi lấy token. Thử lần lượt, dừng ở cái đầu tiên trả `ok`. */
-    origins: ['https://notebooklm.google.com', 'https://notebook.google.com'],
+    /*
+     * Nơi lấy token. Thử lần lượt, dừng ở cái đầu tiên trả `ok`.
+     *
+     * Oracle B có thêm `notebook.google.com` làm đường lùi. GỠ (owner chốt
+     * 2026-09-04): đó là **hằng số ngoại sinh một phiếu** — chỉ oracle B, không
+     * nguồn nào khác xác nhận, `docs/notebooklm-rpc-do-duoc-2.md` chưa từng ghi,
+     * và ta chưa bao giờ đo thấy nó cần. Giữ một origin chưa từng đo mà vẫn cho
+     * nhận cookie phiên là trả giá thật cho một lợi ích giả định.
+     */
+    origins: ['https://notebooklm.google.com'],
 
     /** Rút token và nhãn build ra khỏi HTML trang chủ. */
     atPattern: '"SNlM0e":"([^"]+)"',
@@ -86,6 +94,23 @@
     listTimeoutMs: 8000,
     contextTimeoutMs: 5000,
   };
+
+  /*
+   * Origin được phép nhận cookie phiên và token — KHÔNG ghi đè được.
+   *
+   * `accountOverrides` vẫn đổi `origins` được, nhưng chỉ để THU HẸP hoặc đổi
+   * thứ tự; mọi origin ngoài danh sách này bị bỏ qua. Trước đó không có chốt
+   * nào: hoán vị đổi origin của lượt gửi token đo ra 0 đỏ trên toàn bộ suite,
+   * và một chuỗi JSON trong ô Cài đặt là đủ để chuyển hướng token đi bất cứ đâu.
+   *
+   * Owner chốt 2026-09-04 — xem `WORKSPACE_PROTOCOL.md` → `## Authority`.
+   */
+  const ORIGIN_CHO_PHEP = ['https://notebooklm.google.com'];
+
+  /** `origins` đã lọc theo allow-list, giữ nguyên thứ tự owner đặt. */
+  function originChoPhep(cfg) {
+    return ((cfg || config).origins || []).filter((o) => ORIGIN_CHO_PHEP.includes(o));
+  }
 
   const CTX_KEY = 'rpcContext';
 
@@ -325,7 +350,7 @@
     const fetchImpl = o.fetch || (typeof root.fetch === 'function' ? root.fetch.bind(root) : null);
     if (!fetchImpl) return { ok: false, at: '', bl: '', authuser: want, status: 'no-fetch' };
 
-    for (const origin of cfg.origins) {
+    for (const origin of originChoPhep(cfg)) {
       const url = origin + '/?authuser=' + encodeURIComponent(want) + '&pageId=none';
       let res;
       try {
@@ -383,6 +408,7 @@
     detectAccounts,
     getRpcContext,
     clearRpcContext,
+    originChoPhep,
     get config() {
       return config;
     },

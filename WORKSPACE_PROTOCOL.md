@@ -90,8 +90,30 @@ chuyển lên `Authority`; không nói thì mục này cứ nằm đây như ghi
   không cần, bất kỳ khả năng nào để thay đổi chế độ hiển thị video"* và cam kết *"không đọc, không
   lưu cookie nào"*; chạy thử nghiệm ghi lên notebook không phải notebook nháp.
 - **prohibited without explicit authority**: xin `cookies` permission; lưu trữ hay gửi cookie/token
-  ra ngoài origin `notebooklm.google.com`; chạy lượt import hàng loạt lên tài khoản owner như một
+  ra ngoài origin `notebooklm.google.com` — **ngoại lệ duy nhất, owner chốt 2026-09-04**: một lượt
+  `GET accounts.google.com/ListAccounts` kèm `credentials:'include'`, không mang token của ta, là
+  ruột của bộ chọn tài khoản (ticket 013); chạy lượt import hàng loạt lên tài khoản owner như một
   bước "kiểm chứng".
+
+> **Vì sao ngoại lệ này viết ra chứ không để ngầm.** Trước 2026-09-04, code đang vi phạm nguyên văn
+> dòng trên còn dòng trên thì không nói gì — mà `Authority` là mục **binding** duy nhất của file.
+> Một điều cấm mà code vi phạm sẽ dạy người đọc sau rằng dòng đó không thật sự chặt; đó là chiều
+> hỏng đắt hơn hẳn việc thừa một câu.
+>
+> Ranh giới đi kèm, cũng do owner chốt cùng ngày: **allow-list origin trong
+> `src/common/google-accounts.js` (`ORIGIN_CHO_PHEP`) không ghi đè được.** `accountOverrides` đổi
+> `origins` được, nhưng chỉ để thu hẹp hoặc đổi thứ tự. Lý do có nó: hoán vị đổi origin của lượt
+> gửi token từng đo ra **0 đỏ trên toàn bộ suite**, và `accountOverrides` là một ô JSON trong
+> Cài đặt — một chuỗi dán vào đó là đủ để chuyển hướng token đi bất cứ đâu.
+>
+> Cùng lượt chốt: **gỡ `notebook.google.com`** khỏi `origins`. Nó là hằng số ngoại sinh *một
+> phiếu* — chỉ oracle B, `docs/notebooklm-rpc-do-duoc-2.md` chưa từng ghi, và ta chưa bao giờ đo
+> thấy nó cần. Giữ một origin chưa từng đo mà vẫn cho nhận cookie phiên là trả giá thật cho một
+> lợi ích giả định.
+>
+> Cam kết trong `README.md` **không đổi** và vẫn đúng nguyên văn: nó đã viết *"trình duyệt tự gắn
+> cookie phiên vào request đi tới **Google**"* — không phải "tới notebooklm.google.com" — và
+> extension vẫn không xin quyền `cookies`, vẫn không đọc được giá trị cookie nào.
 
 > **Vì sao neo bằng câu trích chứ không bằng số dòng.** Ba chỗ trên từng ghi `README.md:107`.
 > Dòng đó trôi khi ticket 001 viết lại mục "Cơ chế đẩy vào NotebookLM": cam kết cookie chuyển

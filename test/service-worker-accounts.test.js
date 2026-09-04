@@ -414,6 +414,11 @@ async function reset() {
     ok(/[?&]authuser=1(&|$)/.test(post.url), `K: request mang authuser=1, nhận: ${post.url}`);
     ok(post.body.includes('TOKEN-CUA-1'), 'K: và mang token lấy từ trang của CHÍNH tài khoản 1');
     ok(!post.body.includes('TOKEN-CUA-0'), 'K: không mang token của tài khoản khác');
+    /* Và đi ĐÚNG origin. Không ghim vế này thì hoán vị đổi origin của lượt gửi
+       token vẫn xanh — đo ra 0 đỏ hai lần liên tiếp, kể cả sau khi đã có
+       allow-list, vì allow-list chặn *cấu hình* chứ không ghim *đích đến*. */
+    ok(post.url.startsWith('https://notebooklm.google.com/'),
+      `K: token chỉ đi tới notebooklm.google.com, nhận: ${post.url}`);
   }
 
   {
