@@ -67,6 +67,7 @@ const wrb = (rpcId, payload) => ['wrb.fr', rpcId, payload === null ? null : JSON
 const MSG_PING = 'nlm-ping'; // dùng trước khi `self.NBLM` tồn tại, nên viết thẳng
 const noopEvent = () => ({ addListener() {}, removeListener() {} });
 const store = new Map();
+const storageListeners = [];
 let onMessage = null;
 
 global.self = global;
@@ -90,10 +91,20 @@ global.chrome = {
         for (const k of Array.isArray(keys) ? keys : [keys]) if (store.has(k)) out[k] = store.get(k);
         return out;
       },
-      async set(o) { for (const [k, v] of Object.entries(o)) store.set(k, v); },
+      async set(o) {
+        // Phát `onChanged` như Chrome thật. Không phát thì đường "ghi thẳng
+        // nlmAccount xuống settings" (trang Cài đặt) không tồn tại lúc test, và
+        // mọi khẳng định về nó xanh vì không có gì chạy.
+        const ch = {};
+        for (const [k, v] of Object.entries(o)) {
+          ch[k] = { oldValue: store.get(k), newValue: v };
+          store.set(k, v);
+        }
+        for (const fn of storageListeners) fn(ch, 'local');
+      },
       async remove(k) { store.delete(k); },
     },
-    onChanged: noopEvent(),
+    onChanged: { addListener: (fn) => storageListeners.push(fn), removeListener() {} },
   },
   action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {} },
   alarms: { create: async () => {}, clear: async () => {}, onAlarm: noopEvent() },
@@ -403,6 +414,51 @@ async function reset() {
     ok(/[?&]authuser=1(&|$)/.test(post.url), `K: request mang authuser=1, nhận: ${post.url}`);
     ok(post.body.includes('TOKEN-CUA-1'), 'K: và mang token lấy từ trang của CHÍNH tài khoản 1');
     ok(!post.body.includes('TOKEN-CUA-0'), 'K: không mang token của tài khoản khác');
+  }
+
+  {
+    /*
+     * L. Trang Cài đặt ghi THẲNG `nlmAccount` xuống settings, không qua
+     * `SELECT_ACCOUNT`. Trước bản này nó đi vòng qua cả ba bước dọn, để lại
+     * `notebookUrl` trỏ vào notebook của tài khoản CŨ.
+     *
+     * Ghi tách hai lượt — đúng như `options.js` làm với một field — nên đây là
+     * ca mà đường popup KHÔNG với tới. Nếu gộp vào một lượt ghi thì luật
+     * "owner tự đặt URL trong cùng cú Lưu" sẽ giữ URL lại, và phép đo hoá vô
+     * nghĩa: xanh vì đi nhầm nhánh.
+     */
+    await reset();
+    await self.NBLM.setSettings({ notebookUrl: 'https://notebooklm.google.com/notebook/CUA-TAI-KHOAN-CU' });
+    await self.NBLM.setSettings({ nlmAccount: 'nguoi-khac@gmail.com' });
+    await new Promise((r) => setTimeout(r, 20)); // listener chạy ngoài lượt ghi
+    const st = await self.NBLM.getSettings();
+    ok(!st.notebookUrl,
+      `L: đổi tài khoản từ trang Cài đặt cũng xoá notebookUrl cũ, nhận: ${JSON.stringify(st.notebookUrl)}`);
+    ok(st.nlmAccount === 'nguoi-khac@gmail.com', 'L: và giữ đúng tài khoản vừa chọn');
+  }
+
+  {
+    // M. Đổi cả hai trong CÙNG một cú Lưu là cố ý — không được xoá URL vừa đặt.
+    await reset();
+    await self.NBLM.setSettings({ nlmAccount: 'a@gmail.com', notebookUrl: 'https://notebooklm.google.com/notebook/CO-Y' });
+    await new Promise((r) => setTimeout(r, 20));
+    const st = await self.NBLM.getSettings();
+    ok((st.notebookUrl || '').includes('CO-Y'),
+      `M: URL đặt trong cùng lượt ghi thì GIỮ, nhận: ${JSON.stringify(st.notebookUrl)}`);
+  }
+
+  {
+    // N. Lưu lại trang Cài đặt mà KHÔNG đổi tài khoản: không được đụng gì.
+    // `options.js` ghi mọi field mỗi lần Lưu, nên ca này xảy ra liên tục.
+    await reset();
+    await self.NBLM.setSettings({ nlmAccount: 'a@gmail.com' });
+    await new Promise((r) => setTimeout(r, 20));
+    await self.NBLM.setSettings({ notebookUrl: 'https://notebooklm.google.com/notebook/GIU-NGUYEN' });
+    await self.NBLM.setSettings({ nlmAccount: 'a@gmail.com', delayMs: 1234 });
+    await new Promise((r) => setTimeout(r, 20));
+    const st = await self.NBLM.getSettings();
+    ok((st.notebookUrl || '').includes('GIU-NGUYEN'),
+      `N: Lưu mà không đổi tài khoản thì không xoá gì, nhận: ${JSON.stringify(st.notebookUrl)}`);
   }
 
   console.log(`${pass} pass, ${fail} fail`);

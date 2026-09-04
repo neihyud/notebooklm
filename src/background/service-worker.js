@@ -291,6 +291,48 @@ function authuserFromUrl(url) {
 }
 
 /**
+ * Đổi tài khoản — MỘT chỗ duy nhất biết việc đó kéo theo những gì.
+ *
+ * Trước đây kỷ luật này nằm trong handler của popup, nên trang Cài đặt sửa
+ * thẳng `nlmAccount` là đi vòng qua cả ba bước. Chép kỷ luật sang UI thứ hai
+ * chỉ dời chỗ hỏng sang UI thứ ba; đặt nó ở đây thì mọi đường đổi tài khoản
+ * đều đi qua cùng một chỗ.
+ *
+ * `notebookUrl` phải xoá vì id notebook thuộc về tài khoản CŨ. Còn
+ * `clearRpcContext` thì không phải vì tính đúng đắn — `usable()` đã chặn ca
+ * token-chéo-tài-khoản bằng cấu trúc — mà để không giữ trên đĩa một token
+ * không còn ai dùng.
+ */
+async function doiTaiKhoan(email, opts) {
+  const patch = { nlmAccount: email };
+  // Giữ `notebookUrl` khi CHÍNH lượt ghi đó đã tự đặt nó: owner đổi cả tài
+  // khoản lẫn notebook trong một cú Lưu thì họ đang cố ý, chứ không phải để
+  // sót một URL của tài khoản cũ.
+  if (!(opts && opts.giuUrl)) patch.notebookUrl = '';
+  await setSettings(patch);
+  await ACC.clearRpcContext();
+  return email;
+}
+
+/*
+ * Đường thứ hai vào `doiTaiKhoan`: ai đó ghi thẳng `nlmAccount` xuống settings
+ * mà không qua `SELECT_ACCOUNT` — hôm nay là trang Cài đặt, mai có thể là chỗ
+ * khác. So `oldValue`/`newValue` nên lượt ghi của chính `doiTaiKhoan` không tự
+ * kích lại nó (lúc đó `nlmAccount` không đổi).
+ */
+if (chrome.storage.onChanged && chrome.storage.onChanged.addListener) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes || !changes[KEYS.SETTINGS]) return;
+    const c = changes[KEYS.SETTINGS];
+    const truoc = (c.oldValue || {}).nlmAccount || null;
+    const sau = (c.newValue || {}).nlmAccount || null;
+    if (truoc === sau) return;
+    const giuUrl = (c.oldValue || {}).notebookUrl !== (c.newValue || {}).notebookUrl;
+    doiTaiKhoan(sau, { giuUrl }).catch(() => {});
+  });
+}
+
+/**
  * Tài khoản nào sẽ nhận request — và ta biết chắc tới đâu.
  *
  * Ba mức, cố ý phân biệt rõ vì chúng dẫn tới ba câu khác nhau trong giao diện:
@@ -2060,13 +2102,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return;
 
         case MSG.SELECT_ACCOUNT: {
-          // Vứt ngữ cảnh cũ khi đổi tài khoản. KHÔNG phải vì tính đúng đắn phụ
-          // thuộc vào dòng này — `usable()` trong google-accounts.js đã chặn ca
-          // token-chéo-tài-khoản bằng cấu trúc — mà để không giữ trên đĩa một
-          // token không còn ai dùng.
           const email = String(message.email || '').trim().toLowerCase() || null;
-          await setSettings({ nlmAccount: email });
-          await ACC.clearRpcContext();
+          await doiTaiKhoan(email);
           sendResponse({ ok: true, selected: email });
           return;
         }

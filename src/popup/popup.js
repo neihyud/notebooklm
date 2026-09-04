@@ -870,11 +870,11 @@
       } catch (_) {
         return;
       }
-      // Xoá cả Ô LẪN CÀI ĐẶT. Xoá mỗi ô là để lại một `notebookUrl` trỏ vào
-      // notebook của tài khoản cũ — lượt import kế tiếp sẽ ghi vào đó mà giao
-      // diện không hiện gì. Đúng kiểu hỏng im lặng ticket 013 phải chặn.
+      // Chỉ xoá Ô hiển thị. Phần XUỐNG ĐĨA do `doiTaiKhoan()` bên service
+      // worker lo — nó là chỗ duy nhất biết đổi tài khoản kéo theo những gì,
+      // nên trang Cài đặt đổi tài khoản cũng được dọn y hệt. Ghi lại ở đây nữa
+      // thì hai cơ chế cùng giữ một luật, và hoán vị chỗ nào cũng xanh.
       els.notebookUrl.value = '';
-      await globalThis.NBLM.setSettings({ notebookUrl: '' });
       await napDanhSach();
     })
   );
