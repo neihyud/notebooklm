@@ -128,11 +128,12 @@ async function moPopup(notebookUrl, notebooks = null, bamNap = false, quaNhip = 
     ok(/↻/.test(r.hint), `hint phải chỉ đường xem tên đầy đủ, nhận: ${JSON.stringify(r.hint)}`);
   }
 
-  /* ---- 2. Đã đặt VÀ đã nạp: hint VẪN phải nói, vì dropdown không nói ---- */
+  /* ---- 2. Đã đặt VÀ đã nạp: dropdown hiện đích, hint VẪN nói ---- */
   /*
-   * Trước lượt "luôn mặc định tạo mới", dropdown tự chọn notebook đang lưu nên
-   * hint im để khỏi lặp. Giờ dropdown luôn đứng ở "+ Tạo notebook mới", nên nếu
-   * hint cũng im thì không còn chỗ nào nói owner đang gửi đi đâu.
+   * Trùng lặp có chủ ý, và ca 1 là lý do: trước cú bấm ↻ dropdown còn treo
+   * "Bấm ↻ để nạp danh sách", nên hint là chỗ duy nhất nói ra đích. Cho hint im
+   * sau khi nạp thì owner được trả lời ở đúng trạng thái họ ÍT gặp nhất, và câm
+   * ở trạng thái họ gặp mọi lần mở popup.
    */
   {
     const r = await moPopup(NB, {
@@ -140,8 +141,8 @@ async function moPopup(notebookUrl, notebooks = null, bamNap = false, quaNhip = 
       notebooks: [{ id: 'abc123', title: 'Sổ nghiên cứu' }, { id: 'xyz789', title: 'Sổ khác' }],
     }, true, true);
     ok(r.selDisabled === false, 'tiền đề: đã nạp thì dropdown mở khoá');
-    ok(r.selLabel === '+ Tạo notebook mới', `tiền đề: mục tạo mới LUÔN đứng hiện, nhận: ${JSON.stringify(r.selLabel)}`);
-    ok(r.hint.includes('Sổ nghiên cứu'), `dropdown không nói tên thì hint phải nói, nhận: ${JSON.stringify(r.hint)}`);
+    ok(r.selLabel === 'Sổ nghiên cứu', `dropdown "Gửi tới" phải hiện ĐÚNG đích, nhận: ${JSON.stringify(r.selLabel)}`);
+    ok(r.hint.includes('Sổ nghiên cứu'), `và hint nói lại, vì trước cú ↻ nó là chỗ duy nhất, nhận: ${JSON.stringify(r.hint)}`);
   }
 
   /* ---- 3. Lượt mở SAU: đã có tên trong tay thì phải nói tên, không nói id ---- */
@@ -185,17 +186,20 @@ async function moPopup(notebookUrl, notebooks = null, bamNap = false, quaNhip = 
     ok(r.hint.includes('khac999'), `phải lùi về id của notebook MỚI, nhận: ${JSON.stringify(r.hint)}`);
   }
 
-  /* ---- 5. CHƯA đặt notebook: câu hint cũ phải còn nguyên ---- */
+  /* ---- 5. Đích rỗng = "+ Tạo notebook mới": phải nói ra LÚC NÀO tạo ---- */
   /*
-   * Ghim để bản vá không nuốt mất nhánh else. Hai câu này khác nhau về ý:
-   * "chưa đặt" nói extension sẽ tự dùng tab đang mở; "đã đặt" nói đích cụ thể.
+   * `notebookUrl` rỗng từng nghĩa là "dùng tab NotebookLM nào đang mở sẵn". Nay
+   * nó là lựa chọn "+ Tạo notebook mới", và sổ chỉ ra đời khi owner bấm Chạy.
+   *
+   * Ghim cả thời điểm, không chỉ ý định: "sẽ tạo notebook mới" mà không nói khi
+   * nào thì owner không biết mình đang cầm một cú bấm đẻ ra sổ — và đó đúng là
+   * thứ họ cần biết trước khi bấm.
    */
   {
     const r = await moPopup('');
-    ok(
-      r.hint.includes('Chưa đặt notebook đích'),
-      `chưa đặt thì vẫn phải là câu cũ, nhận: ${JSON.stringify(r.hint)}`
-    );
+    ok(/tạo.*notebook mới/i.test(r.hint), `đích rỗng thì phải nói là sẽ TẠO, nhận: ${JSON.stringify(r.hint)}`);
+    ok(/Chạy/.test(r.hint), `và nói rõ tạo lúc bấm Chạy, nhận: ${JSON.stringify(r.hint)}`);
+    ok(!/tab NotebookLM nào đang mở/.test(r.hint), 'không còn hứa cái nghĩa cũ "dùng tab đang mở"');
     ok(!r.hint.includes('abc123'), 'và không được lẫn id của ca khác');
   }
 
@@ -217,7 +221,7 @@ async function moPopup(notebookUrl, notebooks = null, bamNap = false, quaNhip = 
    * biến thành rỗng.
    */
   {
-    const r = await moPopup(NB, { ok: false }, true, false);
+    const r = await moPopup('', { ok: false }, true, false);
     ok(r.selDisabled === false, 'tiền đề: vẫn với tới được backend nên dropdown mở khoá');
     ok(
       r.selLabel === '+ Tạo notebook mới',

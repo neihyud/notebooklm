@@ -442,13 +442,14 @@ async function listNotebooks() {
 }
 
 /**
- * Tạo notebook. LƯỢT GHI DUY NHẤT của đường này.
+ * Tạo notebook. KHÔNG đụng `settings` — trả URL về cho bên gọi tự quyết.
  *
- * Ghi thẳng `settings.notebookUrl` khi thành công. Bỏ bước đó thì owner bấm
- * tạo lần nữa và tài khoản có hai notebook rỗng — chế độ hỏng dễ xảy ra nhất
- * của tính năng này, và nó im lặng.
- *
- * Ghi CHỈ khi có id thật. `notebook-limit` và `created-but-no-id` đều không ghi.
+ * Từng ghi thẳng `settings.notebookUrl` khi thành công, vì bên gọi khi ấy là
+ * nút "Tạo" trong popup: không ghi thì owner bấm lần nữa và tài khoản có hai
+ * notebook rỗng. Nút ấy đã bỏ (owner chốt 2026-09-04), và bên gọi duy nhất còn
+ * lại — `dichCuaLuotChay` — cần điều NGƯỢC LẠI: ghi vào thì lựa chọn "+ Tạo
+ * notebook mới" bị chính lượt chạy đầu tiên ăn mất, và "luôn tạo mới" im lặng
+ * biến thành "gửi hết vào một sổ".
  */
 async function createNotebook(title) {
   const name = String(title == null ? '' : title).trim();
@@ -491,13 +492,24 @@ async function createNotebook(title) {
   }
 
   const url = `https://notebooklm.google.com/notebook/${r.notebookId}`;
-  await setSettings({ notebookUrl: url });
   return { ok: true, notebookId: r.notebookId, url, status: 'ok' };
 }
 
-async function resolveNotebookTab() {
-  const settings = await getSettings();
-  const target = (settings.notebookUrl || '').trim();
+/**
+ * Tab sẽ NHẬN Nguồn của lượt chạy này.
+ *
+ * `urlDich` là tham số bắt buộc, không đọc lại `settings` — vì đích của một
+ * lượt Chạy không nhất thiết nằm trong settings: khi owner để "+ Tạo notebook
+ * mới" thì `runQueue` vừa tạo ra nó xong và cố tình KHÔNG ghi xuống đĩa. Đọc
+ * lại settings ở đây là đi vào notebook cũ trong khi vừa tạo cái mới.
+ *
+ * Từng có một nhánh "không có đích thì lấy tab notebook nào đang mở". Nhánh đó
+ * chết từ lượt "đích rỗng = tạo mới lúc Chạy": `runQueue` giờ luôn cầm sẵn một
+ * URL thật trước khi gọi vào đây.
+ */
+async function resolveNotebookTab(urlDich) {
+  const target = String(urlDich || '').trim();
+  if (!target) throw new Error('resolveNotebookTab cần một URL notebook cụ thể');
 
   /*
    * ĐƯỜNG GHI cũng phải ghim tài khoản — không chỉ đường liệt kê.
@@ -525,35 +537,18 @@ async function resolveNotebookTab() {
   if (want != null) tabs = tabs.filter((t) => tabAuthuser(t) === want);
   const inNotebook = tabs.filter((t) => /\/notebook\/[^/]+/.test(t.url || ''));
 
-  let tab = null;
-  if (target) {
-    const wantedId = (/\/notebook\/([^/?#]+)/.exec(target) || [])[1];
-    tab = inNotebook.find((t) => wantedId && (t.url || '').includes(wantedId)) || null;
-    if (!tab) {
-      // `settings.notebookUrl` không mang `authuser` (nó là URL owner dán, hoặc
-      // do dropdown ghi). Gắn vào lúc điều hướng, chứ không lưu xuống đĩa: id
-      // notebook thuộc về một tài khoản, `authuser` thì đổi theo lựa chọn.
-      const dest = want == null ? target : withAuthuser(target, want);
-      tab = tabs[0]
-        ? await chrome.tabs.update(tabs[0].id, { url: dest })
-        : await chrome.tabs.create({ url: dest, active: false });
-      await waitTabComplete(tab.id);
-      await sleep(2500); // Angular cần thời gian dựng UI
-    }
-  } else {
-    tab = inNotebook[0] || null;
-    if (!tab) {
-      // Hai ca khác nhau, hai việc phải làm khác nhau: không có tab nào, so với
-      // CÓ tab nhưng của tài khoản khác. Gộp lại thì owner đọc "chưa có notebook
-      // nào đang mở" trong khi đang nhìn thẳng vào một notebook đang mở.
-      throw new Error(
-        want != null && (await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' })).length
-          ? `Có tab NotebookLM đang mở, nhưng không phải của tài khoản đã chọn (${who.email || `authuser=${want}`}). ` +
-            'Mở notebook đích bằng đúng tài khoản đó, hoặc đổi tài khoản trong popup.'
-          : 'Chưa có notebook nào đang mở. Hãy mở notebook đích rồi bấm "Dùng notebook ở tab hiện tại" ' +
-            'trong popup, hoặc dán URL notebook vào Options.'
-      );
-    }
+  const wantedId = (/\/notebook\/([^/?#]+)/.exec(target) || [])[1];
+  let tab = inNotebook.find((t) => wantedId && (t.url || '').includes(wantedId)) || null;
+  if (!tab) {
+    // Đích không mang `authuser` (nó là URL owner dán, do dropdown ghi, hoặc
+    // vừa tạo xong). Gắn vào lúc điều hướng, chứ không lưu xuống đĩa: id
+    // notebook thuộc về một tài khoản, `authuser` thì đổi theo lựa chọn.
+    const dest = want == null ? target : withAuthuser(target, want);
+    tab = tabs[0]
+      ? await chrome.tabs.update(tabs[0].id, { url: dest })
+      : await chrome.tabs.create({ url: dest, active: false });
+    await waitTabComplete(tab.id);
+    await sleep(2500); // Angular cần thời gian dựng UI
   }
 
   // Ngay sau khi điều hướng, Angular có thể chưa kịp dựng xong route notebook —
@@ -1661,6 +1656,62 @@ async function importDoc(item, settings, notebookTabId) {
  * đúng ở nơi vốn đã sống sót qua mọi lần Chrome ngắt service worker — `status`
  * của từng Mục và `savedFile` của từng Mục, cả hai trong chrome.storage.
  */
+/**
+ * Tên cho notebook mà extension tự tạo. Owner đã bỏ ô đặt tên trong popup, nên
+ * cái tên này là thứ duy nhất phân biệt các sổ tự sinh với nhau — dấu thời gian
+ * là thứ rẻ nhất làm được việc đó. "Untitled notebook" thì sau ba lượt chạy
+ * owner có ba dòng giống hệt nhau trong danh sách.
+ */
+function tenNotebookTuDong(luc) {
+  const d = luc || new Date();
+  const hai = (n) => String(n).padStart(2, '0');
+  return `Nhập ${hai(d.getDate())}/${hai(d.getMonth() + 1)}/${d.getFullYear()} ${hai(d.getHours())}:${hai(d.getMinutes())}`;
+}
+
+/**
+ * URL notebook nhận Nguồn của lượt chạy này.
+ *
+ * `settings.notebookUrl` rỗng KHÔNG còn nghĩa "dùng tab notebook nào đang mở" —
+ * nó là lựa chọn "+ Tạo notebook mới" trong popup, và tới đây mới thi hành.
+ * Tạo ở thời điểm Chạy chứ không lúc bấm chọn, vì lúc bấm chọn owner chưa chắc
+ * sẽ chạy: tạo sớm là đẻ ra sổ rỗng cho mỗi lần họ đổi ý.
+ *
+ * KHÔNG ghi xuống `settings`. Ghi vào thì lượt chạy đầu tiên ăn mất lựa chọn
+ * của owner: lần sau đích đã thành notebook vừa tạo, và "luôn tạo mới" im lặng
+ * biến thành "gửi hết vào một sổ".
+ *
+ * Mọi nhánh hỏng đều ném với câu nói rõ CHƯA GỬI GÌ CẢ — ở đây chưa Mục nào rời
+ * hàng đợi, nên "thử lại" là an toàn, và owner cần biết điều đó.
+ */
+async function dichCuaLuotChay(settings) {
+  const daDat = ((settings && settings.notebookUrl) || '').trim();
+  if (daDat) return daDat;
+
+  const tao = await createNotebook(tenNotebookTuDong());
+  if (tao.ok) return tao.url;
+
+  if (tao.limit) {
+    throw new Error(
+      'Tài khoản đã chạm trần số notebook nên không tạo mới được. Chưa gửi Nguồn nào cả — ' +
+        'chọn một notebook có sẵn trong popup rồi chạy lại.'
+    );
+  }
+  if (tao.status === 'created-but-no-id') {
+    // Không idempotent: bảo owner "thử lại" ở đây là bảo họ tạo cái thứ hai.
+    throw new Error(
+      'Notebook mới có thể đã được tạo nhưng không đọc được id, nên chưa gửi Nguồn nào cả. ' +
+        'Mở NotebookLM kiểm xem nó có đó không, rồi chọn nó trong popup — đừng chạy lại ngay, ' +
+        'lượt chạy sau sẽ tạo thêm một sổ nữa.'
+    );
+  }
+  throw new Error(
+    tao.needsTab
+      ? 'Chưa có tab NotebookLM nào đang mở nên không tạo được notebook mới. Chưa gửi Nguồn nào cả — ' +
+        'mở notebooklm.google.com rồi chạy lại.'
+      : 'Không tạo được notebook mới, chưa gửi Nguồn nào cả. Bấm ↻ trong popup để kiểm rồi thử lại.'
+  );
+}
+
 async function runQueue() {
   if (runner) return runner;
   stopRequested = false;
@@ -1686,7 +1737,7 @@ async function runQueue() {
 
     try {
       const settings = await getSettings();
-      notebookTabId = await resolveNotebookTab();
+      notebookTabId = await resolveNotebookTab(await dichCuaLuotChay(settings));
 
       for (;;) {
         if (stopRequested) break;
@@ -2107,10 +2158,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // buộc "chỉ chạy sau cử chỉ của owner" được giữ bằng đúng chuyện đó.
         case MSG.LIST_NOTEBOOKS:
           sendResponse(await listNotebooks());
-          return;
-
-        case MSG.CREATE_NOTEBOOK:
-          sendResponse(await createNotebook(message.title));
           return;
 
         case MSG.LIST_ACCOUNTS:

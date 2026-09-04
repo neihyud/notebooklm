@@ -50,7 +50,21 @@ function renderPopup(queue, opts = {}) {
         return opts.activeUrl ? [{ url: opts.activeUrl, title: 'tab' }] : [];
       },
     },
-    storage: { local: { get: async () => ({}), set: async (o) => { ghi.push(o); } } },
+    /*
+     * `storage.local` phải nói CÙNG một câu với `get-state`.
+     *
+     * Bản trước trả `{}` trong khi `get-state` trả `notebookUrl` thật — hai
+     * nguồn chân lý cho một giá trị, mà Chrome thật chỉ có một: `get-state` của
+     * service worker cũng đọc ra từ đây. Popup đọc thẳng `storage.local` ở
+     * những chỗ cần settings mới nhất (`napDanhSach`), nên chỗ lệch này làm mọi
+     * ca "đã đặt notebook đích" âm thầm chạy như ca "chưa đặt gì".
+     */
+    storage: {
+      local: {
+        get: async () => ({ settings: { notebookUrl: opts.notebookUrl || '' } }),
+        set: async (o) => { ghi.push(o); },
+      },
+    },
   };
   win.__ghi = ghi;
 
@@ -508,31 +522,47 @@ const V = (id, over) => Object.assign({ id, videoId: id.padEnd(11, 'x'), title: 
     click(win, win.document.getElementById('notebook-refresh'));
     await settle();
     const sel = win.document.getElementById('notebook-select');
-    // `__ghi` là mọi lượt chrome.storage.local.set; chỉ lấy phần notebookUrl.
-    const urls = win.__ghi.filter((o) => o.settings).map((o) => o.settings.notebookUrl);
+    /*
+     * `__ghi` là mọi lượt chrome.storage.local.set — nhưng "có ghi hay không"
+     * là câu hỏi sai ở đây.
+     *
+     * `NBLM.setSettings` MERGE rồi ghi lại cả object, nên mọi lượt ghi đều mang
+     * theo `notebookUrl`, kể cả lượt chỉ định cập nhật `notebookLabel` (cache
+     * tên notebook đích, popup ghi mỗi lần nạp danh sách). Đếm số lượt ghi thì
+     * mọi ca "không được tự đặt đích" đỏ vì một lượt ghi hoàn toàn khác.
+     *
+     * Thứ các ca ấy thật sự đòi là đích không ĐỔI. Nên chỉ giữ lượt ghi làm
+     * `notebookUrl` khác đi so với lúc mở popup.
+     */
+    const urls = win.__ghi
+      .filter((o) => o.settings && (o.settings.notebookUrl || '') !== (opts.notebookUrl || ''))
+      .map((o) => o.settings.notebookUrl);
     return { win, sel, urls, nhan: [...sel.options].map((o) => o.textContent) };
   }
 
   const NB2 = { ok: true, needsTab: false, notebooks: [{ id: 'nb-mot', title: 'Ghi chép luận văn' }, { id: 'nb-hai', title: 'Đọc tuần này' }] };
 
   /*
-   * Ba ca dưới đây từng ghim Chốt 3 của ticket 011 — "mục tạo mới KHÔNG được
-   * đứng hiện khi owner đã có notebook, vì cú bấm kế tiếp đẻ ra một sổ rỗng
-   * thừa". Owner đã chốt ngược lại ngày 2026-09-04: mục tạo mới luôn đứng hiện,
-   * đổi lấy lối tạo nhanh nằm sẵn dưới tay.
+   * Dropdown mang nhãn "Gửi tới" nên nó phải HIỆN đúng nơi sẽ gửi tới. Ba ca
+   * dưới canh ba hình dạng của "nơi đó", và cả ba đều có cùng một luật kèm
+   * theo: vẽ thì vẽ, KHÔNG được tự ghi `notebookUrl`.
    *
-   * Hệ quả đi kèm, và là thứ ba ca này chuyển sang canh: dropdown thôi TỰ chọn
-   * hộ, nên nó cũng thôi tự ghi `notebookUrl`. Mọi lượt ghi giờ đến từ một cú
-   * bấm thật của owner. Nhãn "Gửi tới" vì thế không còn nói notebook đích —
-   * `test/popup-notebook-dich.test.js` canh chỗ thay thế (câu hint).
+   * Lịch sử, vì hai lượt đảo liên tiếp làm chỗ này dễ đọc nhầm: Chốt 3 của
+   * ticket 011 cấm mục tạo mới đứng hiện khi owner đã có notebook (sợ cú bấm
+   * kế tiếp đẻ ra sổ rỗng thừa). 2026-09-04 owner đảo, bắt nó LUÔN đứng hiện —
+   * và hệ quả là phải mở sẵn khung đặt tên để bù cho cú `change` không bao giờ
+   * bắn. Cùng ngày, owner thấy khung ấy trên màn hình và bảo bỏ đi. Bỏ được vì
+   * lượt tạo dời sang thời điểm bấm Chạy: "+ Tạo notebook mới" thành một ĐÍCH
+   * (`notebookUrl` rỗng) chứ không còn là nút mở khung, nên dropdown quay lại
+   * hiện đúng đích — và nỗi lo của Chốt 3 tự tan, vì chọn mục đó không tạo gì cả.
    */
   {
-    // Chưa lưu notebook nào.
+    // Chưa lưu notebook nào → đích LÀ "tạo mới", nên nó phải đứng hiện.
     const { sel, urls, nhan } = await napXong({ notebooks: NB2 });
     eq(sel.options.length, 3, 'ba mục: tạo mới + hai notebook');
     eq(nhan[0], '+ Tạo notebook mới', 'slot 0 là mục tạo mới');
     eq(sel.options[1].value, 'nb-mot', 'slot 1 là notebook thật đầu tiên');
-    eq(sel.selectedIndex, 0, 'mục đang hiện là mục TẠO MỚI');
+    eq(sel.selectedIndex, 0, 'chưa đặt đích thì mục đang hiện là TẠO MỚI');
 
     // Placeholder chết đã gỡ: chọn nó không làm gì cả.
     ok(![...sel.options].some((o) => o.value === ''), 'không còn mục rỗng nào trong danh sách');
@@ -541,45 +571,90 @@ const V = (id, over) => Object.assign({ id, videoId: id.padEnd(11, 'x'), title: 
   }
 
   {
-    // Đã lưu một notebook CÒN trong danh sách: dropdown vẫn đứng ở mục tạo mới,
-    // và tuyệt đối không đụng tới `notebookUrl` đang lưu.
+    // Đã lưu một notebook CÒN trong danh sách: dropdown hiện CHÍNH NÓ.
+    //
+    // Ghim bằng `value` chứ không bằng `selectedIndex`: nb-hai nằm ở slot 2, và
+    // một hoán vị đẩy nhầm slot vẫn cho `selectedIndex !== 0`.
     const { sel, urls } = await napXong({
       notebooks: NB2,
       notebookUrl: 'https://notebooklm.google.com/notebook/nb-hai',
     });
-    eq(sel.selectedIndex, 0, 'vẫn là mục tạo mới, không nhảy về notebook đang lưu');
-    eq(urls.length, 0, 'và KHÔNG ghi đè notebook đích owner đã chọn');
+    eq(sel.value, 'nb-hai', 'đã đặt đích thì dropdown hiện đúng notebook đó');
+    eq(urls.length, 0, 'vẽ thôi, KHÔNG ghi đè notebook đích owner đã chọn');
   }
 
   {
-    // Đã lưu một notebook KHÔNG còn trong danh sách (đổi tài khoản, hoặc đã
-    // xoá). Popup không tự chữa hộ nữa: nó để nguyên và chờ owner quyết.
-    const { sel, urls } = await napXong({
+    /*
+     * Đã lưu một notebook KHÔNG còn trong danh sách (đổi tài khoản, hoặc đã xoá).
+     *
+     * Rơi về "+ Tạo notebook mới" ở đây là NÓI DỐI: dropdown bảo "sẽ tạo sổ mới"
+     * trong khi background vẫn nhắm vào id cũ. Phải nói ra bằng một mục riêng,
+     * khoá lại — cùng cách hàng "Tài khoản" xử lý ca đã đăng xuất.
+     */
+    const { sel, urls, nhan } = await napXong({
       notebooks: NB2,
       notebookUrl: 'https://notebooklm.google.com/notebook/nb-da-mat',
     });
-    eq(sel.selectedIndex, 0, 'notebook đã mất: vẫn đứng ở mục tạo mới');
+    eq(sel.selectedIndex, 0, 'notebook đã mất: mục đang hiện là mục nói ra điều đó');
+    ok(/không còn trong danh sách/.test(nhan[0]), `và nó phải NÓI RA, nhận: ${JSON.stringify(nhan[0])}`);
+    ok(nhan[0].includes('nb-da-mat'), `kèm id để owner truy được, nhận: ${JSON.stringify(nhan[0])}`);
+    ok(sel.options[0].disabled, 'khoá lại: chọn một notebook đã mất không phải một lựa chọn');
+    ok(!/\+ Tạo notebook mới/.test(nhan[0]), 'và tuyệt đối không giả vờ là "sẽ tạo sổ mới"');
     eq(urls.length, 0, 'và không âm thầm trỏ owner sang một notebook khác');
   }
 
   {
-    // Tài khoản không có notebook nào. Đây là ca DUY NHẤT mục tạo mới đứng hiện
-    // — và vì chọn lại cái đang chọn không phát `change`, popup phải tự mở
-    // khung tạo. Bảo owner "chọn + Tạo notebook mới" là một ngõ cụt.
+    /*
+     * Tài khoản không có notebook nào — và đây KHÔNG còn là ngõ cụt cần chữa.
+     *
+     * Trước đây phải mở sẵn khung đặt tên, vì tạo sổ cần một cú bấm mà cú bấm
+     * ấy không tồn tại. Giờ không cần cú bấm nào: "+ Tạo notebook mới" đã là
+     * đích đang có hiệu lực, và bấm Chạy là tạo.
+     */
     const { win, sel, urls, nhan } = await napXong({
       notebooks: { ok: true, needsTab: false, notebooks: [] },
     });
     eq(sel.options.length, 1, '0 notebook: chỉ còn mục tạo mới');
     eq(nhan[0], '+ Tạo notebook mới', 'và nó là mục tạo mới');
-    eq(win.document.getElementById('notebook-create').hidden, false, '0 notebook: khung tạo tự mở, không đợi một cú change không bao giờ tới');
+    ok(!win.document.getElementById('notebook-create'), 'không còn khung đặt tên nào trong popup');
+    ok(!win.document.getElementById('notebook-name'), 'và không còn ô tên');
     eq(urls.length, 0, '0 notebook: không ghi gì xuống settings');
   }
 
   {
-    // Không đọc được danh sách cũng dựng ra một danh sách rỗng, nhưng ở đó ta
-    // KHÔNG biết tài khoản có notebook hay không — mở khung tạo là đoán mò.
-    const { win } = await napXong({ notebooks: { ok: false, needsTab: false, notebooks: [] } });
-    eq(win.document.getElementById('notebook-create').hidden, true, 'list hỏng: KHÔNG tự mở khung tạo');
+    /*
+     * Đang gửi tới một notebook, owner đổi ý chọn "+ Tạo notebook mới".
+     *
+     * Đây là lượt GHI, không phải lượt vẽ: phải xoá `notebookUrl`. Bỏ bước xoá
+     * thì dropdown hiện "+ Tạo notebook mới" trong khi background vẫn nhắm
+     * notebook cũ — Nguồn đi vào đúng chỗ owner vừa bỏ chọn, im lặng, và không
+     * một dòng nào trên màn hình nói khác đi.
+     *
+     * Ghim ĐÍCH ĐI RA chứ không ghim cú bấm: hoán vị bỏ thân nhánh `TAO_MOI`
+     * vẫn cho một dropdown trông y hệt.
+     */
+    const { win, sel } = await napXong({
+      notebooks: NB2,
+      notebookUrl: 'https://notebooklm.google.com/notebook/nb-hai',
+    });
+    eq(sel.value, 'nb-hai', 'tiền đề: đang gửi tới nb-hai');
+
+    sel.value = '__tao-moi__';
+    sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+    await settle();
+
+    const sau = win.__ghi.filter((o) => o.settings).map((o) => o.settings.notebookUrl);
+    ok(sau.length > 0, 'chọn mục tạo mới phải GHI, không phải chỉ đổi hiển thị');
+    eq(sau[sau.length - 1], '', 'và lượt ghi ấy xoá đích cũ — rỗng = "tạo mới lúc bấm Chạy"');
+  }
+
+  {
+    // Không đọc được danh sách: mục tạo mới vẫn còn, nên vẫn chạy được — và
+    // câu hint phải chỉ sang trang Cài đặt, nơi ô dán URL thật sự đang nằm.
+    const { win, nhan } = await napXong({ notebooks: { ok: false, needsTab: false, notebooks: [] } });
+    eq(nhan[0], '+ Tạo notebook mới', 'list hỏng: vẫn còn lối tạo mới, không phải ngõ cụt');
+    ok(/Cài đặt/.test(win.document.getElementById('notebook-hint').textContent),
+      `list hỏng: hint chỉ sang nơi còn đặt được đích, nhận: ${JSON.stringify(win.document.getElementById('notebook-hint').textContent)}`);
   }
 
   /* ---------------------------------------------------------------- */

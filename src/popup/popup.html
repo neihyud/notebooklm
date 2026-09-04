@@ -45,21 +45,21 @@
                 title="Nạp danh sách notebook" aria-label="Nạp danh sách notebook">↻</button>
       </div>
     </div>
-    <div class="notebook__create" id="notebook-create" hidden>
-      <input type="text" id="notebook-name" placeholder="Tên notebook mới" spellcheck="false" maxlength="120">
-      <button type="button" id="notebook-create-go" class="btn btn--primary btn--sm">Tạo</button>
-      <button type="button" id="notebook-create-cancel" class="btn btn--sm">Huỷ</button>
-    </div>
     <!--
-      Không có ô dán URL notebook trong popup — chủ ý, không phải quên.
+      Khu "Gửi tới" chỉ còn MỘT điều khiển: cái dropdown ở trên. Không ô dán
+      URL, không ô đặt tên, không nút Tạo — chủ ý, không phải quên.
 
-      `settings.notebookUrl` VẪN là nguồn chân lý mà background đọc; lối đặt nó
-      bằng tay chỉ RỜI CHỖ chứ không mất — ô "URL notebook" nằm ở trang Cài đặt.
-      Trong popup còn hai đường: chọn trong dropdown, hoặc tạo notebook mới.
+      Đích là một trong hai thứ, và dropdown nói ra cái nào đang có hiệu lực:
+        - một notebook có sẵn  → `settings.notebookUrl` trỏ vào nó;
+        - "+ Tạo notebook mới" → `notebookUrl` rỗng, và service worker tạo sổ
+          lúc owner bấm Chạy (`dichCuaLuotChay`), không phải lúc bấm chọn.
 
-      Đánh đổi đã biết và đã chấp nhận: khi `ListNotebooks` hỏng thì chỉ đích
-      danh một notebook có sẵn phải đi vòng qua trang Cài đặt, thêm vài cú bấm.
-      Câu hint ở nhánh đó có nhiệm vụ chỉ sang đấy — `popup.js` `napDanhSach()`.
+      Vì sổ chỉ ra đời lúc Chạy nên popup không cần hỏi tên: extension tự đặt
+      theo dấu thời gian. Đổi tên thì đổi bên NotebookLM.
+
+      Lối chỉ đích danh bằng tay vẫn còn, chỉ RỜI CHỖ — ô "URL notebook" nằm ở
+      trang Cài đặt. Nó là đường ra khi `ListNotebooks` hỏng; câu hint ở nhánh
+      đó có nhiệm vụ chỉ sang đấy (`popup.js`, `napDanhSach()`).
     -->
     <p class="hint" id="notebook-hint"></p>
   </section>

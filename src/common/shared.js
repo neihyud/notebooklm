@@ -56,7 +56,6 @@
     COLLECT_PAGE_LINKS: 'collect-page-links', // quét link YouTube trên tab hiện tại
     IMPORT_PLAYLIST: 'import-playlist',       // import toàn bộ playlist/kênh của tab hiện tại
     LIST_NOTEBOOKS: 'list-notebooks',         // popup xin danh sách notebook cho dropdown
-    CREATE_NOTEBOOK: 'create-notebook',       // popup xin tạo notebook mới (lượt GHI duy nhất)
     LIST_ACCOUNTS: 'list-accounts',           // popup xin danh sách tài khoản Google (ticket 013)
     SELECT_ACCOUNT: 'select-account',         // popup chọn tài khoản; kéo theo việc vứt token cache
   };

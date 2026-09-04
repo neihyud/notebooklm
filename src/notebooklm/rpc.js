@@ -174,8 +174,8 @@
      * `args` là hằng số ngoại sinh CHƯA HIỂU — không ai biết `1` và `[2]` nghĩa
      * gì. Một oracle gọi thật (`docs/notebooklm-rpc-do-duoc-2.md`), oracle kia
      * chỉ xác nhận cái TÊN `LIST_RECENTLY_VIEWED_PROJECTS`. Và chính cái tên đó
-     * là lý do dropdown không bao giờ được thay ô dán URL: "recently viewed"
-     * không hứa là đủ.
+     * là lý do dropdown không bao giờ được thay ô dán URL (nay nằm ở trang Cài
+     * đặt): "recently viewed" không hứa là đủ.
      */
     listNotebooks: {
       rpcId: 'wXbhsf',
@@ -897,7 +897,8 @@
   /**
    * Giá trị này có thể là một notebook id không? Xem `idPattern` trong `BASE`.
    *
-   * Mẫu hỏng thì mặc định là TỪ CHỐI TẤT: dropdown rỗng, ô dán URL vẫn nguyên.
+   * Mẫu hỏng thì mặc định là TỪ CHỐI TẤT: dropdown rỗng, và ô dán URL ở trang
+   * Cài đặt vẫn nguyên.
    * Chiều ngược lại — mẫu hỏng thì nhận tất — sẽ ghi một cái tên vào
    * `settings.notebookUrl` và mọi lượt import sau đó nhắm vào hư không.
    */

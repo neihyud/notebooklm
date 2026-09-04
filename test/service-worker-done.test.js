@@ -20,6 +20,17 @@ const ROOT = path.join(__dirname, '..');
 let pass = 0, fail = 0;
 const ok = (c, m) => (c ? pass++ : (fail++, console.log('❌ ' + m)));
 
+/*
+ * Đích của mọi ca trong file này, và nó phải KHỚP tab notebook trong fixture
+ * (id 7) — khớp thì `resolveNotebookTab` dùng lại tab đó, không điều hướng.
+ *
+ * Từng là chuỗi rỗng. Rỗng nay mang nghĩa KHÁC: "+ Tạo notebook mới", và
+ * `dichCuaLuotChay` sẽ đi tạo một notebook thật trước khi chạy — mà stub RPC ở
+ * đây không dựng cho lượt tạo, nên cả lượt chạy chết ngay từ dòng đầu. File này
+ * kiểm đường ĐÃ CÓ đích, nên nói thẳng ra đích là đúng ý định của nó.
+ */
+const NB_DICH = 'https://notebooklm.google.com/notebook/abc123';
+
 /* ---------- stub chrome, đủ để service worker nạp được ---------- */
 
 const changedListeners = [];
@@ -307,7 +318,7 @@ function probe(promise) {
     // làm cả file không kết thúc trong 90s mà không in ra một chữ nào.
     dl.searchState = 'complete';
     store.clear();
-    store.set('settings', { notebookUrl: '', delayMs: 0, publicFallbackToTranscript: true });
+    store.set('settings', { notebookUrl: NB_DICH, delayMs: 0, publicFallbackToTranscript: true });
     store.set('queue', [
       {
         id: 'v1',
@@ -348,7 +359,7 @@ function probe(promise) {
     dl.calls.length = 0;
     dl.searchState = 'complete'; // xem ghi chú ở chayMotMuc
     store.clear();
-    store.set('settings', { notebookUrl: '', delayMs: 0, docsMode: 'url-then-text' });
+    store.set('settings', { notebookUrl: NB_DICH, delayMs: 0, docsMode: 'url-then-text' });
     store.set('text:d1', 'Nội dung trang tài liệu đã trích sẵn');
     store.set('queue', [
       {
@@ -503,7 +514,7 @@ function probe(promise) {
     hudCalls.length = 0;
     dl.searchState = 'complete';
     dl.searchError = undefined;
-    store.set('settings', Object.assign({ notebookUrl: '', delayMs: 0 }, settings));
+    store.set('settings', Object.assign({ notebookUrl: NB_DICH, delayMs: 0 }, settings));
     await SW.runQueue();
     dl.searchState = null;
     return (await storageLocal.get('queue')).queue;
@@ -671,7 +682,7 @@ function probe(promise) {
     addCalls.length = 0;
     dl.calls.length = 0;
     dl.searchState = 'complete';
-    store.set('settings', { notebookUrl: '', delayMs: 0, saveTranscriptCopy: false });
+    store.set('settings', { notebookUrl: NB_DICH, delayMs: 0, saveTranscriptCopy: false });
     nlmReply = { ok: true, error: null, limit: false, verified: false, unverified: LY_DO_NLM };
     await SW.runQueue();
     dl.searchState = null;
@@ -692,7 +703,7 @@ function probe(promise) {
     addCalls.length = 0;
     dl.calls.length = 0;
     dl.searchState = 'complete';
-    store.set('settings', { notebookUrl: '', delayMs: 0, saveTranscriptCopy: false });
+    store.set('settings', { notebookUrl: NB_DICH, delayMs: 0, saveTranscriptCopy: false });
     nlmReply = { ok: true, error: null, limit: false, verified: false, unverified: LY_DO_NLM };
     await SW.runQueue();
     dl.searchState = null;

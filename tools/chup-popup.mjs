@@ -112,6 +112,24 @@ const CANH = {
       notebooks: [nb('a1', 'Tổng hợp tài liệu nghiên cứu về mô hình ngôn ngữ lớn và ứng dụng trong giáo dục đại học Việt Nam'), nb('b2', 'Ngắn')],
     },
   },
+  'da-dat-notebook': {
+    vi: 'Đã đặt notebook đích — dropdown phải hiện CHÍNH NÓ, không phải "+ Tạo notebook mới".',
+    accounts: null,
+    notebookUrl: 'https://notebooklm.google.com/notebook/nb-hai',
+    notebookLabel: { url: 'https://notebooklm.google.com/notebook/nb-hai', title: 'Đọc tuần này' },
+    notebooks: { ok: true, needsTab: false, notebooks: [
+      { id: 'nb-mot', title: 'Ghi chép luận văn' },
+      { id: 'nb-hai', title: 'Đọc tuần này' },
+    ] },
+  },
+  'dich-da-mat': {
+    vi: 'Đích đang lưu không còn trong danh sách — phải NÓI RA, không được giả vờ là "sẽ tạo sổ mới".',
+    accounts: null,
+    notebookUrl: 'https://notebooklm.google.com/notebook/nb-da-xoa',
+    notebooks: { ok: true, needsTab: false, notebooks: [
+      { id: 'nb-mot', title: 'Ghi chép luận văn' },
+    ] },
+  },
   'khong-co-tab': {
     vi: 'Không với tới được backend lẫn tab nào.',
     accounts: { ok: false, accounts: [], selected: null },
@@ -156,7 +174,11 @@ function stub(canh) {
   return `
   (() => {
     const CANH = ${JSON.stringify(canh)};
-    const SETTINGS = { notebookUrl: '', nlmAccount: CANH.accounts && CANH.accounts.selected || null };
+    const SETTINGS = {
+      notebookUrl: CANH.notebookUrl || '',
+      notebookLabel: CANH.notebookLabel || null,
+      nlmAccount: (CANH.accounts && CANH.accounts.selected) || null,
+    };
     globalThis.chrome = {
       runtime: {
         id: 'chup',
@@ -260,7 +282,6 @@ for (const [ten, canh] of danhSach) {
       nbOpts: [...document.getElementById('notebook-select').options].map(o => o.textContent),
       note: document.getElementById('account-note').hidden ? null : document.getElementById('account-note').textContent,
       nbChon: (document.getElementById('notebook-select').selectedOptions[0] || {}).textContent || null,
-      taoHien: !document.getElementById('notebook-create').hidden,
       hint: document.getElementById('notebook-hint').textContent,
     })`, returnByValue: true }, S);
     console.log('    ' + d.result.value);

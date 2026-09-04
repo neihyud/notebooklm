@@ -110,7 +110,15 @@ global.chrome = {
   alarms: { create: async () => {}, clear: async () => {}, onAlarm: noopEvent() },
   commands: { onCommand: noopEvent() },
   contextMenus: { create() {}, removeAll: (cb) => cb && cb(), onClicked: noopEvent() },
-  notifications: { create: async (o) => { S.notes.push((o && o.title) || ''); } },
+  /*
+   * Giữ CẢ `message`, không chỉ `title`. Tiêu đề chỉ nói "không chạy được";
+   * toàn bộ lời chẩn đoán — chưa gửi gì chưa, thử lại có an toàn không, làm gì
+   * tiếp — nằm trong thân. Bản trước vứt thân đi, nên mọi ca chỉ ghim được là
+   * CÓ báo, không ghim được là báo ĐÚNG.
+   */
+  notifications: {
+    create: async (o) => { S.notes.push({ title: (o && o.title) || '', message: (o && o.message) || '' }); },
+  },
   scripting: { executeScript: async () => [{ result: true }] },
   downloads: { download: async () => 1, search: async () => [], onChanged: noopEvent() },
   tabs: {
@@ -172,9 +180,21 @@ async function reset() {
   ok(MSG_PING === MSG.NLM_PING, 'MSG_PING trong stub khớp hằng thật của repo');
 
   /* ---------------------------------------------------------------- */
-  /* A. Khuyết tật 1 — lùi mù quáng thì tạo notebook thứ hai            */
+  /* A–B. Lượt TẠO notebook, đo qua đúng đường production của nó        */
   /* ---------------------------------------------------------------- */
+  /*
+   * Lái bằng `MSG.RUN` với `notebookUrl` RỖNG, chứ không bằng một message tạo
+   * riêng. Rỗng nay nghĩa là "+ Tạo notebook mới", và `dichCuaLuotChay` thi
+   * hành nó ngay trước vòng lặp hàng đợi — đây là bên gọi DUY NHẤT còn lại của
+   * `createNotebook`.
+   *
+   * Trước đó hai ca này gọi `create-notebook`, message mà nút "Tạo" trong popup
+   * gửi. Nút ấy đã bỏ cùng ô đặt tên (owner chốt 2026-09-04), message thành
+   * code chết, và một test lái qua code chết thì chứng nhận một đường không ai
+   * đi — xanh mãi mãi kể cả khi đường thật hỏng.
+   */
   {
+    // A. `created-but-no-id`: notebook CÓ THỂ đã tồn tại trên tài khoản.
     await reset();
     S.tabs = [{ id: 7, url: 'https://notebooklm.google.com/notebook/abc123' }];
     S.tabReply = { ok: true, notebookId: 'TAB-TAO-CAI-THU-HAI' };
@@ -186,18 +206,22 @@ async function reset() {
       return res(AT_HTML);
     };
 
-    const r = await send({ type: MSG.CREATE_NOTEBOOK, title: 'Sổ mới' });
-    ok(r.status === 'created-but-no-id', 'A: trạng thái "có thể đã tạo" đi thẳng ra ngoài');
+    await chayRong();
     ok(S.tabCalls.length === 0, 'A: KHÔNG lùi sang đường tab — lùi là tạo notebook thứ hai');
-    ok(r.ok === false, 'A: không báo thành công khi không đọc được id');
-    ok(!store.has('settings') || !(store.get('settings') || {}).notebookUrl,
-      'A: không ghi notebookUrl khi không có id thật');
+    ok(!(store.get('settings') || {}).notebookUrl,
+      `A: không ghi notebookUrl khi không có id thật, nhận: ${JSON.stringify((store.get('settings') || {}).notebookUrl)}`);
+    ok(S.nav.length === 0, 'A: và không điều hướng tab nào đi nhận Nguồn');
+
+    // Câu báo phải chặn cú "thử lại" — tạo notebook KHÔNG idempotent, nên thử
+    // lại ở đây là đẻ ra cái thứ hai mà owner phải tự xoá.
+    const noi = S.notes.map((t) => `${t.title} ${t.message}`).join(' | ');
+    ok(/không đọc được id/.test(noi), `A: nói ra đúng chế độ hỏng, nhận: ${JSON.stringify(noi)}`);
+    ok(/chưa gửi Nguồn nào/.test(noi), `A: và nói rõ chưa gửi gì, nhận: ${JSON.stringify(noi)}`);
+    ok(/tạo thêm|đừng chạy lại/.test(noi), `A: và can cú chạy lại, nhận: ${JSON.stringify(noi)}`);
   }
 
-  /* ---------------------------------------------------------------- */
-  /* B. Lùi VẪN xảy ra khi chứng minh được là chưa gửi gì               */
-  /* ---------------------------------------------------------------- */
   {
+    // B. `no-at-token` = chứng minh được chưa byte nào rời máy → lùi là an toàn.
     await reset();
     S.tabs = [{ id: 7, url: 'https://notebooklm.google.com/notebook/abc123' }];
     S.tabReply = { ok: true, notebookId: 'ID-TU-DUONG-TAB' };
@@ -206,10 +230,19 @@ async function reset() {
       return res('<html>không có token nào</html>'); // no-at-token = chưa gửi byte nào
     };
 
-    const r = await send({ type: MSG.CREATE_NOTEBOOK, title: 'Sổ mới' });
+    await chayRong();
     ok(S.tabCalls.length === 1, 'B: chưa gửi gì thì CÓ lùi sang đường tab');
-    ok(r.ok === true && r.notebookId === 'ID-TU-DUONG-TAB', 'B: đường tab tạo được thì báo thành công');
-    ok((store.get('settings') || {}).notebookUrl.includes('ID-TU-DUONG-TAB'), 'B: ghi notebookUrl từ id thật');
+    ok(S.nav.some((n) => (n.url || '').includes('ID-TU-DUONG-TAB')),
+      `B: lượt chạy đi vào ĐÚNG notebook vừa tạo, nhận: ${JSON.stringify(S.nav)}`);
+
+    /*
+     * KHÔNG ghi xuống settings — và đây là cái neo của quyết định "tạo lúc bấm
+     * Chạy". Ghi vào thì đích tự đổi thành sổ vừa tạo, nên lượt Chạy SAU đi vào
+     * đó thay vì tạo cái mới: lựa chọn "+ Tạo notebook mới" bị chính lượt chạy
+     * đầu tiên ăn mất, im lặng, và "luôn tạo mới" thành "gửi hết vào một sổ".
+     */
+    ok(!(store.get('settings') || {}).notebookUrl,
+      `B: tạo hộ thì KHÔNG được ghi đè đích của owner, nhận: ${JSON.stringify((store.get('settings') || {}).notebookUrl)}`);
   }
 
   /* ---------------------------------------------------------------- */
@@ -347,7 +380,7 @@ async function reset() {
     await chayRong();
     ok(S.nav.length === 0, 'H: tài khoản đã đăng xuất thì không điều hướng tab nào');
     ok(S.tabCalls.length === 0, 'H: và không hỏi tab nào');
-    ok(S.notes.some((t) => t.includes('Không chạy được hàng đợi')),
+    ok(S.notes.some((t) => t.title.includes('Không chạy được hàng đợi')),
       `H: nói ra là không chạy được, nhận: ${JSON.stringify(S.notes)}`);
   }
 
@@ -360,7 +393,7 @@ async function reset() {
     S.tabs = [{ id: 7, url: 'https://notebooklm.google.com/notebook/abc' }];
     await chayRong();
     ok(S.nav.length === 0, `I: chưa chọn tài khoản thì dùng tab đang mở như cũ, nhận: ${JSON.stringify(S.nav)}`);
-    ok(!S.notes.some((t) => t.includes('Không chạy được hàng đợi')), 'I: và KHÔNG chặn lượt chạy');
+    ok(!S.notes.some((t) => t.title.includes('Không chạy được hàng đợi')), 'I: và KHÔNG chặn lượt chạy');
   }
 
   {
