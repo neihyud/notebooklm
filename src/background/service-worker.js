@@ -324,6 +324,20 @@ if (chrome.storage.onChanged && chrome.storage.onChanged.addListener) {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes || !changes[KEYS.SETTINGS]) return;
     const c = changes[KEYS.SETTINGS];
+
+    /*
+     * `ttlMs: 0` là điều kiện đảo ngược "không lưu token xuống đĩa". Chỉ thôi
+     * GHI thì token cũ nằm lại vĩnh viễn — `usable()` từ chối đọc nó nên không
+     * ai xoá, và không ai nhận ra nó còn đó. Thu hồi ngay lúc owner bấm Lưu,
+     * chứ không đợi một lượt dùng mới có thể không bao giờ tới.
+     */
+    const ovTruoc = JSON.stringify((c.oldValue || {}).accountOverrides || null);
+    const ovSau = JSON.stringify((c.newValue || {}).accountOverrides || null);
+    if (ovTruoc !== ovSau) {
+      ACC.configure((c.newValue || {}).accountOverrides);
+      if (!(ACC.config.ttlMs > 0)) ACC.clearRpcContext().catch(() => {});
+    }
+
     const truoc = (c.oldValue || {}).nlmAccount || null;
     const sau = (c.newValue || {}).nlmAccount || null;
     if (truoc === sau) return;

@@ -149,9 +149,16 @@
      */
     nlmAccount: null,
     /**
-     * Ghi đè hình dạng `ListAccounts` + ngữ cảnh token (JSON), cùng luật với
-     * `rpcOverrides`. Đặt `{"ttlMs": 0}` là tắt hẳn việc lưu token xuống đĩa —
-     * một trong bốn điều kiện đảo ngược của ticket 013, và cố ý chỉ có một chỗ.
+     * Ghi đè hình dạng `ListAccounts` + ngữ cảnh token (JSON). Gộp SÂU cho
+     * object lồng nhau, nên `{"accountSlots": {"index": 8}}` chỉ dời một ô chứ
+     * không xoá các ô còn lại.
+     *
+     * KHÁC `rpcOverrides` đúng một điểm: ở đó hai mảng được HỢP NHẤT (thêm một
+     * ứng viên selector là ý định thường gặp); ở đây mảng — chỉ có `origins` —
+     * bị THAY THẾ, vì ghi đè origin là để thay chứ không phải để thêm.
+     *
+     * Đặt `{"ttlMs": 0}` là tắt hẳn việc lưu token xuống đĩa VÀ thu hồi token
+     * đã lưu — một trong bốn điều kiện đảo ngược của ticket 013.
      */
     accountOverrides: null,
     /** Hiện checkbox chọn hàng loạt trên trang danh sách. */

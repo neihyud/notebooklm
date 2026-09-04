@@ -461,6 +461,18 @@ async function reset() {
       `N: Lưu mà không đổi tài khoản thì không xoá gì, nhận: ${JSON.stringify(st.notebookUrl)}`);
   }
 
+  {
+    // O. `ttlMs: 0` phải thu hồi NGAY lúc owner bấm Lưu. `writeStored` chỉ dọn
+    // khi có lượt dùng mới — đặt rồi không dùng nữa thì token cũ nằm lại mãi,
+    // và Cài đặt quảng cáo dòng này là "tắt hẳn việc lưu token xuống đĩa".
+    await reset();
+    store.set('rpcContext', { at: 'TOKEN-CU', bl: 'b', authuser: '0', ts: Date.now() });
+    await self.NBLM.setSettings({ accountOverrides: { ttlMs: 0 } });
+    await new Promise((r) => setTimeout(r, 20));
+    ok(store.get('rpcContext') === undefined,
+      `O: đặt ttlMs 0 thu hồi token đã lưu, nhận: ${JSON.stringify(store.get('rpcContext'))}`);
+  }
+
   console.log(`${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
 })();

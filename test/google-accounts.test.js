@@ -205,15 +205,65 @@ const res = (body, okFlag) => ({ ok: okFlag !== false, status: okFlag === false 
     ok(con.status === 'stored', 'trong TTL thì đọc thẳng từ đĩa');
   })();
 
-  /* `ttlMs: 0` — điều kiện đảo ngược số 3 của ticket. Một chỗ, một hằng. */
+  /* `ttlMs: 0` — điều kiện đảo ngược số 3 của ticket. Một chỗ, một hằng.
+     KHÔNG rải `...B.BASE` vào: viết thế là tự tay dựng lại cấu hình đầy đủ, và
+     phép gộp — thứ thật sự phải giữ `listUrl`/`accountSlots` — không bị đo. */
   const B = load();
-  B.configure({ ...B.BASE, ttlMs: 0 });
+  B.configure({ ttlMs: 0 });
   const store2 = fakeStore();
   (async () => {
     const r = await B.getRpcContext('0', { fetch: async () => res(html), storage: store2, now: 0 });
     ok(r.ok === true && r.at === 'T', 'ttlMs 0 vẫn lấy được token để dùng ngay');
     ok(store2.data[B.CTX_KEY] === undefined, 'ttlMs 0 thì KHÔNG ghi gì xuống đĩa');
   })();
+
+  /* Và phải THU HỒI token đã nằm sẵn trên đĩa. Khẳng định ở trên dùng một store
+     RỖNG nên nó chứng nhận rộng hơn cái nó đo: "không ghi thêm" không phải
+     "không còn token nào". Ca dưới đây mới là ca Cài đặt quảng cáo. */
+  const C = load();
+  C.configure({ ttlMs: 0 });
+  const store3 = fakeStore({ [C.CTX_KEY]: { at: 'TOKEN-CU', bl: 'b', authuser: '0', ts: 0 } });
+  (async () => {
+    await C.getRpcContext('0', { fetch: async () => res(html), storage: store3, now: 0 });
+    ok(store3.data[C.CTX_KEY] === undefined,
+      `ttlMs 0 THU HỒI token đã lưu, nhận: ${JSON.stringify(store3.data[C.CTX_KEY])}`);
+  })();
+}
+
+/* ------------------------------------------------------------------ */
+/* 4b. Luật gộp `accountOverrides`                                      */
+/* ------------------------------------------------------------------ */
+{
+  /* Gộp NÔNG thì `{"accountSlots": {"index": 8}}` — đúng hình dạng placeholder
+     in trên màn hình Cài đặt — xoá sạch marker/name/email và không hàng nào
+     được nhận nữa. Ví dụ mẫu tự làm hỏng chính nó. */
+  const D = load();
+  const goc = D.BASE.accountSlots;
+  D.configure({ accountSlots: { index: 8 } });
+  ok(D.config.accountSlots.index === 8, 'gộp: ô được ghi đè nhận giá trị mới');
+  ok(D.config.accountSlots.email === goc.email, 'gộp SÂU: các ô KHÔNG nhắc tới vẫn còn');
+  ok(D.config.accountSlots.marker === goc.marker, 'gộp sâu: giữ cả ô marker');
+  ok(D.config.listUrl === D.BASE.listUrl, 'gộp: nhánh không nhắc tới giữ nguyên');
+
+  /* Đầu-tới-cuối: ô index dời sang 8 thì hàng dựng theo hình dạng MỚI phải đọc
+     được. Chỉ so `config` thôi là chưa chạm tới `rowsToAccounts`. */
+  const s8 = D.config.accountSlots;
+  const row = [];
+  row[s8.marker] = D.config.accountMarker;
+  row[s8.name] = 'Chu So Huu';
+  row[s8.email] = 'a@gmail.com';
+  row[8] = 3;
+  D.detectAccounts({ fetch: async () => res(JSON.stringify([[row]])) }).then((r) => {
+    ok(r.accounts.length === 1 && r.accounts[0].index === 3,
+      `dời ô index bằng override thì đọc đúng, nhận: ${JSON.stringify(r.accounts)}`);
+  });
+
+  /* Mảng THAY THẾ, không hợp nhất — khác `rpcOverrides` đúng chỗ này. Ghi đè
+     `origins` là để thay, không phải để thêm một origin nữa vào danh sách. */
+  const E = load();
+  E.configure({ origins: ['https://chi-mot-cho.example'] });
+  ok(E.config.origins.length === 1 && E.config.origins[0] === 'https://chi-mot-cho.example',
+    `origins bị THAY THẾ chứ không hợp nhất, nhận: ${JSON.stringify(E.config.origins)}`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -260,7 +310,7 @@ const res = (body, okFlag) => ({ ok: okFlag !== false, status: okFlag === false 
  * sửa con số này; nó là một phép đếm của CHÍNH file này, không phải một hằng số
  * ngoại sinh chép tay.
  */
-const CAN_CO = 49;
+const CAN_CO = 56;
 
 setTimeout(() => {
   const daChay = pass + fail;

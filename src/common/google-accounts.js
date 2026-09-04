@@ -93,8 +93,31 @@
   /** Bản nhớ trong RAM. Cùng luật khớp `authuser` như bản trên đĩa. */
   let memo = null;
 
+  /**
+   * Gộp SÂU cho object thường, THAY THẾ cho mọi thứ khác.
+   *
+   * Bản trước gộp nông, nên `{"accountSlots": {"index": 8}}` — đúng hình dạng
+   * placeholder in trên màn hình Cài đặt — xoá sạch `marker`/`name`/`isDefault`
+   * và `collectAccountRows` không nhận ra hàng nào nữa. Ví dụ mẫu tự làm hỏng.
+   *
+   * KHÁC `merge` của `selectors.js`: ở đó hai mảng được HỢP NHẤT, vì "thêm một
+   * ứng viên selector" là ý định thường gặp. Ở đây mảng duy nhất là `origins`,
+   * và owner ghi đè nó là để THAY, không phải để thêm.
+   */
+  function deepMerge(base, ov) {
+    if (!ov || typeof ov !== 'object' || Array.isArray(ov)) return base;
+    const out = Object.assign({}, base);
+    for (const k of Object.keys(ov)) {
+      const a = out[k];
+      const b = ov[k];
+      const cả = (x) => x && typeof x === 'object' && !Array.isArray(x);
+      out[k] = cả(a) && cả(b) ? deepMerge(a, b) : b;
+    }
+    return out;
+  }
+
   function configure(overrides) {
-    config = overrides && typeof overrides === 'object' ? { ...BASE, ...overrides } : BASE;
+    config = overrides && typeof overrides === 'object' ? deepMerge(BASE, overrides) : BASE;
   }
 
   /* ------------------------------------------------------------------ */
@@ -247,11 +270,21 @@
 
   async function writeStored(value, o) {
     const cfg = config;
-    // `ttlMs <= 0` nghĩa là owner đã rút quyền lưu xuống đĩa. Đây là một trong
-    // bốn *điều kiện đảo ngược* của ticket 013, và chỗ đảo cố ý chỉ có một.
-    if (!(cfg.ttlMs > 0)) return;
     const store = o.storage || (root.chrome && root.chrome.storage && root.chrome.storage.local);
     if (!store) return;
+    // `ttlMs <= 0` nghĩa là owner đã rút quyền lưu xuống đĩa. Đây là một trong
+    // bốn *điều kiện đảo ngược* của ticket 013, và chỗ đảo cố ý chỉ có một.
+    //
+    // XOÁ, không phải chỉ thôi ghi. Bản trước chỉ chặn lượt ghi mới, nên token
+    // đã nằm trên đĩa từ trước thì ở lại VĨNH VIỄN: `usable()` từ chối đọc nó,
+    // nên không ai xoá, và không ai nhận ra nó còn đó. Cài đặt quảng cáo dòng
+    // này là "tắt hẳn việc lưu token xuống đĩa" — phải đúng cả với token cũ.
+    if (!(cfg.ttlMs > 0)) {
+      try {
+        await store.remove(CTX_KEY);
+      } catch (_) {}
+      return;
+    }
     try {
       await store.set({ [CTX_KEY]: value });
     } catch (_) {}
